@@ -1020,6 +1020,11 @@ st.markdown("""
     /* === TẢI FONT BIỂU TƯỢNG TRỰC TIẾP TỪ GOOGLE === */
     @import url('https://fonts.googleapis.com/icon?family=Material+Icons');
 
+    /* Ngăn ngừa hiện tượng rung lắc trang (layout shifting) khi xuất hiện/mất thanh cuộn dọc */
+    html {
+        overflow-y: scroll !important;
+    }
+
     /* === ĐẢM BẢO HỆ THỐNG STREAMLIT (HEADER, FOOTER, MENU) LUÔN HIỂN THỊ === */
     header[data-testid="stHeader"], 
     footer, 
