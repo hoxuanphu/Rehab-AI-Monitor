@@ -1904,7 +1904,7 @@ def convert_mov_to_mp4(input_path):
 if 'has_data' not in st.session_state:
     st.session_state.has_data = False
 if 'ncv_model_type' not in st.session_state:
-    st.session_state.ncv_model_type = "MediaPipe Full"
+    st.session_state.ncv_model_type = "MediaPipe Heavy"
 if 'ncv_resize_width' not in st.session_state:
     st.session_state.ncv_resize_width = 480
 if 'ncv_skip_frames' not in st.session_state:
@@ -5132,7 +5132,7 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
                             
                             output_path, ref_name_detected, _, angle_data, total_frames, valid_frames, _, zip_data, frame_paths, _, all_frames_data, all_warnings = xu_ly_video_day_du(
                                 v['video_path'], bt_chuan_ncv, update_progress,
-                                model_type=st.session_state.get('ncv_model_type', 'MediaPipe Full'),
+                                model_type=st.session_state.get('ncv_model_type', 'MediaPipe Heavy'),
                                 min_confidence=st.session_state.get('ncv_confidence', 0.5),
                                 exercise_name=v['exercise']
                             )
@@ -8460,10 +8460,10 @@ def main():
             
             st.markdown("### 🎯 CHỌN MÔ HÌNH")
             st.selectbox("Mô hình Pose", 
-                         options=["MediaPipe Full", "MediaPipe Heavy", "MediaPipe Lite"], 
-                         index=0, # Mặc định là Full để tăng tốc độ xử lý trên CPU
+                         options=["MediaPipe Heavy", "MediaPipe Full", "MediaPipe Lite"], 
+                         index=0, # Mặc định là Heavy để đảm bảo trích xuất chính xác 33 điểm nhất
                          key="ncv_model_type",
-                         help="Mô hình Full cân bằng hoàn hảo giữa độ chính xác và tốc độ xử lý trên CPU.")
+                         help="Mô hình Heavy có độ chính xác cao nhất (Complexity 2), chuyên dụng cho nghiên cứu lâm sàng.")
             
             # st.markdown("### 🎯 CHỌN BÀI TẬP") # Cắt bỏ chọn bài tập ở sidebar cho NCV
             # ma_bai_tap = st.selectbox("Bài tập nghiên cứu", list(BAI_TAP.keys()), format_func=lambda x: f"{BAI_TAP[x]['icon']} {BAI_TAP[x]['ten']}")
@@ -8956,7 +8956,7 @@ def main():
                                     status_text.info(f"🔄 Đang xử lý frame... {p*100:.0f}% | ⏱️ Đang chạy: {elapsed:.1f}s")
                                 
                                 # Lấy cấu hình từ session state (NCV) nếu có, nếu không dùng mặc định
-                                model_type_ncv = st.session_state.get('ncv_model_type', 'MediaPipe Full')
+                                model_type_ncv = st.session_state.get('ncv_model_type', 'MediaPipe Heavy')
                                 conf_ncv = st.session_state.get('ncv_confidence', 0.5)
 
                                 # Xác định sai số theo giai đoạn tập của NCV
