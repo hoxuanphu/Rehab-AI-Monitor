@@ -374,21 +374,32 @@ def _start_video_http_server():
 
 
 def _get_video_server_url(video_path):
-    """Đổi đường dẫn file thành URL http://127.0.0.1:PORT/... để stream Range Requests."""
+    """Đổi đường dẫn file thành URL http://127.0.0.1:PORT/... để stream Range Requests.
+    Trả về None nếu file không nằm trong cùng ổ đĩa/thư mục với server root."""
     global _video_http_server_root
     port = _start_video_http_server()
     if port is None or _video_http_server_root is None:
         return None
     try:
-        rel = os.path.relpath(os.path.abspath(video_path), _video_http_server_root)
+        abs_video = os.path.abspath(video_path)
+        abs_root  = os.path.abspath(_video_http_server_root)
+        # Windows: kiểm tra cùng drive không (relpath giữa 2 drive khác nhau sẽ fail)
+        if os.name == 'nt':
+            if os.path.splitdrive(abs_video)[0].upper() != os.path.splitdrive(abs_root)[0].upper():
+                return None  # khác ổ đĩa → không thể dùng relative URL
+        rel = os.path.relpath(abs_video, abs_root)
+        # Nếu path bắt đầu bằng '..' quá nhiều bậc, khả năng cao là ngoài root → bỏ qua
+        if rel.startswith('..') and rel.count('..') > 3:
+            return None
         rel_url = rel.replace('\\', '/')
         return f'http://127.0.0.1:{port}/{rel_url}'
-    except:
+    except Exception:
         return None
 
 
 def render_video(video_path):
-    """Ẩn video qua HTTP streaming server để phát ngay lập tức, không chờ load toàn bộ file."""
+    """Hiển thị video: ưu tiên HTTP Range Request server (local) để phát ngay lập tức.
+    Tự động đảm bảo H264 trước khi phát, fallback về st.video() khi cần."""
     if not video_path:
         st.error("❌ File video không tồn tại hoặc đường dẫn trống.")
         return
@@ -401,38 +412,53 @@ def render_video(video_path):
             st.error(f'⚠️ Lỗi hiển thị video: {e}')
         return
 
-    # ⚡ Fast-path: tra cache trước để lấy đường dẫn playable (tránh gọi ffprobe lại)
-    playable_path = None
-    try:
-        if os.path.exists(video_path):
-            _mtime = os.path.getmtime(video_path)
-            _size  = os.path.getsize(video_path)
-            playable_path = _get_playable_path_fast(video_path, _mtime, _size)
-    except:
-        pass
-    if playable_path is None:
-        playable_path = ensure_playable_video(video_path)
-    if not playable_path or not os.path.exists(playable_path):
-        st.error('❌ File video không tồn tại.')
+    # Bước 1: Đảm bảo file tồn tại local hợp lệ
+    if not os.path.exists(video_path) or os.path.getsize(video_path) < 5 * 1024:
+        st.warning("⚠️ File video chưa có sẵn trên máy. Đang dùng player dự phòng...")
+        try:
+            st.video(video_path)
+        except:
+            st.error("❌ Không thể hiển thị video.")
         return
 
-    # ——— Chọn phương thức phát ———
-    # Nếu chạy trên Cloud (HF Spaces), không dùng localhost → fallback st.video()
-    is_cloud = bool(os.environ.get('HF_SPACE_ID')) or os.path.exists('/data')
+    # Bước 2: Lấy đường dẫn playable (H264) — dùng cache để tránh gọi ffprobe lại
+    playable_path = None
+    try:
+        _mtime = os.path.getmtime(video_path)
+        _size  = os.path.getsize(video_path)
+        playable_path = _get_playable_path_fast(video_path, _mtime, _size)
+    except:
+        pass
+    # Nếu cache chưa biết hoặc cần convert → gọi ensure_playable_video (blocking, nhưng cached)
+    if playable_path is None:
+        playable_path = ensure_playable_video(video_path)
+    # Xác nhận path trả về hợp lệ và đủ lớn
+    if not playable_path or not os.path.exists(playable_path) or os.path.getsize(playable_path) < 5 * 1024:
+        playable_path = video_path  # dùng file gốc, để browser tự xử lý
+
+    # Bước 3: Chọn phương thức phát
+    is_cloud = bool(os.environ.get('HF_SPACE_ID'))  # chỉ True khi thực sự trên HF Spaces
 
     if not is_cloud:
-        # ★ LOCAL: phát qua HTTP Range Request server — nhanh nhất, không chờ
         video_url = _get_video_server_url(playable_path)
         if video_url:
-            # Lấy kích thước file để hiển thị info
             try:
                 fsize_mb = os.path.getsize(playable_path) / (1024 * 1024)
                 size_label = f'{fsize_mb:.1f} MB'
             except:
                 size_label = ''
-            st.markdown(f"""
-<video controls preload="metadata" style="width:100%; border-radius:10px; background:#000;"
-       controlsList="nodownload">
+            fname = os.path.basename(playable_path)
+            # Dùng st.components.v1.html để tránh sandbox restriction của st.markdown
+            import streamlit.components.v1 as _stcomp
+            _stcomp.html(f"""
+<!DOCTYPE html><html><head>
+<style>
+  body{{margin:0;padding:0;background:transparent;}}
+  video{{width:100%;border-radius:8px;display:block;max-height:400px;background:#000;}}
+  .info{{color:#888;font-size:11px;text-align:right;padding:3px 0;}}
+</style>
+</head><body>
+<video id="vp" controls preload="metadata">
   <source src="{video_url}" type="video/mp4">
   Trình duyệt không hỗ trợ video HTML5.
 </video>
