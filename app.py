@@ -8311,36 +8311,11 @@ def hien_thi_danh_sach_video_fragment(user_role):
                                 else:
                                     st.error("❌ Không thể tải video từ Cloud. Vui lòng kiểm tra lại kết nối.")
                     else:
-                        # Thay đổi tỷ lệ cột sang [1.3, 1.0] để nới rộng video hiển thị vừa vặn hơn
+                        # Tỷ lệ cột [1.3, 1.0] để nới rộng video hiển thị vừa vặn hơn
                         col_v1, col_v2 = st.columns([1.3, 1.0])
                         with col_v1:
                             if active_display_path and os.path.exists(active_display_path):
-                                # Lazy load: chỉ render video khi user bấm nút xem
-                                vid_show_key = f"show_video_{idx}"
-                                if st.session_state.get(vid_show_key):
-                                    render_video(active_display_path)
-                                    if st.button("⏹️ Ẩn video", key=f"hide_vid_{idx}", use_container_width=True):
-                                        st.session_state[vid_show_key] = False
-                                        st.rerun()
-                                else:
-                                    # Hiển thị thumbnail thay vì load video ngay
-                                    st.markdown(
-                                        f"""
-                                        <div style="background: rgba(0,0,0,0.3); border-radius: 10px; 
-                                             border: 1px solid rgba(255,255,255,0.1);
-                                             display: flex; align-items: center; justify-content: center;
-                                             padding: 30px 10px; text-align: center; cursor: pointer;">
-                                            <div>
-                                                <div style="font-size: 3rem; margin-bottom: 8px;">🎬</div>
-                                                <div style="color: #aaa; font-size: 0.85rem;">{os.path.basename(active_display_path)}</div>
-                                            </div>
-                                        </div>
-                                        """,
-                                        unsafe_allow_html=True
-                                    )
-                                    if st.button("▶️ Xem video", key=f"play_vid_{idx}", use_container_width=True, type="primary"):
-                                        st.session_state[vid_show_key] = True
-                                        st.rerun()
+                                render_video(active_display_path)
                             else:
                                 st.error("File video không tồn tại trên hệ thống.")
                         with col_v2:
