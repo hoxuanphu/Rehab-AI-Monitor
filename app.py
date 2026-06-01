@@ -144,6 +144,10 @@ def ensure_playable_video(video_path):
         
     # Đảm bảo video gốc thô tồn tại đầy đủ cục bộ (nếu là file LFS pointer, tự động tải nội dung thật từ Cloud)
     ensure_local_file(video_path)
+    
+    # Nếu đã là định dạng MP4 hoặc H264, cho phép phát trực tiếp ngay lập tức để tối ưu tốc độ và tránh bị đen màn hình/gây treo lag
+    if video_path.lower().endswith('.mp4') or video_path.endswith('_f.mp4'):
+        return video_path
         
     # PHỤC HỒI VIDEO GỐC NẾU VIDEO_PATH TRONG DATABASE BỊ GHI ĐÈ BỞI FILE _F.MP4 BỊ LỖI
     if video_path.endswith('_f.mp4'):
@@ -1248,6 +1252,17 @@ st.markdown("""
     /* Đảm bảo chữ bên trong không bị đổi màu bởi Streamlit default */
     .stButton button p, .stDownloadButton button p {
         color: white !important;
+    }
+
+    /* Giới hạn kích cỡ video toàn hệ thống (mức vừa/nhỏ) */
+    video {
+        max-width: 520px !important;
+        width: 100% !important;
+        height: auto !important;
+        margin: 0 auto !important;
+        display: block !important;
+        border-radius: 12px !important;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.45) !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -7159,7 +7174,17 @@ def hien_thi_frames_day_du(key_suffix=""):
             ])
             
             with v_tab_all:
-                render_video(processed_video_path)
+                in_col_a, out_col_a = st.columns(2)
+                with in_col_a:
+                    st.caption("📥 Video gốc bệnh nhân")
+                    raw_video_path = st.session_state.get('current_eval_video', {}).get('video_path') or st.session_state.get('video_path')
+                    if raw_video_path and os.path.exists(raw_video_path):
+                        render_video(raw_video_path)
+                    else:
+                        st.caption("⚠️ Không tìm thấy video gốc")
+                with out_col_a:
+                    st.caption("📤 Video trích xuất khung xương AI")
+                    render_video(processed_video_path)
                 d_col1, d_col2 = st.columns(2)
                 with d_col1:
                     with open(processed_video_path, "rb") as f:
@@ -8197,24 +8222,7 @@ def hien_thi_danh_sach_video_fragment(user_role):
                         col_v1, col_v2 = st.columns([0.6, 1.4])
                         with col_v1:
                             if active_display_path and os.path.exists(active_display_path):
-                                # Chỉ render video khi bấm xem để tránh tải đồng thời nhiều video gây treo web
-                                play_key = f"play_list_video_{idx}_{user_role}"
-                                if st.session_state.get('playing_video_key') == play_key:
-                                    render_video(active_display_path)
-                                    if st.button("⏸️ Thu nhỏ / Ẩn video", key=f"stop_list_vid_{idx}", use_container_width=True):
-                                        st.session_state.playing_video_key = None
-                                        st.rerun()
-                                else:
-                                    st.markdown(
-                                        f"<div style='border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 20px 10px; text-align: center; background: rgba(255,255,255,0.02); margin-bottom: 8px;' id='placeholder_video_{idx}'>"
-                                        f"<span style='font-size: 1.8rem; color: #00c6ff;'>🎬</span>"
-                                        f"<p style='font-size: 0.75rem; color: #888; margin: 3px 0 0 0;'>Video thô có sẵn</p>"
-                                        f"</div>",
-                                        unsafe_allow_html=True
-                                    )
-                                    if st.button("▶️ Xem Video", key=f"btn_play_list_{idx}", type="secondary", use_container_width=True):
-                                        st.session_state.playing_video_key = play_key
-                                        st.rerun()
+                                render_video(active_display_path)
                             else:
                                 st.error("File video không tồn tại trên hệ thống.")
                         with col_v2:
