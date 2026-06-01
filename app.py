@@ -1257,12 +1257,14 @@ st.markdown("""
     /* Giới hạn kích cỡ video toàn hệ thống (mức vừa/nhỏ) */
     video {
         max-width: 680px !important;
+        max-height: 480px !important;
         width: 100% !important;
         height: auto !important;
         margin: 0 auto !important;
         display: block !important;
         border-radius: 12px !important;
         box-shadow: 0 4px 15px rgba(0, 0, 0, 0.45) !important;
+        object-fit: contain !important;
     }
 </style>
 """, unsafe_allow_html=True)
