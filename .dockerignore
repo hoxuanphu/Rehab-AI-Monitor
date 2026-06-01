@@ -1,0 +1,11 @@
+.venv/
+.git/
+__pycache__/
+*.whl
+*.mp4
+*.zip
+patient_uploads/
+processed_results/
+boxplot_*.html
+radar.html
+*.bat
