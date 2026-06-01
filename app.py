@@ -3108,7 +3108,7 @@ def create_zip_of_frames(frame_data_list, processed_video_path=None):
                 if not os.path.exists(f_path) and cap and cap.isOpened():
                     try:
                         os.makedirs(os.path.dirname(f_path), exist_ok=True)
-                        f_idx = max(0, f_data.get('index', 1) - 1)
+                        f_idx = idx
                         cap.set(cv2.CAP_PROP_POS_FRAMES, f_idx)
                         ret, frame_img = cap.read()
                         if ret:
@@ -3264,6 +3264,9 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
     timestamp = int(time.time())
     out_path = os.path.join(PROCESSED_DIR, f'processed_{timestamp}.mp4')
     thu_muc_frame = tempfile.mkdtemp()
+    
+    from concurrent.futures import ThreadPoolExecutor
+    img_writer_executor = ThreadPoolExecutor(max_workers=4)
     
     model = get_pose_model(model_type=model_type, min_confidence=min_confidence)
     du_lieu_goc = []
@@ -3498,9 +3501,11 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
             writer.write(xu_ly)
             
             frame_path = os.path.join(thu_muc_frame, f"f_{processed_count:06d}.jpg")
-            # KHÔNG GHI HÀNG TRĂM FILE ẢNH RA ĐĨA ĐỂ TỐI ƯU TỐC ĐỘ 3X.
-            # ẢNH SẼ ĐƯỢC TỰ ĐỘNG TRÍCH XUẤT TRÊN PHIÊN BẢN VIDEO ĐÃ PHÂN TÍCH (LAZY LOAD) KHI XEM TRÊN WEB HOẶC TẢI ZIP.
-            # cv2.imwrite(frame_path, xu_ly, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            # Ghi ảnh bất đồng bộ để tránh nghẽn I/O đĩa
+            try:
+                img_writer_executor.submit(cv2.imwrite, frame_path, xu_ly.copy(), [cv2.IMWRITE_JPEG_QUALITY, 85])
+            except Exception as write_err:
+                print("Lỗi submit ghi ảnh:", write_err)
             danh_sach_frame_paths.append(frame_path)
             
             ts_frame_goc = frame_count / fps
@@ -3558,6 +3563,8 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
         if os.path.exists(temp_copy_path) and temp_copy_path != duong_dan_video:
             try: os.unlink(temp_copy_path)
             except: pass
+        if 'img_writer_executor' in locals():
+            img_writer_executor.shutdown(wait=False)
         gc.collect()
 
     # SAU KHI XỬ LÝ XONG, TIẾN HÀNH TRỘN ÂM THANH NẾU CÓ THAY ĐỔI
@@ -7143,7 +7150,7 @@ def hien_thi_frames_day_du(key_suffix=""):
     st.markdown("### 🎬 VIDEO ĐÃ PHÂN TÍCH")
     
     # Khung video và thông tin
-    v_col1, v_col2 = st.columns([0.7, 1.3], gap='large')
+    v_col1, v_col2 = st.columns([1.0, 1.0], gap='large')
     with v_col1:
         if has_video:
             # Tự động tính toán phân đoạn thông minh
@@ -7174,17 +7181,7 @@ def hien_thi_frames_day_du(key_suffix=""):
             ])
             
             with v_tab_all:
-                in_col_a, out_col_a = st.columns(2)
-                with in_col_a:
-                    st.caption("📥 Video gốc bệnh nhân")
-                    raw_video_path = st.session_state.get('current_eval_video', {}).get('video_path') or st.session_state.get('video_path')
-                    if raw_video_path and os.path.exists(raw_video_path):
-                        render_video(raw_video_path)
-                    else:
-                        st.caption("⚠️ Không tìm thấy video gốc")
-                with out_col_a:
-                    st.caption("📤 Video trích xuất khung xương AI")
-                    render_video(processed_video_path)
+                render_video(processed_video_path)
                 d_col1, d_col2 = st.columns(2)
                 with d_col1:
                     with open(processed_video_path, "rb") as f:
@@ -7450,7 +7447,7 @@ def hien_thi_frames_day_du(key_suffix=""):
             if f_path and not os.path.exists(f_path) and cap_recover and cap_recover.isOpened():
                 try:
                     os.makedirs(os.path.dirname(f_path), exist_ok=True)
-                    f_idx = max(0, f_data.get('index', 1) - 1)
+                    f_idx = orig_idx
                     cap_recover.set(cv2.CAP_PROP_POS_FRAMES, f_idx)
                     ret, frame_img = cap_recover.read()
                     if ret:
