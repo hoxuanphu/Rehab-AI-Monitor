@@ -7154,7 +7154,7 @@ def hien_thi_frames_day_du(key_suffix=""):
     st.markdown("### 🎬 VIDEO ĐÃ PHÂN TÍCH")
     
     # Khung video và thông tin
-    v_col1, v_col2 = st.columns([1.3, 1], gap='large')
+    v_col1, v_col2 = st.columns([0.7, 1.3], gap='large')
     with v_col1:
         if has_video:
             # Tự động tính toán phân đoạn thông minh
