@@ -320,44 +320,134 @@ def ensure_playable_video(video_path):
         
     return video_path
 
+
+# ============================================================
+# VIDEO HTTP STREAMING SERVER
+# Phục vụ video qua HTTP Range Requests thực sự — browser chỉ tải
+# đúng đoạn đang cần, không cần đợi load toàn bộ file.
+# ============================================================
+_video_http_server_port = None
+_video_http_server_root = None
+
+def _start_video_http_server():
+    """Khởi động 1 lần duy nhất một HTTP server nhẹ để stream video file."""
+    global _video_http_server_port, _video_http_server_root
+    if _video_http_server_port is not None:
+        return _video_http_server_port
+
+    import http.server
+    import socketserver
+    import threading
+
+    # Thư mục gốc của project (chứa patient_uploads, processed_results, ...)
+    serve_root = os.path.abspath(".")
+    _video_http_server_root = serve_root
+
+    class _RangeHandler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=serve_root, **kwargs)
+
+        def log_message(self, format, *args):
+            pass  # tắt log tràn console
+
+        def end_headers(self):
+            # Cho phép browser từ bất kỳ origin (Streamlit dùng iframe/cport khác)
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Cache-Control', 'public, max-age=86400')
+            super().end_headers()
+
+    # Tìm cổng trống bắt đầu từ 8765
+    port = 8765
+    for attempt_port in range(8765, 8800):
+        try:
+            server = socketserver.ThreadingTCPServer(('127.0.0.1', attempt_port), _RangeHandler)
+            server.allow_reuse_address = True
+            t = threading.Thread(target=server.serve_forever, daemon=True)
+            t.start()
+            _video_http_server_port = attempt_port
+            print(f'[VideoServer] Đang phục vụ video tại http://127.0.0.1:{attempt_port}')
+            break
+        except OSError:
+            continue
+
+    return _video_http_server_port
+
+
+def _get_video_server_url(video_path):
+    """Đổi đường dẫn file thành URL http://127.0.0.1:PORT/... để stream Range Requests."""
+    global _video_http_server_root
+    port = _start_video_http_server()
+    if port is None or _video_http_server_root is None:
+        return None
+    try:
+        rel = os.path.relpath(os.path.abspath(video_path), _video_http_server_root)
+        rel_url = rel.replace('\\', '/')
+        return f'http://127.0.0.1:{port}/{rel_url}'
+    except:
+        return None
+
+
 def render_video(video_path):
-    """Hiển thị video bằng cách đọc bytes nếu dung lượng nhỏ để tránh lỗi proxy HF,
-    hoặc dùng đường dẫn trực tiếp nếu video lớn để tránh làm nghẽn WebSocket/đơ web."""
+    """Ẩn video qua HTTP streaming server để phát ngay lập tức, không chờ load toàn bộ file."""
     if not video_path:
         st.error("❌ File video không tồn tại hoặc đường dẫn trống.")
         return
-        
-    # Phát hiện URL web để gọi trực tiếp st.video
-    if isinstance(video_path, str) and (video_path.startswith("http://") or video_path.startswith("https://") or "youtube" in video_path or "youtu.be" in video_path):
+
+    # URL trực tiếp (YouTube, HF, ...)
+    if isinstance(video_path, str) and (video_path.startswith('http://') or video_path.startswith('https://')):
         try:
             st.video(video_path)
         except Exception as e:
-            st.error(f"⚠️ Lỗi hiển thị video: {e}")
+            st.error(f'⚠️ Lỗi hiển thị video: {e}')
         return
-    
-    # ⚡ Fast-path: tra cache trước để tránh gọi ffprobe/ensure_playable lại lần 2+
+
+    # ⚡ Fast-path: tra cache trước để lấy đường dẫn playable (tránh gọi ffprobe lại)
     playable_path = None
     try:
         if os.path.exists(video_path):
             _mtime = os.path.getmtime(video_path)
-            _size = os.path.getsize(video_path)
+            _size  = os.path.getsize(video_path)
             playable_path = _get_playable_path_fast(video_path, _mtime, _size)
     except:
         pass
-    
-    # Nếu cache chưa biết (lần đầu, hoặc cần convert) → chạy full ensure_playable_video
     if playable_path is None:
         playable_path = ensure_playable_video(video_path)
-        
     if not playable_path or not os.path.exists(playable_path):
-        st.error("❌ File video không tồn tại.")
+        st.error('❌ File video không tồn tại.')
         return
+
+    # ——— Chọn phương thức phát ———
+    # Nếu chạy trên Cloud (HF Spaces), không dùng localhost → fallback st.video()
+    is_cloud = bool(os.environ.get('HF_SPACE_ID')) or os.path.exists('/data')
+
+    if not is_cloud:
+        # ★ LOCAL: phát qua HTTP Range Request server — nhanh nhất, không chờ
+        video_url = _get_video_server_url(playable_path)
+        if video_url:
+            # Lấy kích thước file để hiển thị info
+            try:
+                fsize_mb = os.path.getsize(playable_path) / (1024 * 1024)
+                size_label = f'{fsize_mb:.1f} MB'
+            except:
+                size_label = ''
+            st.markdown(f"""
+<video controls preload="metadata" style="width:100%; border-radius:10px; background:#000;"
+       controlsList="nodownload">
+  <source src="{video_url}" type="video/mp4">
+  Trình duyệt không hỗ trợ video HTML5.
+</video>
+<div style="color:#888; font-size:0.75rem; margin-top:4px; text-align:right;">
+  📹 {os.path.basename(playable_path)}  |  💾 {size_label}
+</div>
+""", unsafe_allow_html=True)
+            return
+
+    # Fallback cho Cloud hoặc khi server chưa khởi động kịp
     try:
-        # Phát trực tiếp bằng đường dẫn file để trình duyệt tự động stream qua HTTP (Range Requests).
-        # Cách này giúp video phát ngay lập tức (chưa đầy 1 giây) mà không làm nghẽn WebSocket/gây đơ web.
         st.video(playable_path)
     except Exception as e:
-        st.error(f"⚠️ Lỗi hiển thị video: {e}")
+        st.error(f'⚠️ Lỗi hiển thị video: {e}')
+
 import threading
 import queue
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
