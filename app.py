@@ -8215,8 +8215,8 @@ def hien_thi_danh_sach_video_fragment(user_role):
                                 else:
                                     st.error("❌ Không thể tải video từ Cloud. Vui lòng kiểm tra lại kết nối.")
                     else:
-                        # Thay đổi tỷ lệ cột từ [1.3, 1] sang [0.6, 1.4] để thu nhỏ video hiển thị
-                        col_v1, col_v2 = st.columns([0.6, 1.4])
+                        # Thay đổi tỷ lệ cột sang [1.0, 1.0] để nới rộng video hiển thị vừa vặn hơn
+                        col_v1, col_v2 = st.columns([1.0, 1.0])
                         with col_v1:
                             if active_display_path and os.path.exists(active_display_path):
                                 render_video(active_display_path)
