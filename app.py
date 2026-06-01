@@ -8262,10 +8262,26 @@ def hien_thi_danh_sach_video_fragment(user_role):
                         # Thay đổi tỷ lệ cột sang [1.3, 1.0] để nới rộng video hiển thị vừa vặn hơn
                         col_v1, col_v2 = st.columns([1.3, 1.0])
                         with col_v1:
-                            if active_display_path and os.path.exists(active_display_path):
-                                render_video(active_display_path)
+                            play_key = f"play_list_vid_{v.get('video_name')}"
+                            if st.session_state.get(play_key):
+                                if active_display_path and os.path.exists(active_display_path):
+                                    render_video(active_display_path)
+                                else:
+                                    st.error("File video không tồn tại trên hệ thống.")
+                                if st.button("⏸️ Tắt phát video", key=f"btn_stop_{v.get('video_name')}_{idx}", use_container_width=True):
+                                    st.session_state[play_key] = False
+                                    st.rerun()
                             else:
-                                st.error("File video không tồn tại trên hệ thống.")
+                                st.markdown(f"""
+                                <div style="background: rgba(128, 128, 128, 0.05); border: 2px dashed rgba(0, 198, 255, 0.3); border-radius: 12px; height: 180px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;">
+                                    <span style="font-size: 2rem; color: #00c6ff;">▶️</span>
+                                    <span style="color: #00c6ff; font-weight: bold; margin-top: 8px; font-size: 0.85rem;">Bấm nút dưới đây để phát video</span>
+                                </div>
+                                """, unsafe_allow_html=True)
+                                st.write("")
+                                if st.button("▶️ Xem Video", key=f"btn_play_{v.get('video_name')}_{idx}", use_container_width=True):
+                                    st.session_state[play_key] = True
+                                    st.rerun()
                         with col_v2:
                             st.write(f"**Người tập:** {v['full_name']}")
                             
