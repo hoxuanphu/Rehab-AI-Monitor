@@ -1025,6 +1025,20 @@ st.markdown("""
         overflow-y: scroll !important;
     }
 
+    /* Khống chế kích thước ảnh frame để tránh giật/rung lắc giao diện khi load ảnh */
+    div[data-testid="stImage"] {
+        min-height: 180px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+    }
+    div[data-testid="stImage"] img {
+        height: 180px !important;
+        object-fit: contain !important;
+        background-color: rgba(128, 128, 128, 0.05) !important;
+        border-radius: 8px !important;
+    }
+
     /* === ĐẢM BẢO HỆ THỐNG STREAMLIT (HEADER, FOOTER, MENU) LUÔN HIỂN THỊ === */
     header[data-testid="stHeader"], 
     footer, 
@@ -1908,7 +1922,7 @@ if 'ncv_model_type' not in st.session_state:
 if 'ncv_resize_width' not in st.session_state:
     st.session_state.ncv_resize_width = 480
 if 'ncv_skip_frames' not in st.session_state:
-    st.session_state.ncv_skip_frames = 1
+    st.session_state.ncv_skip_frames = 0
 if 'view_old_analysis' not in st.session_state:
     st.session_state.view_old_analysis = False
 if 'angle_df' not in st.session_state:
@@ -7384,7 +7398,8 @@ def hien_thi_frames_day_du(key_suffix=""):
 
         rc1, rc2, rc3, rc4 = st.columns([1.5, 1.5, 2.0, 0.6])
         with rc1:
-            fpp = st.selectbox("📄 Số/Trang", [12, 24, 36, 48], index=1, key=f"fpp_{tab_key}_{key_suffix_val}")
+            fpp_option = st.selectbox("📄 Số/Trang", [12, 24, 36, 48, 96, "Tất cả"], index=1, key=f"fpp_{tab_key}_{key_suffix_val}")
+            fpp = 999999 if fpp_option == "Tất cả" else int(fpp_option)
         with rc2:
             grid_cols = st.selectbox("🗂️ Số cột", [1, 2, 3, 4], index=3, key=f"fcols_{tab_key}_{key_suffix_val}")
         with rc3:
@@ -8416,7 +8431,7 @@ def main():
             st.slider("Độ tự tin tối thiểu (Confidence)", 0.0, 1.0, 0.5, key="ncv_confidence", help="Ngưỡng để AI chấp nhận một điểm khớp xương.")
             st.selectbox("Tốc độ xử lý", 
                          options=[0, 1, 2, 4], 
-                         index=1, # Mặc định là nhanh (bỏ qua 1 frame - 15 FPS) để tăng tốc độ 2x
+                         index=0, # Mặc định là Mọi frame (0 frame skipping) để hiển thị đầy đủ
                          format_func=lambda x: "Mặc định (Mọi frame)" if x==0 else f"Nhanh (Bỏ qua {x} frame)",
                          key="ncv_skip_frames",
                          help="Bỏ qua một số khung hình để tăng tốc độ xử lý video dài.")
