@@ -1256,7 +1256,7 @@ st.markdown("""
 
     /* Giới hạn kích cỡ video toàn hệ thống (mức vừa/nhỏ) */
     video {
-        max-width: 520px !important;
+        max-width: 680px !important;
         width: 100% !important;
         height: auto !important;
         margin: 0 auto !important;
@@ -5072,7 +5072,7 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
                 
                 # Nếu video CHƯA CÓ metrics hoặc NCV muốn chạy lại
                 st.warning(f"⚠️ Video '{v.get('video_name')}' của BN {v.get('full_name')} chưa được phân tích.")
-                col_v1, col_v2 = st.columns([0.6, 1.4])
+                col_v1, col_v2 = st.columns([1.3, 1.0])
                 with col_v1:
                     # Kiểm tra xem video đã tồn tại cục bộ chưa để hiển thị spinner khi cần
                     video_exists = False
@@ -7150,7 +7150,7 @@ def hien_thi_frames_day_du(key_suffix=""):
     st.markdown("### 🎬 VIDEO ĐÃ PHÂN TÍCH")
     
     # Khung video và thông tin
-    v_col1, v_col2 = st.columns([1.0, 1.0], gap='large')
+    v_col1, v_col2 = st.columns([1.3, 1.0], gap='large')
     with v_col1:
         if has_video:
             # Tự động tính toán phân đoạn thông minh
@@ -8215,8 +8215,8 @@ def hien_thi_danh_sach_video_fragment(user_role):
                                 else:
                                     st.error("❌ Không thể tải video từ Cloud. Vui lòng kiểm tra lại kết nối.")
                     else:
-                        # Thay đổi tỷ lệ cột sang [1.0, 1.0] để nới rộng video hiển thị vừa vặn hơn
-                        col_v1, col_v2 = st.columns([1.0, 1.0])
+                        # Thay đổi tỷ lệ cột sang [1.3, 1.0] để nới rộng video hiển thị vừa vặn hơn
+                        col_v1, col_v2 = st.columns([1.3, 1.0])
                         with col_v1:
                             if active_display_path and os.path.exists(active_display_path):
                                 render_video(active_display_path)
