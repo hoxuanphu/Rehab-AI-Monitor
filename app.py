@@ -4614,13 +4614,15 @@ def gui_bao_cao_tong_hop_3_giai_doan():
     video_list = load_data(VIDEOS_FILE)
     for v in video_list:
         if v.get('video_path') == v_meta.get('video_path') or (v.get('video_name') == v_meta.get('video_name') and v.get('username') == v_meta.get('username')):
-            v['accuracy'] = round(float(acc_g2), 1)
+            # Tính trung bình có trọng số 3 giai đoạn (GĐ1:25%, GĐ2:40%, GĐ3:35%)
+            _acc_tong_hop = round(acc_g1 * 0.25 + acc_g2 * 0.40 + acc_g3 * 0.35, 1)
+            v['accuracy'] = _acc_tong_hop
             v['status'] = "Đã phân tích"
             v['exercise'] = correct_ex_name
             
             # Lưu stats và các giai đoạn vào metadata video
             v['metrics'] = {
-                "do_chinh_xac": acc_g2,
+                "do_chinh_xac": _acc_tong_hop,
                 "ty_le_gan_dung": metrics_g2['ty_le_gan_dung'],
                 "frame_dung": metrics_g2['frame_dung'],
                 "frame_gan_dung": metrics_g2['frame_gan_dung'],
@@ -6997,7 +6999,13 @@ def hien_thi_ket_qua_cho_benh_nhan(target_username=None):
                 st.markdown("### 📅 XEM LẠI LỊCH SỬ TẬP LUYỆN")
             
             if user_role == "Bệnh nhân":
-                history_opts = [{"label": "--- Đang chờ kết quả mới (Ẩn lịch sử) ---", "val": None}] + [{"label": f"🕒 {v.get('time')} - Bài: {v.get('exercise')} (Đạt: {v.get('accuracy')}%)", "val": v} for v in my_history_vids]
+                def _hist_label(v):
+                    acc = v.get('accuracy', 0)
+                    try: acc = float(acc)
+                    except: acc = 0
+                    verdict = "Đúng" if acc >= 80 else ("Gần đúng" if acc >= 60 else "Sai")
+                    return f"🕒 {v.get('time')} - Bài: {v.get('exercise')} ({verdict}: {acc:.1f}%)"
+                history_opts = [{"label": "--- Đang chờ kết quả mới (Ẩn lịch sử) ---", "val": None}] + [{"label": _hist_label(v), "val": v} for v in my_history_vids]
             else:
                 history_opts = [{"label": "--- Chọn một phiên tập để xem ---", "val": None}] + [{"label": f"🕒 {v.get('time')} - {v.get('full_name')} - {v.get('exercise')}", "val": v} for v in my_history_vids]
                 
