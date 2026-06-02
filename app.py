@@ -546,7 +546,16 @@ def render_video(video_path):
                 st.info("🔄 Video đang được nén tối ưu hóa định dạng H.264 dưới nền. Trình phát có thể tải chậm hoặc đen màn hình trong vài giây đầu...")
 
         if is_cloud:
-            # A. Ưu tiên Base64 cho file nhỏ (<25MB) để phát ngay lập tức không bị lỗi CORS/Range Request của Hugging Face
+            # A. Ưu tiên phát trực tiếp bằng st.video thông qua đường dẫn tương đối (sử dụng symlink đã tạo sẵn sang /data)
+            try:
+                rel_play_path = get_clean_rel_path(target_path)
+                if rel_play_path:
+                    st.video(rel_play_path)
+                    return
+            except Exception as e:
+                pass
+
+            # B. Phương án dự phòng 1: Base64 cho file nhỏ (<25MB) nếu st.video gặp trục trặc
             try:
                 fsize = os.path.getsize(target_path)
                 if fsize < 25 * 1024 * 1024:
@@ -575,7 +584,7 @@ def render_video(video_path):
             except Exception as e:
                 pass
 
-            # B. Nếu file lớn (>=25MB) hoặc Base64 bị lỗi, chuyển sang dùng Cloud URL (Hugging Face CDN) hỗ trợ Range Requests
+            # C. Phương án dự phòng 2: Nếu file lớn (>=25MB) hoặc Base64 bị lỗi, chuyển sang dùng Cloud URL (Hugging Face CDN) hỗ trợ Range Requests
             if HF_TOKEN and HF_DATASET_ID:
                 try:
                     rel_path = get_clean_rel_path(video_path)
@@ -873,6 +882,34 @@ if not os.path.exists(PROCESSED_DIR):
         os.makedirs(PROCESSED_DIR, exist_ok=True)
     except:
         pass
+
+# Tạo liên kết tượng trưng (symlink) trên Cloud HF Spaces từ /app/... sang /data/... để Streamlit serve trực tiếp
+if DATA_DIR == "/data" and os.name != 'nt':
+    for folder in ["patient_uploads", "processed_results"]:
+        target_data_dir = os.path.join("/data", folder)
+        local_app_dir = os.path.abspath(folder)
+        
+        # Đảm bảo thư mục đích trong /data tồn tại
+        os.makedirs(target_data_dir, exist_ok=True)
+        
+        # Nếu thư mục local cũ tồn tại và không phải symlink -> xóa đi để chuẩn bị tạo symlink
+        if os.path.exists(local_app_dir) and not os.path.islink(local_app_dir):
+            try:
+                import shutil
+                if os.path.isdir(local_app_dir):
+                    shutil.rmtree(local_app_dir)
+                else:
+                    os.remove(local_app_dir)
+            except Exception as e:
+                pass
+        
+        # Tạo symlink
+        if not os.path.exists(local_app_dir):
+            try:
+                os.symlink(target_data_dir, local_app_dir)
+            except Exception as e:
+                pass
+
 EXTRACTED_FRAMES_DIR = "extracted_frames"
 OUTPUT_VIDEOS_DIR = "output_videos"
 
