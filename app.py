@@ -531,7 +531,7 @@ def render_video(video_path):
         # File gốc có sẵn local nhưng chưa có H264, kích hoạt convert dưới nền và dùng tạm file gốc
         target_path = ensure_playable_video(video_path)
 
-    # 1. TRƯỜNG HỢP 1: Có sẵn file cục bộ (local) -> Dùng st.video để stream trực tiếp, cực kỳ nhanh
+    # 1. TRƯỜNG HỢP 1: Có sẵn file cục bộ (local)
     if target_path:
         is_cloud = bool(os.environ.get('HF_SPACE_ID')) or bool(os.environ.get('SPACE_ID')) or (os.name != 'nt' and os.path.exists('/data'))
         
@@ -545,7 +545,72 @@ def render_video(video_path):
             if v_codec != 'h264':
                 st.info("🔄 Video đang được nén tối ưu hóa định dạng H.264 dưới nền. Trình phát có thể tải chậm hoặc đen màn hình trong vài giây đầu...")
 
-        if not is_cloud:
+        if is_cloud:
+            # A. Ưu tiên Base64 cho file nhỏ (<25MB) để phát ngay lập tức không bị lỗi CORS/Range Request của Hugging Face
+            try:
+                fsize = os.path.getsize(target_path)
+                if fsize < 25 * 1024 * 1024:
+                    mtime = os.path.getmtime(target_path)
+                    b64_str = get_video_base64_cached(target_path, mtime, fsize)
+                    if b64_str:
+                        video_url = f"data:video/mp4;base64,{b64_str}"
+                        import streamlit.components.v1 as _stcomp
+                        _stcomp.html(f"""
+<!DOCTYPE html><html><head>
+<style>
+  body{{margin:0;padding:0;background:transparent;overflow:hidden;}}
+  video{{width:100%;border-radius:8px;display:block;height:240px;background:#000;}}
+</style>
+</head><body>
+<video id="vp" controls preload="metadata">
+  <source src="{video_url}" type="video/mp4">
+  Trình duyệt không hỗ trợ video HTML5.
+</video>
+<div style="color:#2ecc71; font-size:0.72rem; margin-top:4px; text-align:right; font-family:sans-serif;">
+  ⚡ Đang phát cục bộ (Base64)&nbsp;&nbsp;|&nbsp;&nbsp;📹 {os.path.basename(target_path)}
+</div>
+</body></html>
+""", height=270)
+                        return
+            except Exception as e:
+                pass
+
+            # B. Nếu file lớn (>=25MB) hoặc Base64 bị lỗi, chuyển sang dùng Cloud URL (Hugging Face CDN) hỗ trợ Range Requests
+            if HF_TOKEN and HF_DATASET_ID:
+                try:
+                    rel_path = get_clean_rel_path(video_path)
+                    rel_path_f = rel_path.replace('.mp4', '_f.mp4').replace('.mov', '_f.mp4').replace('.MOV', '_f.mp4').replace('.avi', '_f.mp4').replace('.mkv', '_f.mp4')
+                    
+                    import urllib.parse
+                    rel_path_encoded_f = urllib.parse.quote(rel_path_f, safe='/')
+                    rel_path_encoded_raw = urllib.parse.quote(rel_path, safe='/')
+                    
+                    cloud_url_f = f"https://huggingface.co/datasets/{HF_DATASET_ID}/resolve/main/{rel_path_encoded_f}?token={HF_TOKEN}"
+                    cloud_url_raw = f"https://huggingface.co/datasets/{HF_DATASET_ID}/resolve/main/{rel_path_encoded_raw}?token={HF_TOKEN}"
+                    
+                    import streamlit.components.v1 as _stcomp
+                    _stcomp.html(f"""
+<!DOCTYPE html><html><head>
+<style>
+  body{{margin:0;padding:0;background:transparent;overflow:hidden;}}
+  video{{width:100%;border-radius:8px;display:block;height:240px;background:#000;}}
+</style>
+</head><body>
+<video id="vp" controls preload="metadata">
+  <source src="{cloud_url_f}">
+  <source src="{cloud_url_raw}">
+  Trình duyệt không hỗ trợ video HTML5.
+</video>
+<div style="color:#ffd700; font-size:0.72rem; margin-top:4px; text-align:right; font-family:sans-serif;">
+  ☁️ Đang stream trực tiếp từ Cloud&nbsp;&nbsp;|&nbsp;&nbsp;📹 {os.path.basename(video_path)}
+</div>
+</body></html>
+""", height=270)
+                    return
+                except:
+                    pass
+        else:
+            # C. Nếu chạy local (không phải Cloud) -> Dùng HTTP Range Request server
             video_url = _get_video_server_url(target_path)
             if video_url:
                 try:
@@ -572,7 +637,7 @@ def render_video(video_path):
 """, height=270)
                 return
 
-        # Phát bằng st.video (mặc định trên Cloud / Fallback local) -> Hỗ trợ tải phân đoạn tự động cực kỳ nhanh
+        # D. Fallback cuối cùng: Dùng st.video nếu tất cả các phương pháp trên không khả dụng
         try:
             st.video(target_path)
         except Exception as e:
