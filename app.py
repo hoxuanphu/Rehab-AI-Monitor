@@ -4602,8 +4602,27 @@ def hien_thi_tien_trinh_background_small(video_path):
         p_val = prog.get("progress", 0.0)
         elapsed = prog.get("elapsed", 0.0)
         
+        # Thêm spinner icon và hiệu ứng xoay CSS để tạo hiệu ứng đang chạy trực quan
+        st.markdown(f"""
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+            <span style="font-weight: bold; color: #60a5fa;">⚙️ Tiến độ phân tích <span class="spinner-icon-small">🔄</span></span>
+            <span style="font-size: 0.85rem; color: #888;">⏱️ Đang chạy: {elapsed:.1f}s</span>
+        </div>
+        <style>
+            @keyframes spin-small {{
+                0% {{ transform: rotate(0deg); }}
+                100% {{ transform: rotate(360deg); }}
+            }}
+            .spinner-icon-small {{
+                display: inline-block;
+                animation: spin-small 2s linear infinite;
+                margin-left: 5px;
+            }}
+        </style>
+        """, unsafe_allow_html=True)
+        
         st.progress(p_val)
-        st.info(f"🔄 Đang xử lý... {p_val*100:.0f}% | ⏱️ Đang chạy: {elapsed:.1f}s")
+        st.info(f"🔄 Đang xử lý... {p_val*100:.0f}%")
         
         # Mách nước tối ưu hóa tốc độ
         st.markdown("""
@@ -4643,7 +4662,7 @@ def hien_thi_tien_trinh_background_home_fragment(video_path):
         st.markdown(f"""
         <div style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(59, 130, 246, 0.4); border-radius: 12px; padding: 20px; margin-bottom: 20px; backdrop-filter: blur(10px);">
             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
-                <span style="color: #60a5fa; font-weight: 600; font-size: 1.1rem;">⚙️ Đang xử lý AI trong nền...</span>
+                <span style="color: #60a5fa; font-weight: 600; font-size: 1.1rem;">⚙️ Đang xử lý AI trong nền... <span class="spinner-icon">🔄</span></span>
                 <span style="color: #94a3b8; font-size: 0.9rem;">⏱️ Đang chạy: {elapsed:.1f}s</span>
             </div>
             <div style="color: #e2e8f0; font-size: 0.95rem; margin-bottom: 15px;">
@@ -4651,6 +4670,17 @@ def hien_thi_tien_trinh_background_home_fragment(video_path):
                 Bạn có thể an tâm <b>tắt trình duyệt, chuyển tab</b> hoặc làm việc khác. Tiến trình sẽ tự chạy đến khi hoàn tất.
             </div>
         </div>
+        <style>
+            @keyframes spin {{
+                0% {{ transform: rotate(0deg); }}
+                100% {{ transform: rotate(360deg); }}
+            }}
+            .spinner-icon {{
+                display: inline-block;
+                animation: spin 2s linear infinite;
+                margin-left: 5px;
+            }}
+        </style>
         """, unsafe_allow_html=True)
         
         st.progress(p_val)
@@ -4775,14 +4805,24 @@ def bat_dau_phan_tich_background(
             bt_ncv['chuan'] = bt_chuan_ncv
             
             # Callback cập nhật tiến độ cho MediaPipe
+            last_write_time = [0.0]
+            last_prog_percent = [-1]
+
             def bg_progress_callback(p):
-                elap = time.time() - start_t
+                now = time.time()
+                elap = now - start_t
                 if temp_uploaded_path:
                     # Mức tiến độ tổng thể đi từ 0.15 đến 0.95
                     prog_val = 0.15 + p * 0.80
                 else:
                     prog_val = p * 0.95
-                write_progress(video_path, "processing", username=username, video_name=video_name, progress=prog_val, elapsed=elap, start_time=start_t)
+                
+                percent = int(prog_val * 100)
+                # Chỉ ghi tiến độ xuống đĩa nếu phần trăm thay đổi HOẶC trôi qua ít nhất 1.5 giây để tránh thắt nút cổ chai I/O đĩa
+                if percent != last_prog_percent[0] or (now - last_write_time[0] >= 1.5):
+                    write_progress(video_path, "processing", username=username, video_name=video_name, progress=prog_val, elapsed=elap, start_time=start_t)
+                    last_write_time[0] = now
+                    last_prog_percent[0] = percent
                 
             # Bước C: Chạy phân tích AI trích xuất xương
             output_path, ref_name_detected, _, angle_data, total_frames, valid_frames, temp_folder, zip_data, frame_paths, _, all_frames_data, all_warnings = xu_ly_video_day_du(
