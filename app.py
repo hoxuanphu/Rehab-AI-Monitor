@@ -329,19 +329,21 @@ def ensure_playable_video(video_path):
                 
             # 3. TRÍCH CODEC & TRANSCODE
             v_codec, a_codec = get_video_codec(video_path)
-            # Tối ưu hóa độ phân giải về tối đa 720p (scale=-2:720) giúp giảm tải CPU nén gấp 3-4 lần
+            # Tối ưu hóa độ phân giải tối đa 720p mà không làm phóng to video (scale=-2:min(720,ih))
+            # Bổ dung -map 0:v:0 và -map 0:a? để đảm bảo xử lý được mọi dòng dữ liệu (metadata) của video gốc
             cmd = [
                 'ffmpeg', '-y', 
                 '-i', video_path,
                 '-vcodec', 'libx264', 
                 '-pix_fmt', 'yuv420p', 
                 '-preset', 'ultrafast', 
-                '-vf', 'scale=-2:720', 
+                '-vf', 'scale=-2:min(720\\,ih)', 
                 '-crf', '28', 
                 '-maxrate', '800k', 
                 '-bufsize', '1600k',
                 '-movflags', '+faststart',
                 '-threads', '0',
+                '-map', '0:v:0', '-map', '0:a?',
             ]
             if a_codec:
                 cmd.extend(['-c:a', 'aac'])
@@ -350,12 +352,22 @@ def ensure_playable_video(video_path):
             cmd.append(final_h264)
             
             print(f"[Async Video] Đang convert {video_path} sang H.264 dưới nền...")
-            # Tăng timeout lên 1800 giây (30 phút) để xử lý hoàn hảo các tệp tin cực lớn (như 550MB) trên Space CPU yếu
+            # Tăng timeout lên 1800 giây (30 phút) để xử lý các tệp tin cực lớn (như 550MB) trên Space CPU yếu
             result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=1800)
             
             if result.returncode != 0:
                 print("[Async Video] FFmpeg failed with exit code", result.returncode)
                 print("[Async Video] FFmpeg stderr:", result.stderr)
+                # Ghi log lỗi để hiển thị trực quan lên giao diện bác sĩ
+                try:
+                    error_log_path = os.path.join(os.path.dirname(final_h264), "transcode_error.txt")
+                    with open(error_log_path, "w", encoding="utf-8") as f_err:
+                        f_err.write(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                        f_err.write(f"Cmd: {' '.join(cmd)}\n")
+                        f_err.write(f"Exit Code: {result.returncode}\n")
+                        f_err.write(f"Stderr:\n{result.stderr}\n")
+                except:
+                    pass
                 if os.path.exists(final_h264):
                     try: os.remove(final_h264)
                     except: pass
@@ -367,9 +379,24 @@ def ensure_playable_video(video_path):
                 size_f = os.path.getsize(final_h264)
                 if not _check_video_valid_cached(final_h264, mtime_f, size_f):
                     print("[Async Video] Tệp tin đầu ra không hợp lệ. Đang xóa...")
+                    try:
+                        error_log_path = os.path.join(os.path.dirname(final_h264), "transcode_error.txt")
+                        with open(error_log_path, "w", encoding="utf-8") as f_err:
+                            f_err.write(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                            f_err.write("Error: Output H.264 file created but failed integrity validation (ffprobe duration is invalid).\n")
+                    except:
+                        pass
                     try: os.remove(final_h264)
                     except: pass
                     return
+                
+                # Thành công -> Xóa file log lỗi cũ
+                try:
+                    error_log_path = os.path.join(os.path.dirname(final_h264), "transcode_error.txt")
+                    if os.path.exists(error_log_path):
+                        os.remove(error_log_path)
+                except:
+                    pass
                     
                 print(f"[Async Video] Đã convert thành công sang {final_h264}")
                 try:
@@ -396,6 +423,13 @@ def ensure_playable_video(video_path):
                     except: pass
         except Exception as err:
             print(f"[Async Video] Lỗi trong tiến trình chạy nền: {err}")
+            try:
+                error_log_path = os.path.join(os.path.dirname(final_h264), "transcode_error.txt")
+                with open(error_log_path, "w", encoding="utf-8") as f_err:
+                    f_err.write(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f_err.write(f"Exception: {str(err)}\n")
+            except:
+                pass
             if os.path.exists(final_h264):
                 try: os.remove(final_h264)
                 except: pass
@@ -8924,6 +8958,16 @@ def hien_thi_danh_sach_video_fragment(user_role):
                                                 st.error(f"Lỗi ffprobe H264: {res_h.stderr.strip()}")
                                         except Exception as e_h:
                                             st.write(f"- Lỗi quét ffprobe H264: `{e_h}`")
+                                            
+                                    # Hiển thị log lỗi nén nếu có để bác sĩ dễ dàng debug
+                                    error_log_path = os.path.join(os.path.dirname(final_h264), "transcode_error.txt")
+                                    if os.path.exists(error_log_path):
+                                        st.warning("⚠️ Phát hiện log lỗi nén gần nhất:")
+                                        try:
+                                            with open(error_log_path, "r", encoding="utf-8") as f_err:
+                                                st.text_area("Chi tiết lỗi ffmpeg:", value=f_err.read(), height=150)
+                                        except Exception as e_log:
+                                            st.write(f"Không thể đọc log lỗi: {e_log}")
                                         
                                     st.markdown("**Trạng thái Cloud:**")
                                     if HF_TOKEN and HF_DATASET_ID:
