@@ -970,8 +970,11 @@ def khoi_tao_dong_bo_hf():
         from huggingface_hub import HfApi, hf_hub_download
         api = HfApi(token=HF_TOKEN)
         
-        # 1. Tạo repo dataset riêng tư nếu chưa tồn tại
-        api.create_repo(repo_id=HF_DATASET_ID, repo_type="dataset", private=True, exist_ok=True)
+        # 1. Tạo repo dataset riêng tư nếu chưa tồn tại (Bọc trong try-except để không block luồng nếu Token bị thiếu quyền create_repo)
+        try:
+            api.create_repo(repo_id=HF_DATASET_ID, repo_type="dataset", private=True, exist_ok=True)
+        except Exception as e:
+            print(f"[HF Sync] Bỏ qua lỗi tạo repo (có thể do Token thiếu quyền create, nhưng repo đã tồn tại): {e}")
         
         # 2. Tải các file cấu hình về máy
         files_to_download = [
