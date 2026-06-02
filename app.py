@@ -7130,37 +7130,41 @@ def hien_thi_noi_dung_ket_qua(selected_v, my_evals):
                         _ag1_str = f"{_ag1:.1f}%" if _ag1 is not None else "N/A"
                         _ag2_str = f"{_ag2:.1f}%" if _ag2 is not None else "N/A"
                         _ag3_str = f"{_ag3:.1f}%" if _ag3 is not None else "N/A"
+                        # Accuracy chính = GĐ2 (mốc lâm sàng)
+                        _main_acc = e.get('ai_accuracy', e.get('ai_accuracy_g2'))
+                        if _main_acc is None and _ag2 is not None: _main_acc = _ag2
+                        _main_acc_str = f"{round(float(_main_acc), 1)}%" if _main_acc is not None else "N/A"
 
                         st.markdown(f"""
-                        <p style="text-align:center; margin:0 0 8px 0; color:{eval_text_color};
-                                  font-size:0.72rem; letter-spacing:1px; font-weight:600;">
-                            KẾT QUẢ 3 GIAI ĐOẠN
-                        </p>
+                        <div style="text-align:center; background:{eval_card_bg}; padding:18px 12px;
+                                    border-radius:14px; border:1px solid {eval_card_border};
+                                    box-shadow:0 4px 15px rgba(0,0,0,0.1);">
+                            <p style="margin:0 0 4px 0; color:{eval_text_color}; font-size:0.72rem;
+                                      letter-spacing:1px; font-weight:600;">ĐỘ CHÍNH XÁC</p>
+                            <h1 style="margin:0; color:{title_color}; font-size:2.2rem; font-weight:900;">
+                                {_main_acc_str}
+                            </h1>
+                            <hr style="margin:10px 0; border:0; border-top:1px solid {_divider_color};">
+                            <h3 style="margin:0 0 14px 0; color:{_verdict_color}; font-size:1.1rem; font-weight:800;">
+                                {e.get('doctor_result', 'N/A')}
+                            </h3>
+                            <p style="margin:0; font-size:0.72rem; color:{eval_text_color}; letter-spacing:0.5px;">
+                                TÓM TẮT 3 GIAI ĐOẠN
+                            </p>
+                        </div>
                         """, unsafe_allow_html=True)
 
-                        for _gi, _gl, _gv, _gc, _gb, _gs in [
-                            ("🌱", "GĐ1 · 45°", _ag1, "#00e676", "rgba(0,230,118,0.08)", _ag1_str),
-                            ("📈", "GĐ2 · 30°", _ag2, "#ffd700", "rgba(255,215,0,0.08)", _ag2_str),
-                            ("🎯", "GĐ3 · 15°", _ag3, "#00c6ff", "rgba(0,198,255,0.08)", _ag3_str),
-                        ]:
-                            _gclr = _c(_gv)
-                            _glbl = _lbl(_gv)
-                            st.markdown(f"""
-                            <div style="background:{_gb}; border:1px solid {_gc}; border-radius:10px;
-                                        padding:7px 10px; margin-bottom:6px;">
-                                <span style="font-size:0.68rem; color:#aaa;">{_gi} {_gl}</span><br>
-                                <span style="font-size:0.75rem; color:{_gc};">{_glbl}</span>
-                                <span style="float:right; font-size:1.2rem; font-weight:900; color:{_gclr};">{_gs}</span>
-                            </div>
-                            """, unsafe_allow_html=True)
-
                         st.markdown(f"""
-                        <div style="text-align:center; border-top:1px solid {_divider_color};
-                                    padding-top:8px; margin-top:4px;">
-                            <span style="font-size:0.72rem; color:{eval_text_color};">KẾT LUẬN TỔNG THỂ</span><br>
-                            <span style="font-size:1.1rem; font-weight:800; color:{_verdict_color};">
-                                {e.get('doctor_result', 'N/A')}
-                            </span>
+                        <div style="margin-top:8px; font-size:0.8rem; line-height:1.8;">
+                            <span style="color:#00e676;">🌱 GĐ1:</span>
+                            <b style="color:{_c(_ag1)};">{_ag1_str}</b>
+                            <span style="color:#aaa; font-size:0.7rem;">{_lbl(_ag1)}</span><br>
+                            <span style="color:#ffd700;">📈 GĐ2:</span>
+                            <b style="color:{_c(_ag2)};">{_ag2_str}</b>
+                            <span style="color:#aaa; font-size:0.7rem;">{_lbl(_ag2)}</span><br>
+                            <span style="color:#00c6ff;">🎯 GĐ3:</span>
+                            <b style="color:{_c(_ag3)};">{_ag3_str}</b>
+                            <span style="color:#aaa; font-size:0.7rem;">{_lbl(_ag3)}</span>
                         </div>
                         """, unsafe_allow_html=True)
                     else:
