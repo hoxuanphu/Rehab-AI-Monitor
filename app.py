@@ -737,12 +737,34 @@ def render_video(video_path):
             rel_path_f = rel_path.replace('.mp4', '_f.mp4').replace('.mov', '_f.mp4').replace('.MOV', '_f.mp4').replace('.avi', '_f.mp4').replace('.mkv', '_f.mp4')
             
             import urllib.parse
-            rel_path_encoded_f = urllib.parse.quote(rel_path_f, safe='/')
             rel_path_encoded_raw = urllib.parse.quote(rel_path, safe='/')
-            
-            cloud_url_f = f"https://huggingface.co/datasets/{HF_DATASET_ID}/resolve/main/{rel_path_encoded_f}?token={HF_TOKEN}"
             cloud_url_raw = f"https://huggingface.co/datasets/{HF_DATASET_ID}/resolve/main/{rel_path_encoded_raw}?token={HF_TOKEN}"
-            
+
+            # Chỉ dùng URL _f.mp4 trên cloud nếu local _f.mp4 đã tồn tại và hợp lệ
+            # (tức là đã được push lên cloud thành công sau khi transcode hoàn tất)
+            h264_local = get_final_h264_path(video_path)
+            h264_cloud_valid = False
+            if os.path.exists(h264_local) and os.path.getsize(h264_local) > 5 * 1024:
+                try:
+                    mtime_h = os.path.getmtime(h264_local)
+                    size_h = os.path.getsize(h264_local)
+                    h264_cloud_valid = _check_video_valid_cached(h264_local, mtime_h, size_h)
+                except:
+                    pass
+
+            # Thông báo nếu đang transcode dưới nền
+            is_transcoding = '_transcoding_jobs' in globals() and h264_local in _transcoding_jobs
+            if is_transcoding or not h264_cloud_valid:
+                st.info("⏳ Hệ thống đang nén video sang H.264 dưới nền. Video đang phát thử từ Cloud (có thể không play được trên 1 số trình duyệt). Vui lòng đợi 2-5 phút rồi tải lại trang (F5).")
+
+            if h264_cloud_valid:
+                rel_path_encoded_f = urllib.parse.quote(rel_path_f, safe='/')
+                cloud_url_f = f"https://huggingface.co/datasets/{HF_DATASET_ID}/resolve/main/{rel_path_encoded_f}?token={HF_TOKEN}"
+                sources_html = f'<source src="{cloud_url_f}">\n  <source src="{cloud_url_raw}">'
+            else:
+                # _f.mp4 chưa valid trên cloud, chỉ stream raw
+                sources_html = f'<source src="{cloud_url_raw}">'
+
             import streamlit.components.v1 as _stcomp
             _stcomp.html(f"""
 <!DOCTYPE html><html><head>
@@ -751,9 +773,8 @@ def render_video(video_path):
   video{{width:100%;border-radius:8px;display:block;height:240px;background:#000;}}
 </style>
 </head><body>
-<video id="vp" controls preload="metadata" onerror="this.outerHTML='<div style=\'padding:20px;background:#442222;color:#ff8888;border-radius:8px;text-align:center;height:240px;display:flex;align-items:center;justify-content:center;\'>⚠️ Lỗi kết nối: Không thể tải video từ Cloud.<br>Nguyên nhân có thể do Token sai quyền hoặc file đã bị xóa khi khởi động lại. Vui lòng upload lại video!</div>'">
-  <source src="{cloud_url_f}">
-  <source src="{cloud_url_raw}">
+<video id="vp" controls preload="metadata" onerror="this.outerHTML='<div style=\\'padding:20px;background:#442222;color:#ff8888;border-radius:8px;text-align:center;height:240px;display:flex;align-items:center;justify-content:center;\\'>⚠️ Lỗi phát video: Định dạng gốc chưa được nén xong (HEVC/H.265 không hỗ trợ trình duyệt).<br>Vui lòng đợi hệ thống nén xong rồi tải lại trang!</div>'">
+  {sources_html}
   Trình duyệt không hỗ trợ video HTML5.
 </video>
 <div style="color:#ffd700; font-size:0.72rem; margin-top:4px; text-align:right; font-family:sans-serif;">
