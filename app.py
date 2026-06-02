@@ -8851,6 +8851,18 @@ def hien_thi_danh_sach_video_fragment(user_role):
                                     st.write(f"- Tồn tại cục bộ: {'✅ Có' if local_exists else '❌ Không'}")
                                     if os.path.exists(v_display_path):
                                         st.write(f"- Kích thước tệp: `{os.path.getsize(v_display_path)/(1024*1024):.2f} MB`")
+                                        try:
+                                            v_codec, a_codec = get_video_codec(v_display_path)
+                                            st.write(f"- Codec: `{v_codec} / {a_codec}`")
+                                            import subprocess
+                                            cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', v_display_path]
+                                            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3)
+                                            dur = res.stdout.strip()
+                                            st.write(f"- Thời lượng ffprobe: `{dur if dur else 'Không xác định'} giây`")
+                                            if res.returncode != 0:
+                                                st.error(f"Lỗi ffprobe: {res.stderr.strip()}")
+                                        except Exception as e:
+                                            st.write(f"- Lỗi quét ffprobe: `{e}`")
                                     
                                     st.markdown(f"**Tệp nén H.264:** `{final_h264}`")
                                     h264_exists = os.path.exists(final_h264) and os.path.getsize(final_h264) >= 5 * 1024
