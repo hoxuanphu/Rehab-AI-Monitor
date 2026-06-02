@@ -449,7 +449,7 @@ def _get_video_server_url(video_path):
 
 def render_video(video_path):
     """Hiển thị video: ưu tiên HTTP Range Request server (local) để phát ngay lập tức.
-    Tự động đảm bảo H264 trước khi phát, fallback về st.video() khi cần."""
+    Tự động đảm bảo H264 trước khi phát, hỗ trợ stream trực tiếp từ Cloud nếu chưa tải về local."""
     if not video_path:
         st.error("❌ File video không tồn tại hoặc đường dẫn trống.")
         return
@@ -457,14 +457,57 @@ def render_video(video_path):
     # URL trực tiếp (YouTube, HF, ...)
     if isinstance(video_path, str) and (video_path.startswith('http://') or video_path.startswith('https://')):
         try:
-            st.video(video_path)
+            import streamlit.components.v1 as _stcomp
+            _stcomp.html(f"""
+<!DOCTYPE html><html><head>
+<style>
+  body{{margin:0;padding:0;background:transparent;overflow:hidden;}}
+  video{{width:100%;border-radius:8px;display:block;height:240px;background:#000;}}
+</style>
+</head><body>
+<video id="vp" controls preload="metadata">
+  <source src="{video_path}" type="video/mp4">
+  Trình duyệt không hỗ trợ video HTML5.
+</video>
+</body></html>
+""", height=255)
         except Exception as e:
             st.error(f'⚠️ Lỗi hiển thị video: {e}')
         return
 
-    # Bước 1: Đảm bảo file tồn tại local hợp lệ
-    if not os.path.exists(video_path) or os.path.getsize(video_path) < 5 * 1024:
-        st.warning("⚠️ File video chưa có sẵn trên máy. Đang dùng player dự phòng...")
+    # Bước 1: Kiểm tra xem file có tồn tại local hợp lệ không
+    is_local = os.path.exists(video_path) and os.path.getsize(video_path) >= 5 * 1024
+
+    if not is_local:
+        # Nếu không có local, thử sinh link stream từ Hugging Face Dataset (Cloud)
+        if HF_TOKEN and HF_DATASET_ID:
+            try:
+                rel_path = os.path.relpath(video_path, DATA_DIR).replace("\\", "/")
+                cloud_url = f"https://huggingface.co/datasets/{HF_DATASET_ID}/resolve/main/{rel_path}?token={HF_TOKEN}"
+                
+                import streamlit.components.v1 as _stcomp
+                _stcomp.html(f"""
+<!DOCTYPE html><html><head>
+<style>
+  body{{margin:0;padding:0;background:transparent;overflow:hidden;}}
+  video{{width:100%;border-radius:8px;display:block;height:240px;background:#000;}}
+</style>
+</head><body>
+<video id="vp" controls preload="metadata">
+  <source src="{cloud_url}" type="video/mp4">
+  Trình duyệt không hỗ trợ video HTML5.
+</video>
+<div style="color:#ffd700; font-size:0.72rem; margin-top:4px; text-align:right; font-family:sans-serif;">
+  ☁️ Đang stream trực tiếp từ Cloud&nbsp;&nbsp;|&nbsp;&nbsp;📹 {os.path.basename(video_path)}
+</div>
+</body></html>
+""", height=270)
+                return
+            except Exception as e:
+                pass
+                
+        # Fallback cuối cùng nếu không có cấu hình cloud
+        st.warning("⚠️ File video không có sẵn trên máy và cấu hình Cloud bị thiếu.")
         try:
             st.video(video_path)
         except:
@@ -513,6 +556,7 @@ def render_video(video_path):
 <div style="color:#888; font-size:0.72rem; margin-top:4px; text-align:right; font-family:sans-serif;">
   📹 {os.path.basename(playable_path)}&nbsp;&nbsp;|&nbsp;&nbsp;💾 {size_label}
 </div>
+</body></html>
 """, height=270)
             return
 
@@ -2794,9 +2838,12 @@ def hien_thi_tab_danh_gia_va_nckh_bac_si():
             with sub_tabs[2]:
                 if v_ai.get('metrics'):
                     df_ncv = None
-                    if 'df_path' in v_ai and os.path.exists(v_ai['df_path']):
-                        try: df_ncv = pd.read_csv(v_ai['df_path'])
-                        except: pass
+                    df_path_ncv = v_ai.get('df_path')
+                    if df_path_ncv:
+                        ensure_local_file(df_path_ncv)
+                        if os.path.exists(df_path_ncv):
+                            try: df_ncv = pd.read_csv(df_path_ncv)
+                            except: pass
                     
                     ex_ai = next((BAI_TAP[k] for k in BAI_TAP if BAI_TAP[k]['ten'] == v_ai['exercise']), BAI_TAP['codman'])
                     hien_thi_tab_phan_tich(key_suffix="doc_view_ncv_sub", stats_ext=v_ai['metrics'], df_ext=df_ncv, exercise_ext=ex_ai)
@@ -6370,8 +6417,9 @@ def hien_thi_form_danh_gia_bac_si():
 
             st.markdown(f"#### 🎬 Đang đánh giá: {selected_video['full_name']} - {selected_video['exercise']}")
             
-            if os.path.exists(selected_video['video_path']):
-                render_video(selected_video['video_path'])
+            v_to_render = selected_video.get('processed_path') if (selected_video.get('status') == "Đã phân tích" and selected_video.get('processed_path')) else selected_video.get('video_path')
+            if v_to_render:
+                render_video(v_to_render)
             
             with st.form("doctor_eval_form_final_v_fixed"):
                 col1, col2 = st.columns(2)
@@ -6570,9 +6618,12 @@ def hien_thi_ket_qua_cho_benh_nhan(target_username=None):
             if 'sai_so' in selected_v:
                 st.session_state.exercise['chuan'] = ex_base['chuan'].copy()
                 st.session_state.exercise['chuan']['sai_so'] = selected_v['sai_so']
-            if selected_v.get('df_path') and os.path.exists(selected_v.get('df_path', '')):
-                try: st.session_state.angle_df = pd.read_csv(selected_v['df_path'])
-                except: pass
+            df_path = selected_v.get('df_path')
+            if df_path:
+                ensure_local_file(df_path)
+                if os.path.exists(df_path):
+                    try: st.session_state.angle_df = pd.read_csv(df_path)
+                    except: pass
     
     # 4. HIỂN THỊ CÁC TAB (HOẶC NỘI DUNG TRỰC TIẾP CHO NCV)
     if user_role == "Nghiên cứu viên":
@@ -8493,12 +8544,8 @@ def hien_thi_danh_sach_video_fragment(user_role):
         for idx, v in page_videos:
             col_list1, col_list2 = st.columns([12, 1])
             with col_list1:
-                v_display_path = v.get('video_path')
                 processed_path = v.get('processed_path')
-                
-                # Kiểm tra sự tồn tại của file cục bộ có dung lượng hợp lệ (> 5KB) mà không thực hiện tải xuống
-                local_exists = False
-                active_display_path = None
+                raw_path = v.get('video_path')
                 
                 def is_valid_local_file(path):
                     if path and os.path.exists(path):
@@ -8508,13 +8555,16 @@ def hien_thi_danh_sach_video_fragment(user_role):
                         except:
                             pass
                     return False
-                    
-                if is_valid_local_file(v_display_path):
-                    local_exists = True
-                    active_display_path = v_display_path
+
+                # Xác định video hiển thị: ưu tiên processed_path (video đã vẽ khung xương AI) nếu đã phân tích
+                if processed_path and (is_valid_local_file(processed_path) or not is_valid_local_file(raw_path)):
+                    v_display_path = processed_path
                 else:
-                    local_exists = False
-                    active_display_path = v_display_path
+                    v_display_path = raw_path
+
+                # Kiểm tra sự tồn tại của file hiển thị cục bộ
+                local_exists = is_valid_local_file(v_display_path)
+                active_display_path = v_display_path
                 
                 # Tra cứu O(1) từ dict đã build sẵn
                 ev_key = (v.get('username'), v.get('video_name'), v.get('exercise'))
@@ -8529,33 +8579,28 @@ def hien_thi_danh_sach_video_fragment(user_role):
                         display_status = "Đang chờ bác sĩ đánh giá"
 
                 with st.expander(f"🎬 {v['full_name']} - {v['exercise']} ({v['time']}) - {display_status}"):
-                    if not local_exists:
-                        st.markdown("""
-                        <div style="background: rgba(255, 215, 0, 0.15); padding: 15px; border-radius: 8px; border: 1px solid rgba(255, 215, 0, 0.3); margin-bottom: 15px;">
-                            <span style="color: #ffd700; font-weight: bold; font-size: 0.95rem;">☁️ Video được lưu trên Cloud (Hugging Face Dataset)</span>
-                            <p style="color: #aaa; font-size: 0.8rem; margin: 5px 0 0 0;">Video này chưa có sẵn trên server cục bộ. Hãy bấm nút dưới đây để tải về trước khi xem.</p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        if st.button("📥 Tải video về hệ thống", key=f"download_vid_{idx}", type="primary", width="stretch"):
-                            with st.spinner("Đang tải video từ Cloud..."):
-                                success = False
-                                if v_display_path:
-                                    success = ensure_local_file(v_display_path)
-                                if not success and processed_path:
-                                    success = ensure_local_file(processed_path)
-                                if success:
-                                    st.success("✅ Tải video thành công!")
-                                    st.rerun()
-                                else:
-                                    st.error("❌ Không thể tải video từ Cloud. Vui lòng kiểm tra lại kết nối.")
-                    else:
-                        # Tỷ lệ cột [1.3, 1.0] để nới rộng video hiển thị vừa vặn hơn
-                        col_v1, col_v2 = st.columns([1.3, 1.0])
-                        with col_v1:
-                            if active_display_path and os.path.exists(active_display_path):
-                                render_video(active_display_path)
-                            else:
-                                st.error("File video không tồn tại trên hệ thống.")
+                    # Tỷ lệ cột [1.3, 1.0] để nới rộng video hiển thị vừa vặn hơn
+                    col_v1, col_v2 = st.columns([1.3, 1.0])
+                    with col_v1:
+                        if active_display_path:
+                            render_video(active_display_path)
+                        else:
+                            st.error("File video không tồn tại hoặc đường dẫn trống.")
+                            
+                        # Nếu không có local, hiển thị nút tải về tùy chọn bên dưới video để người dùng có thể tải về lưu trữ
+                        if not local_exists and active_display_path:
+                            if st.button("📥 Tải video về lưu trữ cục bộ", key=f"download_vid_{idx}", type="secondary", use_container_width=True):
+                                with st.spinner("Đang tải video từ Cloud..."):
+                                    success = False
+                                    if v_display_path:
+                                        success = ensure_local_file(v_display_path)
+                                    if not success and processed_path:
+                                        success = ensure_local_file(processed_path)
+                                    if success:
+                                        st.success("✅ Tải video thành công!")
+                                        st.rerun()
+                                    else:
+                                        st.error("❌ Không thể tải video từ Cloud. Vui lòng kiểm tra lại kết nối.")
                         with col_v2:
                             st.write(f"**Người tập:** {v['full_name']}")
                             
