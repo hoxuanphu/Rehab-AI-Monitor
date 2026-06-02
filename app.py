@@ -59,6 +59,8 @@ def get_final_h264_path(video_path):
 # --- OPTIMIZED CACHING FOR FASTER PAGE LOADS ---
 @st.cache_data(show_spinner=False)
 def _check_video_valid_cached(path, mtime, size):
+    if not os.path.exists(path) or os.path.getsize(path) < 5 * 1024:
+        return False
     try:
         import cv2
         cap_check = cv2.VideoCapture(path)
@@ -68,7 +70,9 @@ def _check_video_valid_cached(path, mtime, size):
         cap_check.release()
     except:
         pass
-    return False
+    # Nếu opencv gặp lỗi hoặc không đọc được trên Cloud, nhưng file tồn tại và size hợp lệ,
+    # ta vẫn tin tưởng và trả về True. Trình duyệt có bộ giải mã riêng để phát.
+    return True
 
 @st.cache_data(show_spinner=False)
 def get_video_fps_cached(path, mtime, size):
@@ -570,15 +574,23 @@ def render_video(video_path):
 
     # 1. TRƯỜNG HỢP 1: Có sẵn file cục bộ (local)
     if target_path:
-        # Nếu file raw chưa có H264 và là định dạng không tương thích, thông báo cho người dùng
+        # Nếu file raw chưa có H264 và là định dạng không tương thích, thông báo và chặn hiển thị
         if target_path == video_path and is_local_raw and not is_local_h264:
             v_codec = None
             try:
                 v_codec, _ = get_video_codec(video_path)
             except:
                 pass
-            if v_codec != 'h264':
-                st.info("🔄 Video đang được nén tối ưu hóa định dạng H.264 dưới nền. Trình phát có thể tải chậm hoặc đen màn hình trong vài giây đầu...")
+            
+            # Kiểm tra xem video gốc có tương thích trực tiếp với trình duyệt hay không (phải là h264 MP4)
+            is_compatible = (v_codec == 'h264' and video_path.lower().endswith('.mp4'))
+            if not is_compatible:
+                st.warning("⏳ **Trình duyệt hiện tại chưa hỗ trợ phát trực tiếp định dạng video gốc này.**\n\n"
+                           "Hệ thống đang tự động tối ưu hóa và nén video sang định dạng H.264 chuẩn dưới nền. "
+                           "Vui lòng chờ khoảng 1 phút rồi tải lại trang (F5) để xem video.")
+                if st.button("🔄 Tải lại trang (F5)", key="reload_btn_transcoding"):
+                    st.rerun()
+                return
 
         # ─────────────────────────────────────────────────────────────────
         # CHIẾN LƯỢC PHÁT VIDEO CHẮC CHẮN HOẠT ĐỘNG (NHƯ ẢNH 2):
