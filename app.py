@@ -8061,12 +8061,98 @@ def hien_thi_frames_day_du(key_suffix=""):
         if page_key not in st.session_state:
             st.session_state[page_key] = 1
 
+        # Inject custom CSS styles for clean frame cards and interactive hover zoom
+        st.markdown("""
+        <style>
+        /* Đảm bảo các cột và block trong Streamlit có thể hiển thị ảnh phóng to tràn viền mà không bị che khuất */
+        div[data-testid="column"] {
+            overflow: visible !important;
+        }
+        div[data-testid="stVerticalBlock"] {
+            overflow: visible !important;
+        }
+        div[data-testid="stVerticalBlockBorderOnly"] {
+            overflow: visible !important;
+            padding: 0.3rem !important; /* Thu nhỏ padding ngoài để ảnh to hơn */
+        }
+        
+        .frame-card {
+            background-color: #1a1a2e;
+            border: 1px solid #2d2d44;
+            border-radius: 8px;
+            padding: 8px;
+            margin-bottom: 12px;
+            transition: all 0.2s ease-in-out;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.15);
+            position: relative;
+        }
+        .frame-card:hover {
+            border-color: #0072ff;
+            box-shadow: 0 6px 12px rgba(0, 114, 255, 0.25);
+        }
+        .frame-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+        .frame-card-index {
+            color: #aaa;
+            font-size: 0.75rem;
+            font-weight: bold;
+        }
+        .frame-card-badge {
+            font-size: 0.65rem;
+            font-weight: bold;
+            padding: 1px 6px;
+            border-radius: 10px;
+            border: 1px solid;
+        }
+        .frame-card-img-wrapper {
+            width: 100%;
+            overflow: visible;
+            position: relative;
+            text-align: center;
+            background-color: #0a0a16;
+            border-radius: 4px;
+        }
+        .frame-card-img {
+            max-width: 100%;
+            height: auto;
+            max-height: 200px;
+            object-fit: contain;
+            border-radius: 4px;
+            transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            cursor: zoom-in;
+            display: block;
+            margin: 0 auto;
+        }
+        /* Phóng to cực đại ảnh lên 2.2 lần khi hover chuột vào mà không lệch bố cục */
+        .frame-card-img:hover {
+            transform: scale(2.2);
+            z-index: 99999 !important;
+            position: relative;
+            box-shadow: 0 12px 30px rgba(0, 0, 0, 0.8);
+            border: 2px solid #0072ff;
+        }
+        .frame-card-footer {
+            font-size: 0.72rem;
+            line-height: 1.4;
+            margin-top: 6px;
+        }
+        .frame-card-row {
+            display: flex;
+            justify-content: space-between;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
         rc1, rc2, rc3, rc4 = st.columns([1.5, 1.5, 2.0, 0.6])
         with rc1:
             fpp_option = st.selectbox("📄 Số/Trang", [12, 24, 36, 48, 96, "Tất cả"], index=1, key=f"fpp_{tab_key}_{key_suffix_val}")
             fpp = 999999 if fpp_option == "Tất cả" else int(fpp_option)
         with rc2:
-            grid_cols = st.selectbox("🗂️ Số cột", [1, 2, 3, 4], index=1, key=f"fcols_{tab_key}_{key_suffix_val}")
+            grid_cols = st.selectbox("🗂️ Số cột", [1, 2, 3, 4], index=3, key=f"fcols_{tab_key}_{key_suffix_val}")
         with rc3:
             sub_filter = st.selectbox("🔍 Lọc thêm", ["Tất cả", "PASS", "NEAR", "FAIL"], key=f"fsub_{tab_key}_{key_suffix_val}")
         with rc4:
@@ -8176,36 +8262,41 @@ def hien_thi_frames_day_du(key_suffix=""):
             ck_ref = eval_inf.get('elbow_ref', 170)
             diff_v = abs(gv - cv_ref)
             diff_k = abs(gk - ck_ref)
+
+            # Lấy base64 của ảnh để vẽ HTML tùy chỉnh có hỗ trợ hover zoom
+            b64_data = ""
+            if f_path and os.path.exists(f_path):
+                try:
+                    with open(f_path, "rb") as img_file:
+                        b64_data = base64.b64encode(img_file.read()).decode("utf-8")
+                except:
+                    pass
             
             with col_target:
-                with st.container(border=True):
-                    # Header: #Index - Status
+                if b64_data:
                     st.markdown(f"""
-                    <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;'>
-                        <span style='color: #888; font-size: 0.8rem; font-weight: bold;'>#{f_data.get('index')}</span>
-                        <span style='background: {bg_alpha}; color: {color}; font-size: 0.75rem; font-weight: bold; padding: 2px 8px; border-radius: 12px; border: 1px solid {color}40;'>{phase_st}</span>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    # Hình ảnh
-                    if f_path and os.path.exists(f_path):
-                        st.image(f_path, use_container_width=True)
-                    else:
-                        st.error("Ảnh lỗi")
-                        
-                    # Thông số
-                    st.markdown(f"""
-                    <div style='font-size: 0.75rem; line-height: 1.4; margin-top: 6px;'>
-                        <div style='display: flex; justify-content: space-between;'>
-                            <span>Vai: <b>{gv:.0f}°</b> / {cv_ref:.0f}°</span>
-                            <span style='color: {color}; font-weight: bold;'>Δ {diff_v:.1f}°</span>
+                    <div class="frame-card">
+                        <div class="frame-card-header">
+                            <span class="frame-card-index">#{f_data.get('index')}</span>
+                            <span class="frame-card-badge" style="background: {bg_alpha}; color: {color}; border-color: {color}40;">{phase_st}</span>
                         </div>
-                        <div style='display: flex; justify-content: space-between;'>
-                            <span>Khuỷu: <b>{gk:.0f}°</b> / {ck_ref:.0f}°</span>
-                            <span style='color: {color}; font-weight: bold;'>Δ {diff_k:.1f}°</span>
+                        <div class="frame-card-img-wrapper">
+                            <img class="frame-card-img" src="data:image/jpeg;base64,{b64_data}" />
+                        </div>
+                        <div class="frame-card-footer">
+                            <div class="frame-card-row">
+                                <span>Vai: <b>{gv:.0f}°</b> / {cv_ref:.0f}°</span>
+                                <span style="color: {color}; font-weight: bold;">Δ {diff_v:.1f}°</span>
+                            </div>
+                            <div class="frame-card-row">
+                                <span>Khuỷu: <b>{gk:.0f}°</b> / {ck_ref:.0f}°</span>
+                                <span style="color: {color}; font-weight: bold;">Δ {diff_k:.1f}°</span>
+                            </div>
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
+                else:
+                    st.error("Ảnh lỗi")
 
     # Lấy ranh giới phân đoạn đã tính toán ở trên
     if 'segment_bounds' not in st.session_state or st.session_state.get('last_processed_video_for_bounds') != processed_video_path:
