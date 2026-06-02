@@ -590,7 +590,19 @@ def render_video(video_path):
         # ─────────────────────────────────────────────────────────────────
         try:
             # Ưu tiên truyền trực tiếp file path vào st.video để Streamlit tự xử lý stream (tránh lỗi file lớn)
-            st.video(target_path, format="video/mp4")
+            # Tuy nhiên, Streamlit trên Linux hay bị lỗi 404 (màn hình xám) nếu tên file có dấu Tiếng Việt.
+            # Ta sẽ tạo một file symlink hoặc copy ra thư mục an toàn với tên ASCII để phát:
+            import hashlib
+            import tempfile
+            
+            safe_name = f"stream_{hashlib.md5(target_path.encode()).hexdigest()[:10]}.mp4"
+            safe_path = os.path.join(tempfile.gettempdir(), safe_name)
+            
+            if not os.path.exists(safe_path) or os.path.getsize(safe_path) != os.path.getsize(target_path):
+                import shutil
+                shutil.copy2(target_path, safe_path)
+                
+            st.video(safe_path, format="video/mp4")
             return
         except Exception as _ve:
             try:
