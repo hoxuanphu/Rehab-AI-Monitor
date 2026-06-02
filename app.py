@@ -3352,12 +3352,12 @@ def ve_khung_xuong_custom(frame_output, current_landmarks, active_side=None, mau
         cv2.line(frame_output, pts[start_idx], pts[end_idx], (200, 200, 200), max(1, line_thickness - 1))
         
     # Đường nối bên trái
-    color_trai = mau_tong if active_side == "LEFT" else (180, 180, 180)
+    color_trai = mau_tong if active_side in ["LEFT", "BOTH"] else (180, 180, 180)
     for start_idx, end_idx in LIEN_KET_TRAI:
         cv2.line(frame_output, pts[start_idx], pts[end_idx], color_trai, line_thickness)
         
     # Đường nối bên phải
-    color_phai = mau_tong if active_side == "RIGHT" else (180, 180, 180)
+    color_phai = mau_tong if active_side in ["RIGHT", "BOTH"] else (180, 180, 180)
     for start_idx, end_idx in LIEN_KET_PHAI:
         cv2.line(frame_output, pts[start_idx], pts[end_idx], color_phai, line_thickness)
         
@@ -3369,7 +3369,7 @@ def ve_khung_xuong_custom(frame_output, current_landmarks, active_side=None, mau
     # Khớp thân và tứ chi
     for i in range(11, 33):
         is_left = i in [11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31]
-        is_active = (active_side == "LEFT" and is_left) or (active_side == "RIGHT" and not is_left)
+        is_active = (active_side == "BOTH") or (active_side == "LEFT" and is_left) or (active_side == "RIGHT" and not is_left)
         
         # Màu sắc khớp: Vàng sáng cho bên active, Trắng cho bên inactive
         color_khop = (0, 235, 255) if is_active else (240, 240, 240)
@@ -3379,7 +3379,7 @@ def ve_khung_xuong_custom(frame_output, current_landmarks, active_side=None, mau
 # ============================================
 # XỬ LÝ FRAME - CẢI THIỆN BOX THÔNG TIN
 # ============================================================
-def xu_ly_frame(frame, model, chuan, frame_idx, fps=30, dynamic_chuan=None, active_side=None, last_pose_landmarks=None, precomputed_landmarks=None):
+def xu_ly_frame(frame, model, chuan, frame_idx, fps=30, dynamic_chuan=None, active_side=None, last_pose_landmarks=None, precomputed_landmarks=None, exercise_name="codman"):
     # 1. LẤY KÍCH THƯỚC VÀ CHUYỂN ĐỔI MÀU (Không dùng padding gây lệch)
     h, w = frame.shape[:2]
     
@@ -3553,6 +3553,25 @@ def xu_ly_frame(frame, model, chuan, frame_idx, fps=30, dynamic_chuan=None, acti
     mau_khuyu = (0, 255, 0) if khuyu_dung else (ORANGE_BGR if khuyu_gan_dung else (0, 0, 255))
     mau_tong = (0, 255, 0) if tong_the else (ORANGE_BGR if gan_dung_tong_the else (0, 0, 255))
     
+    # Tính riêng cho Trái/Phải phục vụ vẽ góc
+    vai_diff_t = abs(goc_vai_t - chuan_vai)
+    khuyu_diff_t = abs(goc_khuyu_t - chuan_khuyu)
+    vai_dung_t = vai_diff_t <= ss
+    khuyu_dung_t = khuyu_diff_t <= ss
+    vai_gan_dung_t = vai_diff_t <= (ss * 1.5)
+    khuyu_gan_dung_t = khuyu_diff_t <= (ss * 1.5)
+    mau_vai_t = (0, 255, 0) if vai_dung_t else (ORANGE_BGR if vai_gan_dung_t else (0, 0, 255))
+    mau_khuyu_t = (0, 255, 0) if khuyu_dung_t else (ORANGE_BGR if khuyu_gan_dung_t else (0, 0, 255))
+    
+    vai_diff_p = abs(goc_vai_p - chuan_vai)
+    khuyu_diff_p = abs(goc_khuyu_p - chuan_khuyu)
+    vai_dung_p = vai_diff_p <= ss
+    khuyu_dung_p = khuyu_diff_p <= ss
+    vai_gan_dung_p = vai_diff_p <= (ss * 1.5)
+    khuyu_gan_dung_p = khuyu_diff_p <= (ss * 1.5)
+    mau_vai_p = (0, 255, 0) if vai_dung_p else (ORANGE_BGR if vai_gan_dung_p else (0, 0, 255))
+    mau_khuyu_p = (0, 255, 0) if khuyu_dung_p else (ORANGE_BGR if khuyu_gan_dung_p else (0, 0, 255))
+    
     scale_factor = w / 640.0
     line_thickness = max(2, int(2 * scale_factor))
     circle_rad = max(2, int(2 * scale_factor))
@@ -3567,8 +3586,9 @@ def xu_ly_frame(frame, model, chuan, frame_idx, fps=30, dynamic_chuan=None, acti
     text_thick = max(1, int(2 * scale_factor))
     text_thick_thin = max(1, int(1 * scale_factor))
 
-    # === 0. VẼ KHUNG XƯƠNG ĐỘNG 33 ĐIỂM TỰ VẼ (ĐẢM BẢO HIỂN THỊ ĐẦY ĐỦ CẢ HAI CHÂN) ===
-    ve_khung_xuong_custom(frame_output, current_landmarks, active_side=active_side, mau_tong=mau_tong, scale_factor=scale_factor)
+    # === 0. VẼ KHUNG XƯƠNG ĐỘNG 33 ĐIỂM TỰ VẼ ===
+    custom_active_side = "BOTH" if exercise_name == "gay" else ("RIGHT" if exercise_name == "codman" else active_side)
+    ve_khung_xuong_custom(frame_output, current_landmarks, active_side=custom_active_side, mau_tong=mau_tong, scale_factor=scale_factor)
     
     # === 1. VẼ HEADER TRÊN CÙNG (TOP BAR) ===
     header_h = int(35 * scale_factor)
@@ -3577,15 +3597,40 @@ def xu_ly_frame(frame, model, chuan, frame_idx, fps=30, dynamic_chuan=None, acti
     cv2.putText(frame_output, f"Frame #{frame_idx}", (w // 2 - int(50 * scale_factor), int(22 * scale_factor)), cv2.FONT_HERSHEY_SIMPLEX, 0.6 * scale_factor, (255, 255, 255), text_thick)
     
     # === 2. VẼ CUNG TRÒN VÀ SỐ ĐO TẠI KHỚP (JOINT LABELS) ===
-    # Vẽ cung tròn
-    ve_cung_tron_goc(frame_output, pts_vai[0], pts_vai[1], pts_vai[2], goc_vai, mau_vai, radius=int(35 * scale_factor))
-    ve_cung_tron_goc(frame_output, pts_khuyu[0], pts_khuyu[1], pts_khuyu[2], goc_khuyu, mau_khuyu, radius=int(30 * scale_factor))
-    
-    # Vẽ nhãn số đo ngay tại khớp
-    cv2.putText(frame_output, f"{int(goc_vai)}", (pts_vai[1][0] + int(15 * scale_factor), pts_vai[1][1] - int(15 * scale_factor)), 
-                cv2.FONT_HERSHEY_SIMPLEX, font_scale_large, mau_vai, text_thick)
-    cv2.putText(frame_output, f"{int(goc_khuyu)}", (pts_khuyu[1][0] + int(15 * scale_factor), pts_khuyu[1][1] - int(15 * scale_factor)), 
-                cv2.FONT_HERSHEY_SIMPLEX, font_scale_large, mau_khuyu, text_thick)
+    # Vẽ góc và cung tròn tùy thuộc vào bài tập
+    if exercise_name == "gay":
+        # Vẽ cả hai bên (Trái và Phải)
+        # Bên Trái
+        ve_cung_tron_goc(frame_output, hong_t, vai_t, khuyu_t, goc_vai_t, mau_vai_t, radius=int(35 * scale_factor))
+        ve_cung_tron_goc(frame_output, vai_t, khuyu_t, co_tay_t, goc_khuyu_t, mau_khuyu_t, radius=int(30 * scale_factor))
+        cv2.putText(frame_output, f"{int(goc_vai_t)}", (vai_t[0] - int(45 * scale_factor), vai_t[1] - int(15 * scale_factor)), 
+                    cv2.FONT_HERSHEY_SIMPLEX, font_scale_large, mau_vai_t, text_thick)
+        cv2.putText(frame_output, f"{int(goc_khuyu_t)}", (khuyu_t[0] - int(45 * scale_factor), khuyu_t[1] - int(15 * scale_factor)), 
+                    cv2.FONT_HERSHEY_SIMPLEX, font_scale_large, mau_khuyu_t, text_thick)
+        
+        # Bên Phải
+        ve_cung_tron_goc(frame_output, hong_p, vai_p, khuyu_p, goc_vai_p, mau_vai_p, radius=int(35 * scale_factor))
+        ve_cung_tron_goc(frame_output, vai_p, khuyu_p, co_tay_p, goc_khuyu_p, mau_khuyu_p, radius=int(30 * scale_factor))
+        cv2.putText(frame_output, f"{int(goc_vai_p)}", (vai_p[0] + int(15 * scale_factor), vai_p[1] - int(15 * scale_factor)), 
+                    cv2.FONT_HERSHEY_SIMPLEX, font_scale_large, mau_vai_p, text_thick)
+        cv2.putText(frame_output, f"{int(goc_khuyu_p)}", (khuyu_p[0] + int(15 * scale_factor), khuyu_p[1] - int(15 * scale_factor)), 
+                    cv2.FONT_HERSHEY_SIMPLEX, font_scale_large, mau_khuyu_p, text_thick)
+    elif exercise_name == "codman":
+        # Chỉ vẽ bên Phải (Tay tập cố định)
+        ve_cung_tron_goc(frame_output, hong_p, vai_p, khuyu_p, goc_vai_p, mau_vai_p, radius=int(35 * scale_factor))
+        ve_cung_tron_goc(frame_output, vai_p, khuyu_p, co_tay_p, goc_khuyu_p, mau_khuyu_p, radius=int(30 * scale_factor))
+        cv2.putText(frame_output, f"{int(goc_vai_p)}", (vai_p[0] + int(15 * scale_factor), vai_p[1] - int(15 * scale_factor)), 
+                    cv2.FONT_HERSHEY_SIMPLEX, font_scale_large, mau_vai_p, text_thick)
+        cv2.putText(frame_output, f"{int(goc_khuyu_p)}", (khuyu_p[0] + int(15 * scale_factor), khuyu_p[1] - int(15 * scale_factor)), 
+                    cv2.FONT_HERSHEY_SIMPLEX, font_scale_large, mau_khuyu_p, text_thick)
+    else:
+        # Vẽ theo active_side mặc định (cho bài tập khác như Dây kháng lực)
+        ve_cung_tron_goc(frame_output, pts_vai[0], pts_vai[1], pts_vai[2], goc_vai, mau_vai, radius=int(35 * scale_factor))
+        ve_cung_tron_goc(frame_output, pts_khuyu[0], pts_khuyu[1], pts_khuyu[2], goc_khuyu, mau_khuyu, radius=int(30 * scale_factor))
+        cv2.putText(frame_output, f"{int(goc_vai)}", (pts_vai[1][0] + int(15 * scale_factor), pts_vai[1][1] - int(15 * scale_factor)), 
+                    cv2.FONT_HERSHEY_SIMPLEX, font_scale_large, mau_vai, text_thick)
+        cv2.putText(frame_output, f"{int(goc_khuyu)}", (pts_khuyu[1][0] + int(15 * scale_factor), pts_khuyu[1][1] - int(15 * scale_factor)), 
+                    cv2.FONT_HERSHEY_SIMPLEX, font_scale_large, mau_khuyu, text_thick)
     
     # === 3. VẼ BOX THÔNG TIN CHI TIẾT (TOP-LEFT BOX) — MỞ RỘNG 3 GIAI ĐOẠN ===
     box_x, box_y = int(15 * scale_factor), int(50 * scale_factor)
@@ -4107,7 +4152,8 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
                     frame, None, chuan_dynamic, frame_count, fps,
                     dynamic_chuan=dynamic_chuan, active_side=active_side,
                     last_pose_landmarks=None,
-                    precomputed_landmarks=p1_data['landmarks']
+                    precomputed_landmarks=p1_data['landmarks'],
+                    exercise_name=ref_name
                 )
                 
                 if goc_v is not None:
@@ -4152,7 +4198,10 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
             
             d_frame = {
                 'index': frame_count, 'timestamp': time_str, 'path': persistent_frame_path,
-                'goc_vai': goc_v, 'goc_khuyu': goc_k, 'dung': dung,
+                'goc_vai': goc_v, 'goc_khuyu': goc_k,
+                'goc_vai_trai': p1_data.get('goc_vai_left'), 'goc_khuyu_trai': p1_data.get('goc_khuyu_left'),
+                'goc_vai_phai': p1_data.get('goc_vai_right'), 'goc_khuyu_phai': p1_data.get('goc_khuyu_right'),
+                'dung': dung,
                 'gan_dung': eval_info['nearly_correct'] if eval_info else False,
                 'eval_info': eval_info if eval_info else {}
             }
@@ -4160,7 +4209,10 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
             
             row_data = {
                 'frame': frame_count, 'timestamp': time_str, 'timestamp_seconds': ts_frame_goc,
-                'goc_vai': goc_v, 'goc_khuyu': goc_k, 'dung': dung if goc_v is not None else False,
+                'goc_vai': goc_v, 'goc_khuyu': goc_k,
+                'goc_vai_trai': p1_data.get('goc_vai_left'), 'goc_khuyu_trai': p1_data.get('goc_khuyu_left'),
+                'goc_vai_phai': p1_data.get('goc_vai_right'), 'goc_khuyu_phai': p1_data.get('goc_khuyu_right'),
+                'dung': dung if goc_v is not None else False,
                 'gan_dung': eval_info['nearly_correct'] if (eval_info and goc_v is not None) else False,
                 'vai_dung': eval_info['shoulder_correct'] if (eval_info and goc_v is not None) else False,
                 'khuyu_dung': eval_info['elbow_correct'] if (eval_info and goc_v is not None) else False,
