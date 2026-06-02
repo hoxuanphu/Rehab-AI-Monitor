@@ -8640,6 +8640,7 @@ def hien_thi_danh_sach_video_fragment(user_role):
 
                 # Luôn hiển thị video thô bệnh nhân upload ở trang chủ theo yêu cầu của người dùng
                 v_display_path = raw_path
+                final_h264 = get_final_h264_path(v_display_path)
 
                 # Kiểm tra sự tồn tại của file hiển thị cục bộ
                 local_exists = is_valid_local_file(v_display_path)
