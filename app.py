@@ -570,8 +570,6 @@ def render_video(video_path):
 
     # 1. TRƯỜNG HỢP 1: Có sẵn file cục bộ (local)
     if target_path:
-        is_cloud = bool(os.environ.get('HF_SPACE_ID')) or bool(os.environ.get('SPACE_ID')) or (os.name != 'nt' and os.path.exists('/data'))
-        
         # Nếu file raw chưa có H264 và là định dạng không tương thích, thông báo cho người dùng
         if target_path == video_path and is_local_raw and not is_local_h264:
             v_codec = None
@@ -582,59 +580,24 @@ def render_video(video_path):
             if v_codec != 'h264':
                 st.info("🔄 Video đang được nén tối ưu hóa định dạng H.264 dưới nền. Trình phát có thể tải chậm hoặc đen màn hình trong vài giây đầu...")
 
-        if is_cloud:
-            # ─────────────────────────────────────────────────────────────────
-            # CHIẾN LƯỢC PHÁT VIDEO TRÊN CLOUD:
-            # CHỈ SỬ DỤNG ĐỌC BYTES VÀ TRUYỀN VÀO ST.VIDEO
-            # Lý do: Streamlit trên HF Spaces có thể chặn/lỗi khi serve file từ
-            # đường dẫn tuyệt đối /data/ ra public, dẫn đến lỗi màn hình đen 0:00.
-            # Đọc bytes vào RAM giải quyết triệt để 100% lỗi hiển thị.
-            # ─────────────────────────────────────────────────────────────────
-            try:
-                with open(target_path, 'rb') as _vf:
-                    _vbytes = _vf.read()
-                if _vbytes:
-                    st.video(_vbytes, format="video/mp4")
-                    return
-            except Exception as _ve:
-                st.error(f"❌ Không thể đọc video từ hệ thống: {_ve}")
-                return
-
-
-        else:
-            # C. Nếu chạy local (không phải Cloud) -> Dùng HTTP Range Request server
-            video_url = _get_video_server_url(target_path)
-            if video_url:
-                try:
-                    fsize_mb = os.path.getsize(target_path) / (1024 * 1024)
-                    size_label = f'{fsize_mb:.1f} MB'
-                except:
-                    size_label = ''
-                import streamlit.components.v1 as _stcomp
-                _stcomp.html(f"""
-<!DOCTYPE html><html><head>
-<style>
-  body{{margin:0;padding:0;background:transparent;overflow:hidden;}}
-  video{{width:100%;border-radius:8px;display:block;height:240px;background:#000;}}
-</style>
-</head><body>
-<video id="vp" controls preload="metadata">
-  <source src="{video_url}" type="video/mp4">
-  Trình duyệt không hỗ trợ video HTML5.
-</video>
-<div style="color:#888; font-size:0.72rem; margin-top:4px; text-align:right; font-family:sans-serif;">
-  📹 {os.path.basename(target_path)}&nbsp;&nbsp;|&nbsp;&nbsp;💾 {size_label}
-</div>
-</body></html>
-""", height=270)
-                return
-
-        # D. Fallback cuối cùng: Dùng st.video nếu tất cả các phương pháp trên không khả dụng
+        # ─────────────────────────────────────────────────────────────────
+        # CHIẾN LƯỢC PHÁT VIDEO MỚI (ÁP DỤNG CHO CẢ LOCAL VÀ CLOUD):
+        # LUÔN SỬ DỤNG ĐỌC BYTES VÀ TRUYỀN VÀO ST.VIDEO
+        # Lý do: Streamlit (đặc biệt trên Windows/HF Spaces) thường bị lỗi màn 
+        # hình đen 0:00 do không resolve được absolute path thành static file.
+        # Đọc bytes vào RAM giải quyết triệt để 100% lỗi hiển thị, đồng thời
+        # cho phép Streamlit tự quản lý cache và byte-range requests.
+        # ─────────────────────────────────────────────────────────────────
         try:
-            st.video(target_path)
-        except Exception as e:
-            st.error(f'⚠️ Lỗi hiển thị video: {e}')
-        return
+            with open(target_path, 'rb') as _vf:
+                _vbytes = _vf.read()
+            if _vbytes:
+                st.video(_vbytes, format="video/mp4")
+                return
+        except Exception as _ve:
+            st.error(f"❌ Không thể đọc video từ hệ thống: {_ve}")
+            return
+
 
     # 2. TRƯỜNG HỢP 2: Không có sẵn cục bộ -> Stream trực tiếp từ Cloud
     # Đồng thời kích hoạt tải/convert dưới nền
