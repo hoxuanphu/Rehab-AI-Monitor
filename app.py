@@ -350,6 +350,56 @@ def _start_video_http_server():
         def log_message(self, format, *args):
             pass  # tắt log tràn console
 
+        def do_GET(self):
+            import re
+            range_header = self.headers.get('Range')
+            if not range_header:
+                return super().do_GET()
+
+            match = re.match(r'bytes=(\d+)-(\d*)', range_header)
+            if not match:
+                return super().do_GET()
+
+            path = self.translate_path(self.path)
+            if not os.path.isfile(path):
+                return super().do_GET()
+
+            start = int(match.group(1))
+            end_str = match.group(2)
+
+            file_size = os.path.getsize(path)
+            end = int(end_str) if end_str else file_size - 1
+            if start >= file_size:
+                self.send_error(416, "Requested Range Not Satisfiable")
+                return
+
+            if end >= file_size:
+                end = file_size - 1
+
+            content_length = end - start + 1
+
+            try:
+                self.send_response(206)
+                ctype = self.guess_type(path)
+                self.send_header('Content-Type', ctype or 'video/mp4')
+                self.send_header('Content-Range', f'bytes {start}-{end}/{file_size}')
+                self.send_header('Content-Length', str(content_length))
+                self.end_headers()
+
+                with open(path, 'rb') as f:
+                    f.seek(start)
+                    remaining = content_length
+                    buffer_size = 64 * 1024
+                    while remaining > 0:
+                        chunk_size = min(buffer_size, remaining)
+                        chunk = f.read(chunk_size)
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                        remaining -= len(chunk)
+            except Exception:
+                pass
+
         def end_headers(self):
             # Cho phép browser từ bất kỳ origin (Streamlit dùng iframe/cport khác)
             self.send_header('Access-Control-Allow-Origin', '*')
@@ -447,14 +497,12 @@ def render_video(video_path):
                 size_label = f'{fsize_mb:.1f} MB'
             except:
                 size_label = ''
-            fname = os.path.basename(playable_path)
-            # Dùng st.components.v1.html để tránh sandbox restriction của st.markdown
             import streamlit.components.v1 as _stcomp
             _stcomp.html(f"""
 <!DOCTYPE html><html><head>
 <style>
-  body{{margin:0;padding:0;background:transparent;}}
-  video{{width:100%;border-radius:8px;display:block;max-height:400px;background:#000;}}
+  body{{margin:0;padding:0;background:transparent;overflow:hidden;}}
+  video{{width:100%;border-radius:8px;display:block;height:240px;background:#000;}}
   .info{{color:#888;font-size:11px;text-align:right;padding:3px 0;}}
 </style>
 </head><body>
@@ -462,10 +510,10 @@ def render_video(video_path):
   <source src="{video_url}" type="video/mp4">
   Trình duyệt không hỗ trợ video HTML5.
 </video>
-<div style="color:#888; font-size:0.75rem; margin-top:4px; text-align:right;">
-  📹 {os.path.basename(playable_path)}  |  💾 {size_label}
+<div style="color:#888; font-size:0.72rem; margin-top:4px; text-align:right; font-family:sans-serif;">
+  📹 {os.path.basename(playable_path)}&nbsp;&nbsp;|&nbsp;&nbsp;💾 {size_label}
 </div>
-""", unsafe_allow_html=True)
+""", height=270)
             return
 
     # Fallback cho Cloud hoặc khi server chưa khởi động kịp
