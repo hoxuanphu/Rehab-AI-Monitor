@@ -32,6 +32,19 @@ import hashlib
 import gc
 
 
+def get_clean_rel_path(path):
+    """Lấy đường dẫn tương đối sạch của file đối với DATA_DIR, 
+    độc lập với hệ điều hành và việc path là tuyệt đối hay tương đối."""
+    if not path:
+        return ""
+    p = path.replace("\\", "/")
+    for folder in ["patient_uploads", "processed_results"]:
+        idx = p.find(folder)
+        if idx != -1:
+            return p[idx:]
+    return os.path.basename(path)
+
+
 # --- OPTIMIZED CACHING FOR FASTER PAGE LOADS ---
 @st.cache_data(show_spinner=False)
 def _check_video_valid_cached(path, mtime, size):
@@ -508,7 +521,7 @@ def render_video(video_path):
         
         if HF_TOKEN and HF_DATASET_ID:
             try:
-                rel_path = os.path.relpath(video_path, DATA_DIR).replace("\\", "/")
+                rel_path = get_clean_rel_path(video_path)
                 # Thử stream file H264 từ Cloud nếu đã được đồng bộ lên đó trước đó
                 rel_path_f = rel_path.replace('.mp4', '_f.mp4').replace('.mov', '_f.mp4').replace('.MOV', '_f.mp4').replace('.avi', '_f.mp4').replace('.mkv', '_f.mp4')
                 
@@ -966,8 +979,7 @@ def push_file_to_hf_async(local_path):
         try:
             from huggingface_hub import HfApi
             api = HfApi(token=HF_TOKEN)
-            rel_path = os.path.relpath(local_path, DATA_DIR)
-            rel_path = rel_path.replace("\\", "/") # Chuẩn hóa dạng Unix
+            rel_path = get_clean_rel_path(local_path)
             
             if os.path.exists(local_path):
                 api.upload_file(
@@ -1008,7 +1020,7 @@ def ensure_local_file(file_path):
         
     if HF_TOKEN and HF_DATASET_ID:
         try:
-            rel_path = os.path.relpath(file_path, DATA_DIR).replace("\\", "/")
+            rel_path = get_clean_rel_path(file_path)
             from huggingface_hub import hf_hub_download
             hf_hub_download(
                 repo_id=HF_DATASET_ID,
