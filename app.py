@@ -3910,7 +3910,7 @@ def dong_bo_va_chuan_hoa_exercise(username, video_name, video_path, original_exe
         
     return correct_ex_name
 
-def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaPipe Heavy", min_confidence=0.5, exercise_name="codman"):
+def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaPipe Heavy", min_confidence=0.5, exercise_name="codman", skip_step=None, resize_width=None):
     import gc
     import json
     import os
@@ -3978,6 +3978,9 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
     fps = int(cap.get(cv2.CAP_PROP_FPS)) or 30
     fps_export = max(10, fps // 2) # BẬT LẠI LÀM CHẬM 0.5X (SLOW MOTION)
     tong_frame = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    if tong_frame <= 0:
+        print(f"[AI Process] Cảnh báo: CAP_PROP_FRAME_COUNT trả về {tong_frame}. Thiết lập dự đoán là 1000 frames.")
+        tong_frame = 1000
     if MAX_FRAMES and tong_frame > MAX_FRAMES: tong_frame = MAX_FRAMES
     
     w_cap = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -4010,9 +4013,13 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
     last_audio_time = -10.0
     last_pose_landmarks = None
     
-    # Lấy giá trị skip và resolution từ session_state nếu có (NCV chỉnh), nếu không dùng mặc định
-    skip_step = st.session_state.get('ncv_skip_frames', SKIP_FRAMES)
-    resize_width = st.session_state.get('ncv_resize_width', RESIZE_WIDTH)
+    # Lấy giá trị skip và resolution từ tham số hoặc session_state
+    if skip_step is None:
+        try: skip_step = st.session_state.get('ncv_skip_frames', SKIP_FRAMES)
+        except: skip_step = SKIP_FRAMES
+    if resize_width is None:
+        try: resize_width = st.session_state.get('ncv_resize_width', RESIZE_WIDTH)
+        except: resize_width = RESIZE_WIDTH
 
     # Tự động phát hiện bên tay tập chủ đạo (LEFT hoặc RIGHT) để tránh nhảy bên gây lỗi trích xuất
     # Riêng bài tập Codman, cố định tay tập chủ đạo là tay phải (RIGHT) theo yêu cầu chuyên môn
@@ -4090,8 +4097,12 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
             })
             
             if callback and tong_frame > 0:
+                if frame_count > tong_frame:
+                    tong_frame = frame_count + 100
                 prog = min(frame_count / tong_frame, 1.0) * 0.5
                 callback(prog)
+                if frame_count % 100 == 1 or frame_count == tong_frame:
+                    print(f"[AI Process] Pass 1: Frame {frame_count}/{tong_frame} (Tiến độ: {prog*100:.1f}%)")
                 
             if processed_count % 50 == 0:
                 gc.collect()
@@ -4281,8 +4292,11 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
             du_lieu_goc.append(row_data)
             
             if callback and tong_frame > 0:
-                prog = 0.5 + min(processed_count / len(raw_pass1_data), 1.0) * 0.5
+                p_len = len(raw_pass1_data)
+                prog = 0.5 + (min(processed_count / p_len, 1.0) * 0.5 if p_len > 0 else 0.5)
                 callback(prog)
+                if processed_count % 100 == 1 or processed_count == p_len:
+                    print(f"[AI Process] Pass 2: Frame {processed_count}/{p_len} (Tiến độ: {prog*100:.1f}%)")
                 
             if processed_count % 50 == 0:
                 gc.collect()
@@ -4716,7 +4730,9 @@ def bat_dau_phan_tich_background(
     giai_doan,
     model_type,
     confidence,
-    temp_uploaded_path=None
+    temp_uploaded_path=None,
+    skip_step=None,
+    resize_width=None
 ):
     """Khởi chạy tiến trình phân tích video dưới background thread"""
     p_file = get_progress_file(video_path)
@@ -4828,7 +4844,8 @@ def bat_dau_phan_tich_background(
             output_path, ref_name_detected, _, angle_data, total_frames, valid_frames, temp_folder, zip_data, frame_paths, _, all_frames_data, all_warnings = xu_ly_video_day_du(
                 video_path, bt_chuan_ncv, bg_progress_callback,
                 model_type=model_type, min_confidence=confidence,
-                exercise_name=exercise_name
+                exercise_name=exercise_name,
+                skip_step=skip_step, resize_width=resize_width
             )
             
             elap = time.time() - start_t
@@ -6570,7 +6587,9 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
                                 exercise_name=v['exercise'],
                                 giai_doan=ncv_gd,
                                 model_type=st.session_state.get('ncv_model_type', 'MediaPipe Heavy'),
-                                confidence=st.session_state.get('ncv_confidence', 0.5)
+                                confidence=st.session_state.get('ncv_confidence', 0.5),
+                                skip_step=st.session_state.get('ncv_skip_frames', 0),
+                                resize_width=st.session_state.get('ncv_resize_width', 720)
                             )
                             st.toast("🚀 Đã khởi chạy phân tích dưới nền thành công!", icon="⚡")
                             time.sleep(0.5)
@@ -10760,7 +10779,9 @@ def main():
                                         giai_doan=ncv_gd,
                                         model_type=model_type_ncv,
                                         confidence=conf_ncv,
-                                        temp_uploaded_path=temp_uploaded_path
+                                        temp_uploaded_path=temp_uploaded_path,
+                                        skip_step=st.session_state.get('ncv_skip_frames', 0),
+                                        resize_width=st.session_state.get('ncv_resize_width', 720)
                                     )
                                     st.toast("🚀 Đã tải video lên và bắt đầu xử lý AI trong nền!", icon="⚡")
                                     time.sleep(0.5)
