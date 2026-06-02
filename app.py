@@ -175,9 +175,16 @@ def _get_playable_path_fast(video_path, mtime, size):
     # 4. Chưa biết codec hoặc cần convert → báo là cần gọi ensure_playable_video
     return None  # None = cần xử lý đầy đủ
 
+import threading
+
+if '_transcoding_jobs' not in globals():
+    _transcoding_jobs = set()
+if '_transcoding_lock' not in globals():
+    _transcoding_lock = threading.Lock()
+
 def ensure_playable_video(video_path):
     """Đảm bảo video có định dạng H.264 mượt mà (đuôi _f.mp4) để chơi được trên trình duyệt.
-    Nếu file _f.mp4 chưa có hoặc bị lỗi (0 byte, quá nhỏ), tự động chuyển đổi từ file gốc cực nhanh."""
+    Nếu file _f.mp4 chưa có hoặc bị lỗi (0 byte, quá nhỏ), tự động chuyển đổi từ file gốc dưới nền (không block UI)."""
     if not video_path:
         return video_path
         
@@ -232,10 +239,13 @@ def ensure_playable_video(video_path):
 
     # KIỂM TRA CODEC: Nếu đã là H.264 và đuôi là .mp4, cho phép phát trực tiếp không cần convert
     if video_path.endswith('.mp4') and not video_path.endswith('_f.mp4'):
-        v_codec, _ = get_video_codec(video_path)
-        if v_codec == 'h264':
-            print(f"[Playable Check] Video {video_path} đã ở định dạng H.264, phát trực tiếp.")
-            return video_path
+        try:
+            v_codec, _ = get_video_codec(video_path)
+            if v_codec == 'h264':
+                print(f"[Playable Check] Video {video_path} đã ở định dạng H.264, phát trực tiếp.")
+                return video_path
+        except:
+            pass
 
     final_h264 = video_path.replace('.mp4', '_f.mp4').replace('.mov', '_f.mp4').replace('.MOV', '_f.mp4').replace('.avi', '_f.mp4').replace('.mkv', '_f.mp4')
     
@@ -252,74 +262,78 @@ def ensure_playable_video(video_path):
     if is_valid_h264:
         return final_h264
         
-    # Nếu tồn tại nhưng không hợp lệ (không đọc được), xóa đi để ép convert lại từ đầu
-    if os.path.exists(final_h264):
-        try: os.remove(final_h264)
-        except: pass
-        
-    if os.path.exists(final_h264):
-        try: os.remove(final_h264)
-        except: pass
-        
-    v_codec, a_codec = get_video_codec(video_path)
-    cmd = [
-        'ffmpeg', '-y', 
-        '-i', video_path,
-        '-vcodec', 'libx264', 
-        '-pix_fmt', 'yuv420p', 
-        '-preset', 'ultrafast', 
-        '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', 
-        '-crf', '28', 
-        '-maxrate', '800k', 
-        '-bufsize', '1600k',
-        '-movflags', '+faststart',
-        '-threads', '0',
-    ]
-    if a_codec:
-        cmd.extend(['-c:a', 'aac'])
-    else:
-        cmd.extend(['-an'])
-    cmd.append(final_h264)
-    try:
-        print(f"[Auto-Heal Video] Đang convert {video_path} sang H.264...")
-        st.toast(f"🔄 Đang tối ưu hóa định dạng video H.264 để phát mượt mà trên trình duyệt...", icon="🎬")
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=180)
-        if result.returncode != 0:
-            print("[Auto-Heal Video] FFmpeg failed with exit code", result.returncode)
-            print("[Auto-Heal Video] FFmpeg stderr:", result.stderr)
+    # Khởi chạy convert dưới nền nếu chưa chạy
+    with _transcoding_lock:
+        if final_h264 in _transcoding_jobs:
+            return video_path  # Trả về tạm video gốc trong khi convert
+        _transcoding_jobs.add(final_h264)
+
+    def _run_transcode():
+        try:
+            # Nếu tồn tại nhưng không hợp lệ (không đọc được), xóa đi để ép convert lại từ đầu
             if os.path.exists(final_h264):
                 try: os.remove(final_h264)
                 except: pass
-            return video_path
+                
+            v_codec, a_codec = get_video_codec(video_path)
+            cmd = [
+                'ffmpeg', '-y', 
+                '-i', video_path,
+                '-vcodec', 'libx264', 
+                '-pix_fmt', 'yuv420p', 
+                '-preset', 'ultrafast', 
+                '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', 
+                '-crf', '28', 
+                '-maxrate', '800k', 
+                '-bufsize', '1600k',
+                '-movflags', '+faststart',
+                '-threads', '0',
+            ]
+            if a_codec:
+                cmd.extend(['-c:a', 'aac'])
+            else:
+                cmd.extend(['-an'])
+            cmd.append(final_h264)
             
-        if os.path.exists(final_h264) and os.path.getsize(final_h264) > 5 * 1024:
-            print(f"[Auto-Heal Video] Đã convert thành công sang {final_h264}")
-            try:
-                video_list = load_data(VIDEOS_FILE)
-                updated = False
-                for vid in video_list:
-                    if vid.get('processed_path') == video_path:
-                        vid['processed_path'] = final_h264
-                        updated = True
-                    elif vid.get('video_path') == video_path:
-                        vid['video_path'] = final_h264
-                        updated = True
-                if updated:
-                    save_data(VIDEOS_FILE, video_list)
-                    print("[Auto-Heal Video] Đã cập nhật database video_list.json")
-            except Exception as db_err:
-                print(f"[Auto-Heal Video] Lỗi cập nhật database: {db_err}")
+            print(f"[Auto-Heal Video] Đang convert {video_path} sang H.264 dưới nền...")
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=300)
+            if result.returncode != 0:
+                print("[Auto-Heal Video] FFmpeg failed with exit code", result.returncode)
+                print("[Auto-Heal Video] FFmpeg stderr:", result.stderr)
+                if os.path.exists(final_h264):
+                    try: os.remove(final_h264)
+                    except: pass
+                return
                 
-            if st.session_state.get('processed_video_path') == video_path:
-                st.session_state.processed_video_path = final_h264
-                
-            push_file_to_hf_async(final_h264)
-            return final_h264
-    except Exception as e:
-        print(f"[Auto-Heal Video] Lỗi convert video: {e}")
-        if os.path.exists(final_h264):
-            try: os.remove(final_h264)
-            except: pass
+            if os.path.exists(final_h264) and os.path.getsize(final_h264) > 5 * 1024:
+                print(f"[Auto-Heal Video] Đã convert thành công sang {final_h264}")
+                try:
+                    video_list = load_data(VIDEOS_FILE)
+                    updated = False
+                    for vid in video_list:
+                        if vid.get('processed_path') == video_path:
+                            vid['processed_path'] = final_h264
+                            updated = True
+                        elif vid.get('video_path') == video_path:
+                            vid['video_path'] = final_h264
+                            updated = True
+                    if updated:
+                        save_data(VIDEOS_FILE, video_list)
+                        print("[Auto-Heal Video] Đã cập nhật database video_list.json")
+                except Exception as db_err:
+                    print(f"[Auto-Heal Video] Lỗi cập nhật database: {db_err}")
+                    
+                push_file_to_hf_async(final_h264)
+        except Exception as e:
+            print(f"[Auto-Heal Video] Lỗi convert video: {e}")
+            if os.path.exists(final_h264):
+                try: os.remove(final_h264)
+                except: pass
+        finally:
+            with _transcoding_lock:
+                _transcoding_jobs.discard(final_h264)
+
+    threading.Thread(target=_run_transcode, daemon=True).start()
     return video_path
         
     return video_path
@@ -457,6 +471,14 @@ def render_video(video_path):
     if not video_path:
         st.error("❌ File video không tồn tại hoặc đường dẫn trống.")
         return
+
+    # Hiển thị thông báo nếu hệ thống đang tối ưu hóa định dạng ở nền
+    try:
+        final_h264 = video_path.replace('.mp4', '_f.mp4').replace('.mov', '_f.mp4').replace('.MOV', '_f.mp4').replace('.avi', '_f.mp4').replace('.mkv', '_f.mp4')
+        if '_transcoding_jobs' in globals() and final_h264 in _transcoding_jobs:
+            st.info("🔄 Hệ thống đang nén và tối ưu hóa định dạng video H.264 dưới nền để phát mượt mà trên trình duyệt. Vui lòng chờ 1-2 phút và tải lại trang...")
+    except:
+        pass
 
     # URL trực tiếp (YouTube, HF, ...)
     if isinstance(video_path, str) and (video_path.startswith('http://') or video_path.startswith('https://')):
