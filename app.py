@@ -44,6 +44,17 @@ def get_clean_rel_path(path):
             return p[idx:]
     return os.path.basename(path)
 
+def get_final_h264_path(video_path):
+    """Trả về đường dẫn tệp H264 đích (_f.mp4) tương ứng một cách chuẩn xác, độc lập với định dạng/cú pháp phần mở rộng gốc."""
+    if not video_path:
+        return ""
+    if video_path.endswith('_f.mp4'):
+        return video_path
+    base, _ = os.path.splitext(video_path)
+    if base.endswith('_f'):
+        return base + ".mp4"
+    return base + "_f.mp4"
+
 
 # --- OPTIMIZED CACHING FOR FASTER PAGE LOADS ---
 @st.cache_data(show_spinner=False)
@@ -177,12 +188,7 @@ def _get_playable_path_fast(video_path, mtime, size):
     if video_path.endswith('_f.mp4') and os.path.exists(video_path) and size >= 5 * 1024:
         return video_path
     # 2. Kiểm tra file _f.mp4 tương ứng có tồn tại hợp lệ không
-    final_h264 = (video_path
-        .replace('.mp4', '_f.mp4')
-        .replace('.mov', '_f.mp4')
-        .replace('.MOV', '_f.mp4')
-        .replace('.avi', '_f.mp4')
-        .replace('.mkv', '_f.mp4'))
+    final_h264 = get_final_h264_path(video_path)
     if os.path.exists(final_h264):
         try:
             if os.path.getsize(final_h264) >= 5 * 1024:
@@ -211,7 +217,7 @@ def ensure_playable_video(video_path):
         return video_path
         
     # Xác định file H264 đích mong muốn
-    final_h264 = video_path.replace('.mp4', '_f.mp4').replace('.mov', '_f.mp4').replace('.MOV', '_f.mp4').replace('.avi', '_f.mp4').replace('.mkv', '_f.mp4')
+    final_h264 = get_final_h264_path(video_path)
 
     # Nếu video_path đã là file H264 transcode và tồn tại hợp lệ cục bộ → dùng ngay
     if video_path.endswith('_f.mp4'):
@@ -485,7 +491,7 @@ def render_video(video_path):
 
     # Hiển thị thông báo nếu hệ thống đang tối ưu hóa định dạng ở nền
     try:
-        final_h264 = video_path.replace('.mp4', '_f.mp4').replace('.mov', '_f.mp4').replace('.MOV', '_f.mp4').replace('.avi', '_f.mp4').replace('.mkv', '_f.mp4')
+        final_h264 = get_final_h264_path(video_path)
         if '_transcoding_jobs' in globals() and final_h264 in _transcoding_jobs:
             st.info("🔄 Hệ thống đang nén và tối ưu hóa định dạng video H.264 dưới nền để phát mượt mà trên trình duyệt. Vui lòng chờ 1-2 phút và tải lại trang...")
     except:
@@ -513,7 +519,7 @@ def render_video(video_path):
         return
 
     # Bước 1: Kiểm tra xem file H264 có sẵn local không
-    final_h264 = video_path.replace('.mp4', '_f.mp4').replace('.mov', '_f.mp4').replace('.MOV', '_f.mp4').replace('.avi', '_f.mp4').replace('.mkv', '_f.mp4')
+    final_h264 = get_final_h264_path(video_path)
     is_local_h264 = os.path.exists(final_h264) and os.path.getsize(final_h264) >= 5 * 1024
     is_local_raw = os.path.exists(video_path) and os.path.getsize(video_path) >= 5 * 1024
 
@@ -8750,6 +8756,30 @@ def hien_thi_danh_sach_video_fragment(user_role):
                                     st.write(f"**Độ chính xác AI:** {acc_text}")
                                 
                             st.write(f"**Trạng thái:** {v['status']}")
+                            
+                            # Khối chẩn đoán thông tin file (chỉ hiển thị cho bác sĩ/NCV để debug)
+                            if user_role in ["Bác sĩ / KTV PHCN", "Nghiên cứu viên"]:
+                                with st.popover("🔍 Kiểm tra tệp tin (Debug)"):
+                                    st.markdown(f"**Tệp hiển thị:** `{v_display_path}`")
+                                    st.write(f"- Tồn tại cục bộ: {'✅ Có' if local_exists else '❌ Không'}")
+                                    if os.path.exists(v_display_path):
+                                        st.write(f"- Kích thước tệp: `{os.path.getsize(v_display_path)/(1024*1024):.2f} MB`")
+                                    
+                                    st.markdown(f"**Tệp nén H.264:** `{final_h264}`")
+                                    h264_exists = os.path.exists(final_h264) and os.path.getsize(final_h264) >= 5 * 1024
+                                    st.write(f"- Tồn tại cục bộ: {'✅ Có' if h264_exists else '❌ Không'}")
+                                    if os.path.exists(final_h264):
+                                        st.write(f"- Kích thước tệp: `{os.path.getsize(final_h264)/(1024*1024):.2f} MB`")
+                                        
+                                    st.markdown("**Trạng thái Cloud:**")
+                                    if HF_TOKEN and HF_DATASET_ID:
+                                        rel_path = get_clean_rel_path(v_display_path)
+                                        import urllib.parse
+                                        rel_path_encoded = urllib.parse.quote(rel_path, safe='/')
+                                        cloud_url = f"https://huggingface.co/datasets/{HF_DATASET_ID}/resolve/main/{rel_path_encoded}?token={HF_TOKEN}"
+                                        st.write(f"- URL: `{cloud_url}`")
+                                    else:
+                                        st.write("- Chưa cấu hình Cloud Dataset.")
                             
                             # HIỂN THỊ ĐÁNH GIÁ CỦA BÁC SĨ (GROUND TRUTH) CHO NCV
                             if doc_eval:
