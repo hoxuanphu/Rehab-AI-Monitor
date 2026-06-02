@@ -3397,14 +3397,18 @@ def xu_ly_frame(frame, model, chuan, frame_idx, fps=30, dynamic_chuan=None, acti
     if precomputed_landmarks is not None:
         current_landmarks = precomputed_landmarks
     else:
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        # 2. AI XỬ LÝ TRỰC TIẾP TRÊN FRAME GỐC
-        ket_qua = model.process(rgb) if model else None
+        # Tối ưu hóa MediaPipe: Downsample xuống độ phân giải thấp (360px) để model xử lý cực nhanh
+        small_w = 360
+        small_h = int(h * (360 / w))
+        frame_small = cv2.resize(frame, (small_w, small_h), interpolation=cv2.INTER_LINEAR)
+        rgb_small = cv2.cvtColor(frame_small, cv2.COLOR_BGR2RGB)
+        # 2. AI XỬ LÝ TRÊN FRAME NHỎ
+        ket_qua = model.process(rgb_small) if model else None
         if ket_qua and ket_qua.pose_landmarks:
             current_landmarks = ket_qua.pose_landmarks
         elif last_pose_landmarks:
             current_landmarks = last_pose_landmarks
-        del rgb
+        del rgb_small
         del ket_qua
         
     if not current_landmarks:
@@ -4049,8 +4053,12 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
                     frame = cv2.resize(frame, (resize_width, new_h), interpolation=cv2.INTER_LINEAR)
             
             h, w = frame.shape[:2]
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            ket_qua = model.process(rgb)
+            # Tối ưu hóa MediaPipe: Downsample xuống độ phân giải thấp (360px) để model xử lý cực nhanh
+            small_w = 360
+            small_h = int(h * (360 / w))
+            frame_small = cv2.resize(frame, (small_w, small_h), interpolation=cv2.INTER_LINEAR)
+            rgb_small = cv2.cvtColor(frame_small, cv2.COLOR_BGR2RGB)
+            ket_qua = model.process(rgb_small)
             
             current_landmarks = None
             if ket_qua and ket_qua.pose_landmarks:
