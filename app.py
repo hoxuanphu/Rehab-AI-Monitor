@@ -3896,7 +3896,10 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
     timestamp = int(time.time())
     out_path = os.path.join(PROCESSED_DIR, f'processed_{timestamp}.mp4')
     thu_muc_frame = os.path.join(PROCESSED_DIR, f'processed_{timestamp}_frames')
-    os.makedirs(thu_muc_frame, exist_ok=True)
+    
+    # Tạo thư mục tạm cục bộ để lưu trữ các khung hình (cực nhanh trên SSD/RAM)
+    import tempfile
+    local_temp_dir = tempfile.mkdtemp(prefix=f"frames_processed_{timestamp}_")
     
     from concurrent.futures import ThreadPoolExecutor
     img_writer_executor = ThreadPoolExecutor(max_workers=4)
@@ -4133,13 +4136,14 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
                 
             writer.write(xu_ly)
             
-            frame_path = os.path.join(thu_muc_frame, f"f_{processed_count:06d}.jpg")
-            # Ghi ảnh bất đồng bộ để tránh nghẽn I/O đĩa
+            persistent_frame_path = os.path.join(thu_muc_frame, f"f_{processed_count:06d}.jpg")
+            local_frame_path = os.path.join(local_temp_dir, f"f_{processed_count:06d}.jpg")
+            # Ghi ảnh bất đồng bộ vào thư mục tạm cục bộ (cực nhanh)
             try:
-                img_writer_executor.submit(cv2.imwrite, frame_path, xu_ly.copy(), [cv2.IMWRITE_JPEG_QUALITY, 85])
+                img_writer_executor.submit(cv2.imwrite, local_frame_path, xu_ly.copy(), [cv2.IMWRITE_JPEG_QUALITY, 85])
             except Exception as write_err:
                 print("Lỗi submit ghi ảnh:", write_err)
-            danh_sach_frame_paths.append(frame_path)
+            danh_sach_frame_paths.append(persistent_frame_path)
             
             ts_frame_goc = frame_count / fps
             time_str = f"{int(ts_frame_goc // 60):02d}:{int(ts_frame_goc % 60):02d}"
@@ -4147,7 +4151,7 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
             if warnings_list: all_warnings.extend(warnings_list)
             
             d_frame = {
-                'index': frame_count, 'timestamp': time_str, 'path': frame_path,
+                'index': frame_count, 'timestamp': time_str, 'path': persistent_frame_path,
                 'goc_vai': goc_v, 'goc_khuyu': goc_k, 'dung': dung,
                 'gan_dung': eval_info['nearly_correct'] if eval_info else False,
                 'eval_info': eval_info if eval_info else {}
@@ -4262,9 +4266,10 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
         import zipfile
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=1) as z:
             for f_data in danh_sach_frame_data:
-                f_path = get_local_frame_path(f_data.get('path'))
-                if f_path and os.path.exists(f_path):
-                    z.write(f_path, os.path.basename(f_path))
+                f_name = os.path.basename(f_data.get('path'))
+                local_f_path = os.path.join(local_temp_dir, f_name)
+                if os.path.exists(local_f_path):
+                    z.write(local_f_path, f_name)
     except Exception as e:
         print(f"Lỗi tự động tạo file ZIP frames: {e}")
         zip_path = None
@@ -4308,6 +4313,15 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
     
     gc.collect()
     valid_count = sum(1 for row in du_lieu_goc if row['goc_vai'] is not None)
+    
+    # Dọn dẹp thư mục tạm chứa các frame cục bộ để giải phóng dung lượng đĩa
+    if 'local_temp_dir' in locals() and local_temp_dir and os.path.exists(local_temp_dir):
+        try:
+            import shutil
+            shutil.rmtree(local_temp_dir, ignore_errors=True)
+        except Exception as cleanup_err:
+            print(f"Lỗi dọn dẹp thư mục tạm frames: {cleanup_err}")
+            
     return final_video_path, ref_name, None, du_lieu_goc, frame_count, valid_count, thu_muc_frame, zip_path, danh_sach_frame_paths, {}, json_path, all_warnings
 
 def recalc_metrics(df, ss):
@@ -7719,6 +7733,8 @@ def cut_video_segments(input_path, n1, n2, total_frames, fps_export=15):
     import subprocess
     import os
     
+    input_path = get_local_frame_path(input_path)
+    
     g1_path = input_path.replace('.mp4', '_g1.mp4')
     g2_path = input_path.replace('.mp4', '_g2.mp4')
     g3_path = input_path.replace('.mp4', '_g3.mp4')
@@ -7788,17 +7804,18 @@ def hien_thi_frames_day_du(key_suffix=""):
     """Hiển thị frames với Streamlit Fragment (Chỉ load lại vùng này, cực nhanh)"""
     user_role = st.session_state.user_info.get('role')
 
-    if not st.session_state.get('all_frames_data_path'):
+    all_frames_data_path = get_local_frame_path(st.session_state.get('all_frames_data_path'))
+    if not all_frames_data_path:
         st.info("📭 Không có dữ liệu khung hình để hiển thị.")
         return
 
-    ensure_local_file(st.session_state.all_frames_data_path)
+    ensure_local_file(all_frames_data_path)
 
-    if not os.path.exists(st.session_state.all_frames_data_path):
+    if not os.path.exists(all_frames_data_path):
         st.info("📭 Không có dữ liệu khung hình để hiển thị.")
         return
 
-    all_frames_data = load_all_frames_data_cached(st.session_state.all_frames_data_path)
+    all_frames_data = load_all_frames_data_cached(all_frames_data_path)
 
     total_frames = len(all_frames_data)
     if total_frames == 0:
@@ -7820,11 +7837,12 @@ def hien_thi_frames_day_du(key_suffix=""):
     acc_g1 = metrics_g1.get('do_chinh_xac', 0.0) if isinstance(metrics_g1, dict) else 0.0
     acc_g2 = metrics_g2.get('do_chinh_xac', 0.0) if isinstance(metrics_g2, dict) else 0.0
     acc_g3 = metrics_g3.get('do_chinh_xac', 0.0) if isinstance(metrics_g3, dict) else 0.0
-    processed_video_path = st.session_state.get('processed_video_path')
+    processed_video_path = get_local_frame_path(st.session_state.get('processed_video_path'))
     if processed_video_path:
         ensure_local_file(processed_video_path)
-        check_and_extract_frames_zip(processed_video_path)
-    frames_zip = st.session_state.get('frames_zip')
+        # Bỏ giải nén toàn bộ ZIP để tránh lag và đĩa đầy trên Cloud, ta sẽ đọc in-memory khi render
+        # check_and_extract_frames_zip(processed_video_path)
+    frames_zip = get_local_frame_path(st.session_state.get('frames_zip'))
     has_video = bool(processed_video_path and os.path.exists(processed_video_path))
 
     # 0. HIỂN THỊ VIDEO ĐÃ PHÂN TÍCH
@@ -8208,7 +8226,23 @@ def hien_thi_frames_day_du(key_suffix=""):
         page_inds = indices_list[s_idx:e_idx]
 
         # Tối ưu hóa: Phục hồi ảnh bị thiếu hoặc lỗi (LFS pointer hoặc size < 5KB) bằng cách mở video
+        # Nếu đã có file ZIP, ta coi như ảnh khả dụng (vì hệ thống sẽ đọc trực tiếp từ ZIP mà không cần lưu ổ cứng)
+        has_zip = False
+        zip_path_for_check = ""
+        if processed_video_path:
+            zip_path_for_check = get_local_frame_path(processed_video_path.replace('.mp4', '_frames.zip'))
+            has_zip = os.path.exists(zip_path_for_check)
+
         def _is_image_missing_or_invalid(img_p):
+            if has_zip:
+                try:
+                    import zipfile
+                    f_name = os.path.basename(img_p)
+                    with zipfile.ZipFile(zip_path_for_check, 'r') as z:
+                        if f_name in z.namelist():
+                            return False
+                except:
+                    pass
             if not img_p or not os.path.exists(img_p):
                 return True
             try:
@@ -8263,14 +8297,27 @@ def hien_thi_frames_day_du(key_suffix=""):
             diff_v = abs(gv - cv_ref)
             diff_k = abs(gk - ck_ref)
 
-            # Lấy base64 của ảnh để vẽ HTML tùy chỉnh có hỗ trợ hover zoom
+            # Lấy base64 của ảnh để vẽ HTML tùy chỉnh có hỗ trợ hover zoom (ưu tiên đọc trực tiếp trên đĩa SSD)
             b64_data = ""
-            if f_path and os.path.exists(f_path):
+            if f_path and os.path.exists(f_path) and os.path.getsize(f_path) >= 5 * 1024:
                 try:
                     with open(f_path, "rb") as img_file:
                         b64_data = base64.b64encode(img_file.read()).decode("utf-8")
                 except:
                     pass
+            
+            # Nếu không tìm thấy file ảnh lẻ, đọc trực tiếp từ ZIP file (in-memory) để tránh giải nén chậm
+            if not b64_data and processed_video_path:
+                zip_path = get_local_frame_path(processed_video_path.replace('.mp4', '_frames.zip'))
+                if zip_path and os.path.exists(zip_path):
+                    try:
+                        import zipfile
+                        f_name = os.path.basename(f_path)
+                        with zipfile.ZipFile(zip_path, 'r') as z:
+                            if f_name in z.namelist():
+                                b64_data = base64.b64encode(z.read(f_name)).decode("utf-8")
+                    except Exception as zip_read_err:
+                        print(f"Lỗi đọc frame {f_name} từ ZIP: {zip_read_err}")
             
             with col_target:
                 if b64_data:
