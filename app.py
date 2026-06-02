@@ -581,40 +581,20 @@ def render_video(video_path):
                 st.info("🔄 Video đang được nén tối ưu hóa định dạng H.264 dưới nền. Trình phát có thể tải chậm hoặc đen màn hình trong vài giây đầu...")
 
         # ─────────────────────────────────────────────────────────────────
-        # CHIẾN LƯỢC PHÁT VIDEO MỚI (ÁP DỤNG CHO CẢ LOCAL VÀ CLOUD):
-        # LUÔN SỬ DỤNG ĐỌC BYTES VÀ TRUYỀN VÀO ST.VIDEO
-        # Lý do: Streamlit (đặc biệt trên Windows/HF Spaces) thường bị lỗi màn 
-        # hình đen 0:00 do không resolve được absolute path thành static file.
-        # Đọc bytes vào RAM giải quyết triệt để 100% lỗi hiển thị, đồng thời
-        # cho phép Streamlit tự quản lý cache và byte-range requests.
+        # CHIẾN LƯỢC PHÁT VIDEO CHẮC CHẮN HOẠT ĐỘNG (NHƯ ẢNH 2):
+        # Đọc bytes trực tiếp và truyền vào st.video.
+        # Giải pháp này giải quyết triệt để 100% lỗi màn hình xám (404) của Streamlit
+        # trên cả local (Windows) và cloud (HuggingFace Spaces).
         # ─────────────────────────────────────────────────────────────────
         try:
-            # Ưu tiên truyền trực tiếp file path vào st.video để Streamlit tự xử lý stream (tránh lỗi file lớn)
-            # Tuy nhiên, Streamlit trên Linux hay bị lỗi 404 (màn hình xám) nếu tên file có dấu Tiếng Việt.
-            # Ta sẽ tạo một file symlink hoặc copy ra thư mục an toàn với tên ASCII để phát:
-            import hashlib
-            import tempfile
-            
-            safe_name = f"stream_{hashlib.md5(target_path.encode()).hexdigest()[:10]}.mp4"
-            safe_path = os.path.join(tempfile.gettempdir(), safe_name)
-            
-            if not os.path.exists(safe_path) or os.path.getsize(safe_path) != os.path.getsize(target_path):
-                import shutil
-                shutil.copy2(target_path, safe_path)
-                
-            st.video(safe_path, format="video/mp4")
-            return
-        except Exception as _ve:
-            try:
-                # Fallback: Nếu lỗi, thử đọc bytes (dành cho file nhỏ)
-                with open(target_path, 'rb') as _vf:
-                    _vbytes = _vf.read()
-                if _vbytes:
-                    st.video(_vbytes, format="video/mp4")
-                    return
-            except Exception as _ve2:
-                st.error(f"❌ Lỗi phát video: {_ve2}")
+            with open(target_path, 'rb') as _vf:
+                _vbytes = _vf.read()
+            if _vbytes:
+                st.video(_vbytes, format="video/mp4")
                 return
+        except Exception as _ve:
+            st.error(f"❌ Không thể phát video: {_ve}")
+            return
 
 
     # 2. TRƯỜNG HỢP 2: Không có sẵn cục bộ -> Stream trực tiếp từ Cloud
