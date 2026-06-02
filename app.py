@@ -8645,16 +8645,17 @@ def segment_frames(all_frames_data):
 def cut_video_segments(input_path, n1, n2, total_frames, fps_export=15):
     """
     Cắt video gốc thành 3 video tương ứng với 3 giai đoạn tập luyện
-    bằng ffmpeg siêu nhanh (sử dụng codec copy làm lựa chọn hàng đầu).
+    bằng ffmpeg và transcode sang H.264 có faststart để trình duyệt load tức thì.
     """
     import subprocess
     import os
     
     input_path = get_local_frame_path(input_path)
     
-    g1_path = input_path.replace('.mp4', '_g1.mp4')
-    g2_path = input_path.replace('.mp4', '_g2.mp4')
-    g3_path = input_path.replace('.mp4', '_g3.mp4')
+    # Sử dụng hậu tố _gX_f.mp4 để tránh bị cache tệp phân đoạn cũ bị lỗi codec/lag
+    g1_path = input_path.replace('.mp4', '_g1_f.mp4')
+    g2_path = input_path.replace('.mp4', '_g2_f.mp4')
+    g3_path = input_path.replace('.mp4', '_g3_f.mp4')
     
     if (os.path.exists(g1_path) and os.path.getsize(g1_path) > 0 and
         os.path.exists(g2_path) and os.path.getsize(g2_path) > 0 and
@@ -8669,31 +8670,23 @@ def cut_video_segments(input_path, n1, n2, total_frames, fps_export=15):
     def _run_cut(start, end, out_p):
         dur = end - start
         try:
-            # Ưu tiên codec copy cực nhanh
+            # Transcode H.264 với preset ultrafast và +faststart để stream mượt mà trên browser
             cmd = [
                 'ffmpeg', '-y',
                 '-ss', f"{start:.3f}",
                 '-t', f"{dur:.3f}",
                 '-i', input_path,
-                '-c', 'copy',
+                '-c:v', 'libx264',
+                '-pix_fmt', 'yuv420p',
+                '-preset', 'ultrafast',
+                '-crf', '26',
+                '-c:a', 'aac',
+                '-movflags', '+faststart',
                 out_p
             ]
-            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
-        except:
-            # Fallback sang transcode nếu codec copy không tương thích
-            try:
-                cmd = [
-                    'ffmpeg', '-y',
-                    '-ss', f"{start:.3f}",
-                    '-t', f"{dur:.3f}",
-                    '-i', input_path,
-                    '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28',
-                    '-c:a', 'aac',
-                    out_p
-                ]
-                subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
-            except Exception as e:
-                print(f"Lỗi khi cắt phân đoạn {start} -> {end}: {e}")
+            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=40)
+        except Exception as e:
+            print(f"Lỗi khi cắt phân đoạn {start} -> {end}: {e}")
                 
     _run_cut(t0, t1, g1_path)
     _run_cut(t1, t2, g2_path)
