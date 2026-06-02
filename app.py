@@ -1182,6 +1182,24 @@ thuc_hien_khoi_tao_he_thong_mot_lan()
 # Khởi tạo trạng thái đăng nhập
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
+
+# Thử khôi phục phiên từ query parameters khi F5 refresh trang
+if not st.session_state.logged_in:
+    if "logged_in_user" in st.query_params and "logged_in_role" in st.query_params:
+        try:
+            logged_user = st.query_params["logged_in_user"]
+            logged_role = st.query_params["logged_in_role"]
+            users = load_users()
+            if logged_user in users and users[logged_user].get('role', 'Bệnh nhân') == logged_role:
+                st.session_state.logged_in = True
+                st.session_state.user_info = {
+                    "username": logged_user,
+                    "email": users[logged_user].get('email'),
+                    "role": logged_role
+                }
+        except:
+            pass
+
 if 'user_info' not in st.session_state:
     st.session_state.user_info = None
 if 'forgot_password_mode' not in st.session_state:
@@ -8034,6 +8052,8 @@ def hien_thi_dang_nhap_dang_ky():
                                         "email": users[u].get('email'),
                                         "role": users[u].get('role', 'Bệnh nhân')
                                     }
+                                    st.query_params["logged_in_user"] = u
+                                    st.query_params["logged_in_role"] = users[u].get('role', 'Bệnh nhân')
                                     st.session_state.show_login_dialog = False
                                     st.rerun()
                                 else:
@@ -8814,6 +8834,7 @@ def main():
         if st.button("🚪 Đăng xuất hệ thống", width="stretch", key="logout_sidebar", type="secondary"):
             if st.session_state.user_info and st.session_state.user_info.get("auth_type") == "google":
                 st.logout()
+            st.query_params.clear()
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
             st.rerun()
