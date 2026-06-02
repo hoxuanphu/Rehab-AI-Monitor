@@ -620,20 +620,41 @@ def render_video(video_path):
                 return
 
         # ─────────────────────────────────────────────────────────────────
-        # CHIẾN LƯỢC PHÁT VIDEO CHẮC CHẮN HOẠT ĐỘNG (NHƯ ẢNH 2):
-        # Đọc bytes trực tiếp và truyền vào st.video.
-        # Giải pháp này giải quyết triệt để 100% lỗi màn hình xám (404) của Streamlit
-        # trên cả local (Windows) và cloud (HuggingFace Spaces).
+        # CHIẾN LƯỢC PHÁT VIDEO HIỆU NĂNG CAO (HỖ TRỢ FILE LỚN):
+        # Sao chép file vào thư mục static/ và phát qua đường dẫn static của Streamlit.
+        # Phương pháp này kích hoạt HTTP Range Requests giúp stream video mượt mà,
+        # cho phép tua nhanh và không bị tràn RAM/crash websocket với tệp dung lượng lớn.
         # ─────────────────────────────────────────────────────────────────
         try:
-            with open(target_path, 'rb') as _vf:
-                _vbytes = _vf.read()
-            if _vbytes:
-                st.video(_vbytes, format="video/mp4")
-                return
-        except Exception as _ve:
-            st.error(f"❌ Không thể phát video: {_ve}")
+            import hashlib
+            import shutil
+            
+            # Tạo thư mục static/ nếu chưa có
+            static_dir = os.path.join(".", "static")
+            os.makedirs(static_dir, exist_ok=True)
+            
+            # Đặt tên file an toàn (ASCII) để tránh lỗi ký tự Unicode tiếng Việt
+            safe_name = f"stream_{hashlib.md5(target_path.encode()).hexdigest()[:10]}.mp4"
+            static_path = os.path.join(static_dir, safe_name)
+            
+            # Đồng bộ file từ /data hoặc local sang thư mục static
+            if not os.path.exists(static_path) or os.path.getsize(static_path) != os.path.getsize(target_path):
+                shutil.copy2(target_path, static_path)
+                
+            # Phát bằng URL tĩnh của Streamlit (bắt buộc cấu hình enableStaticServing = true)
+            st.video(f"static/{safe_name}", format="video/mp4")
             return
+        except Exception as _ve:
+            # Fallback dự phòng nếu static serving gặp trục trặc: phát qua bytes
+            try:
+                with open(target_path, 'rb') as _vf:
+                    _vbytes = _vf.read()
+                if _vbytes:
+                    st.video(_vbytes, format="video/mp4")
+                    return
+            except Exception as _ve2:
+                st.error(f"❌ Không thể phát video: {_ve2}")
+                return
 
 
     # 2. TRƯỜNG HỢP 2: Không có sẵn cục bộ -> Stream trực tiếp từ Cloud
