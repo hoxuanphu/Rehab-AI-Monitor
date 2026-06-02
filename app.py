@@ -123,6 +123,15 @@ def get_base64_image(path):
     except:
         return None
 
+@st.cache_data(max_entries=50, show_spinner=False)
+def get_video_base64_cached(path, mtime, size):
+    """Đọc và mã hóa video sang Base64 có cache để phát trực tiếp cực kỳ mượt mà trên Cloud"""
+    try:
+        with open(path, "rb") as f:
+            return base64.b64encode(f.read()).decode()
+    except:
+        return ""
+
 @st.cache_data(max_entries=500, show_spinner=False)
 def _get_video_codec_cached(path, mtime, size):
     """Cache kết quả ffprobe theo (path, mtime, size) để tránh gọi lại subprocess."""
@@ -515,7 +524,39 @@ def render_video(video_path):
     elif is_local_raw:
         # File gốc có sẵn local nhưng chưa có H264, kích hoạt convert dưới nền và dùng tạm file gốc
         target_path = ensure_playable_video(video_path)
-    else:
+        
+    # Phát trực tiếp bằng Base64 nếu file có sẵn cục bộ và dung lượng vừa phải (<15MB)
+    # Phương pháp này vượt qua 100% các rào cản CORS và lỗi HTTP Range Request trên Cloud (Hugging Face Spaces)
+    if target_path and os.path.exists(target_path) and os.path.getsize(target_path) >= 5 * 1024:
+        try:
+            mtime = os.path.getmtime(target_path)
+            size = os.path.getsize(target_path)
+            if size < 15 * 1024 * 1024:
+                b64_str = get_video_base64_cached(target_path, mtime, size)
+                if b64_str:
+                    video_url = f"data:video/mp4;base64,{b64_str}"
+                    import streamlit.components.v1 as _stcomp
+                    _stcomp.html(f"""
+<!DOCTYPE html><html><head>
+<style>
+  body{{margin:0;padding:0;background:transparent;overflow:hidden;}}
+  video{{width:100%;border-radius:8px;display:block;height:240px;background:#000;}}
+</style>
+</head><body>
+<video id="vp" controls preload="metadata">
+  <source src="{video_url}" type="video/mp4">
+  Trình duyệt không hỗ trợ video HTML5.
+</video>
+<div style="color:#2ecc71; font-size:0.72rem; margin-top:4px; text-align:right; font-family:sans-serif;">
+  ⚡ Đang phát cục bộ (Base64)&nbsp;&nbsp;|&nbsp;&nbsp;📹 {os.path.basename(target_path)}
+</div>
+</body></html>
+""", height=270)
+                    return
+        except:
+            pass
+
+    if not target_path:
         # Không có sẵn local, kích hoạt tải và convert dưới nền
         ensure_playable_video(video_path) # Chạy nền, không block UI
         
