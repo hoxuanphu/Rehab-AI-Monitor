@@ -511,8 +511,13 @@ def render_video(video_path):
                 rel_path = os.path.relpath(video_path, DATA_DIR).replace("\\", "/")
                 # Thử stream file H264 từ Cloud nếu đã được đồng bộ lên đó trước đó
                 rel_path_f = rel_path.replace('.mp4', '_f.mp4').replace('.mov', '_f.mp4').replace('.MOV', '_f.mp4').replace('.avi', '_f.mp4').replace('.mkv', '_f.mp4')
-                cloud_url_f = f"https://huggingface.co/datasets/{HF_DATASET_ID}/resolve/main/{rel_path_f}?token={HF_TOKEN}"
-                cloud_url_raw = f"https://huggingface.co/datasets/{HF_DATASET_ID}/resolve/main/{rel_path}?token={HF_TOKEN}"
+                
+                import urllib.parse
+                rel_path_encoded_f = urllib.parse.quote(rel_path_f, safe='/')
+                rel_path_encoded_raw = urllib.parse.quote(rel_path, safe='/')
+                
+                cloud_url_f = f"https://huggingface.co/datasets/{HF_DATASET_ID}/resolve/main/{rel_path_encoded_f}?token={HF_TOKEN}"
+                cloud_url_raw = f"https://huggingface.co/datasets/{HF_DATASET_ID}/resolve/main/{rel_path_encoded_raw}?token={HF_TOKEN}"
                 
                 import streamlit.components.v1 as _stcomp
                 _stcomp.html(f"""
