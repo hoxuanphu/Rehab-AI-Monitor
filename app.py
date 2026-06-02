@@ -8066,7 +8066,7 @@ def hien_thi_frames_day_du(key_suffix=""):
             fpp_option = st.selectbox("📄 Số/Trang", [12, 24, 36, 48, 96, "Tất cả"], index=1, key=f"fpp_{tab_key}_{key_suffix_val}")
             fpp = 999999 if fpp_option == "Tất cả" else int(fpp_option)
         with rc2:
-            grid_cols = st.selectbox("🗂️ Số cột", [1, 2, 3, 4], index=3, key=f"fcols_{tab_key}_{key_suffix_val}")
+            grid_cols = st.selectbox("🗂️ Số cột", [1, 2, 3, 4], index=1, key=f"fcols_{tab_key}_{key_suffix_val}")
         with rc3:
             sub_filter = st.selectbox("🔍 Lọc thêm", ["Tất cả", "PASS", "NEAR", "FAIL"], key=f"fsub_{tab_key}_{key_suffix_val}")
         with rc4:
