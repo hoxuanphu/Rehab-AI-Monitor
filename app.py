@@ -3512,9 +3512,33 @@ def xu_ly_frame(frame, model, chuan, frame_idx, fps=30, dynamic_chuan=None, acti
 
     ss = chuan["sai_so"]
     
-    vai_diff = abs(goc_vai - chuan_vai)
-    khuyu_diff = abs(goc_khuyu - chuan_khuyu)
+    ex_clean = str(exercise_name or '').lower()
+    is_gay = any(kw in ex_clean for kw in ["gậy", "gay", "pulley", "stick"])
+    is_codman = any(kw in ex_clean for kw in ["codman"])
     
+    if is_gay:
+        vai_diff_t = abs(goc_vai_t - chuan_vai)
+        vai_diff_p = abs(goc_vai_p - chuan_vai)
+        khuyu_diff_t = abs(goc_khuyu_t - chuan_khuyu)
+        khuyu_diff_p = abs(goc_khuyu_p - chuan_khuyu)
+        
+        vai_diff = max(vai_diff_t, vai_diff_p)
+        khuyu_diff = max(khuyu_diff_t, khuyu_diff_p)
+        
+        # Để thống kê / hiển thị, lấy góc trung bình hai bên
+        goc_vai = (goc_vai_t + goc_vai_p) / 2
+        goc_khuyu = (goc_khuyu_t + goc_khuyu_p) / 2
+    elif is_codman:
+        # Chỉ so sánh góc bên phải
+        vai_diff = abs(goc_vai_p - chuan_vai)
+        khuyu_diff = abs(goc_khuyu_p - chuan_khuyu)
+        goc_vai = goc_vai_p
+        goc_khuyu = goc_khuyu_p
+    else:
+        # Mặc định theo active_side
+        vai_diff = abs(goc_vai - chuan_vai)
+        khuyu_diff = abs(goc_khuyu - chuan_khuyu)
+        
     vai_dung = vai_diff <= ss
     khuyu_dung = khuyu_diff <= ss
     
@@ -3634,7 +3658,9 @@ def xu_ly_frame(frame, model, chuan, frame_idx, fps=30, dynamic_chuan=None, acti
     
     # === 3. VẼ BOX THÔNG TIN CHI TIẾT (TOP-LEFT BOX) — MỞ RỘNG 3 GIAI ĐOẠN ===
     box_x, box_y = int(15 * scale_factor), int(50 * scale_factor)
-    box_w, box_h = int(345 * scale_factor), int(235 * scale_factor)   # Tăng chiều cao để chứa thêm 3 giai đoạn
+    is_gay = any(kw in str(exercise_name or '').lower() for kw in ["gậy", "gay", "pulley", "stick"])
+    box_w = int(345 * scale_factor)
+    box_h = int(275 * scale_factor) if is_gay else int(235 * scale_factor)   # Tăng chiều cao để chứa thêm 3 giai đoạn
     
     # TỐI ƯU: Chỉ tạo overlay cho vùng Box thay vì toàn bộ frame
     # Đảm bảo box không vượt quá biên frame
@@ -3665,34 +3691,53 @@ def xu_ly_frame(frame, model, chuan, frame_idx, fps=30, dynamic_chuan=None, acti
     else:
         cv2.putText(frame_output, f"TIME: {time_str}", (box_x + int(15 * scale_factor), box_y + int(52 * scale_factor)), font, font_scale_small, (180, 180, 180), text_thick_thin)
     
-    # Dòng 3: SHOULDER & ELBOW
-    cv2.putText(frame_output, "SHOULDER", (box_x + int(15 * scale_factor), box_y + int(82 * scale_factor)), font, 0.48 * scale_factor, (200, 200, 200), text_thick_thin)
-    cv2.putText(frame_output, f"{int(goc_vai)}", (box_x + int(15 * scale_factor), box_y + int(108 * scale_factor)), font, font_scale_large, mau_vai, text_thick)
-    cv2.putText(frame_output, f"/{int(chuan_vai)}", (box_x + int(70 * scale_factor), box_y + int(108 * scale_factor)), font, font_scale_small, (140, 140, 140), text_thick_thin)
-    cv2.putText(frame_output, "ELBOW", (box_x + int(180 * scale_factor), box_y + int(82 * scale_factor)), font, 0.48 * scale_factor, (200, 200, 200), text_thick_thin)
-    cv2.putText(frame_output, f"{int(goc_khuyu)}", (box_x + int(180 * scale_factor), box_y + int(108 * scale_factor)), font, font_scale_large, mau_khuyu, text_thick)
-    cv2.putText(frame_output, f"/{int(chuan_khuyu)}", (box_x + int(240 * scale_factor), box_y + int(108 * scale_factor)), font, font_scale_small, (140, 140, 140), text_thick_thin)
+    sep_y = box_y + int(162 * scale_factor) if is_gay else box_y + int(120 * scale_factor)
+    
+    if is_gay:
+        # Dòng 3 (LEFT SIDE)
+        cv2.putText(frame_output, "LEFT SIDE: SHOULDER / ELBOW", (box_x + int(15 * scale_factor), box_y + int(78 * scale_factor)), font, 0.44 * scale_factor, (200, 200, 200), text_thick_thin)
+        cv2.putText(frame_output, f"{int(goc_vai_t)}", (box_x + int(15 * scale_factor), box_y + int(102 * scale_factor)), font, font_scale_medium, mau_vai_t, text_thick)
+        cv2.putText(frame_output, f"/{int(chuan_vai)}", (box_x + int(60 * scale_factor), box_y + int(102 * scale_factor)), font, font_scale_tiny, (140, 140, 140), text_thick_thin)
+        
+        cv2.putText(frame_output, f"{int(goc_khuyu_t)}", (box_x + int(180 * scale_factor), box_y + int(102 * scale_factor)), font, font_scale_medium, mau_khuyu_t, text_thick)
+        cv2.putText(frame_output, f"/{int(chuan_khuyu)}", (box_x + int(225 * scale_factor), box_y + int(102 * scale_factor)), font, font_scale_tiny, (140, 140, 140), text_thick_thin)
+        
+        # Dòng 4 (RIGHT SIDE)
+        cv2.putText(frame_output, "RIGHT SIDE: SHOULDER / ELBOW", (box_x + int(15 * scale_factor), box_y + int(126 * scale_factor)), font, 0.44 * scale_factor, (200, 200, 200), text_thick_thin)
+        cv2.putText(frame_output, f"{int(goc_vai_p)}", (box_x + int(15 * scale_factor), box_y + int(150 * scale_factor)), font, font_scale_medium, mau_vai_p, text_thick)
+        cv2.putText(frame_output, f"/{int(chuan_vai)}", (box_x + int(60 * scale_factor), box_y + int(150 * scale_factor)), font, font_scale_tiny, (140, 140, 140), text_thick_thin)
+        
+        cv2.putText(frame_output, f"{int(goc_khuyu_p)}", (box_x + int(180 * scale_factor), box_y + int(150 * scale_factor)), font, font_scale_medium, mau_khuyu_p, text_thick)
+        cv2.putText(frame_output, f"/{int(chuan_khuyu)}", (box_x + int(225 * scale_factor), box_y + int(150 * scale_factor)), font, font_scale_tiny, (140, 140, 140), text_thick_thin)
+    else:
+        # Chỉ vẽ bên tập chủ đạo hoặc bên Phải
+        cv2.putText(frame_output, "SHOULDER", (box_x + int(15 * scale_factor), box_y + int(82 * scale_factor)), font, 0.48 * scale_factor, (200, 200, 200), text_thick_thin)
+        cv2.putText(frame_output, f"{int(goc_vai)}", (box_x + int(15 * scale_factor), box_y + int(108 * scale_factor)), font, font_scale_large, mau_vai, text_thick)
+        cv2.putText(frame_output, f"/{int(chuan_vai)}", (box_x + int(70 * scale_factor), box_y + int(108 * scale_factor)), font, font_scale_small, (140, 140, 140), text_thick_thin)
+        cv2.putText(frame_output, "ELBOW", (box_x + int(180 * scale_factor), box_y + int(82 * scale_factor)), font, 0.48 * scale_factor, (200, 200, 200), text_thick_thin)
+        cv2.putText(frame_output, f"{int(goc_khuyu)}", (box_x + int(180 * scale_factor), box_y + int(108 * scale_factor)), font, font_scale_large, mau_khuyu, text_thick)
+        cv2.putText(frame_output, f"/{int(chuan_khuyu)}", (box_x + int(240 * scale_factor), box_y + int(108 * scale_factor)), font, font_scale_small, (140, 140, 140), text_thick_thin)
     
     # === ĐƯỜNG PHÂN CÁCH ===
-    cv2.line(frame_output, (box_x + int(8 * scale_factor), box_y + int(120 * scale_factor)), (box_x + box_w - int(8 * scale_factor), box_y + int(120 * scale_factor)), (80, 80, 100), text_thick_thin)
-    cv2.putText(frame_output, "3 GIAI DOAN (45/30/15):", (box_x + int(15 * scale_factor), box_y + int(137 * scale_factor)), font, font_scale_mini, (150, 200, 255), text_thick_thin)
+    cv2.line(frame_output, (box_x + int(8 * scale_factor), sep_y), (box_x + box_w - int(8 * scale_factor), sep_y), (80, 80, 100), text_thick_thin)
+    cv2.putText(frame_output, "3 GIAI DOAN (45/30/15):", (box_x + int(15 * scale_factor), sep_y + int(17 * scale_factor)), font, font_scale_mini, (150, 200, 255), text_thick_thin)
     
     # === G1 (45°) ===
     g1_label = f"G1(45): {g1_text}"
-    cv2.putText(frame_output, g1_label, (box_x + int(15 * scale_factor), box_y + int(160 * scale_factor)), font, font_scale_g, g1_color, text_thick)
+    cv2.putText(frame_output, g1_label, (box_x + int(15 * scale_factor), sep_y + int(40 * scale_factor)), font, font_scale_g, g1_color, text_thick)
     
     # === G2 (30°) ===
     g2_label = f"G2(30): {g2_text}"
-    cv2.putText(frame_output, g2_label, (box_x + int(15 * scale_factor), box_y + int(183 * scale_factor)), font, font_scale_g, g2_color, text_thick)
+    cv2.putText(frame_output, g2_label, (box_x + int(15 * scale_factor), sep_y + int(63 * scale_factor)), font, font_scale_g, g2_color, text_thick)
     
     # === G3 (15°) ===
     g3_label = f"G3(15): {g3_text}"
-    cv2.putText(frame_output, g3_label, (box_x + int(15 * scale_factor), box_y + int(206 * scale_factor)), font, font_scale_g, g3_color, text_thick)
+    cv2.putText(frame_output, g3_label, (box_x + int(15 * scale_factor), sep_y + int(86 * scale_factor)), font, font_scale_g, g3_color, text_thick)
     
     warnings_list = get_warning_message(goc_vai, goc_khuyu, chuan_vai, chuan_khuyu, ss)
     if warnings_list:
         w_text = warnings_list[0][:38] + ".." if len(warnings_list[0]) > 38 else warnings_list[0]
-        cv2.putText(frame_output, f"! {w_text}", (box_x + int(15 * scale_factor), box_y + int(228 * scale_factor)), font, font_scale_tiny, (0, 255, 255), text_thick_thin)
+        cv2.putText(frame_output, f"! {w_text}", (box_x + int(15 * scale_factor), sep_y + int(108 * scale_factor)), font, font_scale_tiny, (0, 255, 255), text_thick_thin)
 
     # Đảm bảo trả về kiểu dữ liệu Python chuẩn
     goc_vai = float(goc_vai)
@@ -4376,7 +4421,7 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
             
     return final_video_path, ref_name, None, du_lieu_goc, frame_count, valid_count, thu_muc_frame, zip_path, danh_sach_frame_paths, {}, json_path, all_warnings
 
-def recalc_metrics(df, ss):
+def recalc_metrics(df, ss, exercise_name="codman"):
     if df is None or len(df) == 0:
         return {
             "ty_le_tong_the": 0.0,
@@ -4446,15 +4491,82 @@ def recalc_metrics(df, ss):
     chuan_vai = df_valid['vai_chuan'] if 'vai_chuan' in df_valid.columns else pd.Series([90.0] * total, index=df_valid.index)
     chuan_khuyu = df_valid['khuyu_chuan'] if 'khuyu_chuan' in df_valid.columns else pd.Series([170.0] * total, index=df_valid.index)
     
-    vai_diff = np.abs(df_valid['goc_vai'] - chuan_vai)
-    khuyu_diff = np.abs(df_valid['goc_khuyu'] - chuan_khuyu)
+    ex_clean = str(exercise_name or '').lower()
+    is_gay = any(kw in ex_clean for kw in ["gậy", "gay", "pulley", "stick"])
+    is_codman = any(kw in ex_clean for kw in ["codman"])
     
-    vai_dung = vai_diff <= ss
-    khuyu_dung = khuyu_diff <= ss
-    
-    vai_gan_dung = vai_diff <= (ss * 1.5)
-    khuyu_gan_dung = khuyu_diff <= (ss * 1.5)
-    
+    if is_gay:
+        vai_diff_t = np.abs(df_valid['goc_vai_trai'] - chuan_vai)
+        vai_diff_p = np.abs(df_valid['goc_vai_phai'] - chuan_vai)
+        khuyu_diff_t = np.abs(df_valid['goc_khuyu_trai'] - chuan_khuyu)
+        khuyu_diff_p = np.abs(df_valid['goc_khuyu_phai'] - chuan_khuyu)
+        
+        vai_dung = (vai_diff_t <= ss) & (vai_diff_p <= ss)
+        khuyu_dung = (khuyu_diff_t <= ss) & (khuyu_diff_p <= ss)
+        
+        vai_gan_dung = (vai_diff_t <= (ss * 1.5)) & (vai_diff_p <= (ss * 1.5))
+        khuyu_gan_dung = (khuyu_diff_t <= (ss * 1.5)) & (khuyu_diff_p <= (ss * 1.5))
+        
+        mae_vai = (vai_diff_t.mean() + vai_diff_p.mean()) / 2
+        mae_khuyu = (khuyu_diff_t.mean() + khuyu_diff_p.mean()) / 2
+        
+        tb_goc_vai = (df_valid['goc_vai_trai'].mean() + df_valid['goc_vai_phai'].mean()) / 2
+        tb_goc_khuyu = (df_valid['goc_khuyu_trai'].mean() + df_valid['goc_khuyu_phai'].mean()) / 2
+        
+        min_goc_vai = min(df_valid['goc_vai_trai'].min(), df_valid['goc_vai_phai'].min())
+        max_goc_vai = max(df_valid['goc_vai_trai'].max(), df_valid['goc_vai_phai'].max())
+        min_goc_khuyu = min(df_valid['goc_khuyu_trai'].min(), df_valid['goc_khuyu_phai'].min())
+        max_goc_khuyu = max(df_valid['goc_khuyu_trai'].max(), df_valid['goc_khuyu_phai'].max())
+        
+        std_goc_vai = (df_valid['goc_vai_trai'].std() + df_valid['goc_vai_phai'].std()) / 2
+        std_goc_khuyu = (df_valid['goc_khuyu_trai'].std() + df_valid['goc_khuyu_phai'].std()) / 2
+    elif is_codman:
+        vai_diff = np.abs(df_valid['goc_vai_phai'] - chuan_vai)
+        khuyu_diff = np.abs(df_valid['goc_khuyu_phai'] - chuan_khuyu)
+        
+        vai_dung = vai_diff <= ss
+        khuyu_dung = khuyu_diff <= ss
+        
+        vai_gan_dung = vai_diff <= (ss * 1.5)
+        khuyu_gan_dung = khuyu_diff <= (ss * 1.5)
+        
+        mae_vai = vai_diff.mean()
+        mae_khuyu = khuyu_diff.mean()
+        
+        tb_goc_vai = df_valid['goc_vai_phai'].mean()
+        tb_goc_khuyu = df_valid['goc_khuyu_phai'].mean()
+        
+        min_goc_vai = df_valid['goc_vai_phai'].min()
+        max_goc_vai = df_valid['goc_vai_phai'].max()
+        min_goc_khuyu = df_valid['goc_khuyu_phai'].min()
+        max_goc_khuyu = df_valid['goc_khuyu_phai'].max()
+        
+        std_goc_vai = df_valid['goc_vai_phai'].std()
+        std_goc_khuyu = df_valid['goc_khuyu_phai'].std()
+    else:
+        vai_diff = np.abs(df_valid['goc_vai'] - chuan_vai)
+        khuyu_diff = np.abs(df_valid['goc_khuyu'] - chuan_khuyu)
+        
+        vai_dung = vai_diff <= ss
+        khuyu_dung = khuyu_diff <= ss
+        
+        vai_gan_dung = vai_diff <= (ss * 1.5)
+        khuyu_gan_dung = khuyu_diff <= (ss * 1.5)
+        
+        mae_vai = vai_diff.mean()
+        mae_khuyu = khuyu_diff.mean()
+        
+        tb_goc_vai = df_valid['goc_vai'].mean()
+        tb_goc_khuyu = df_valid['goc_khuyu'].mean()
+        
+        min_goc_vai = df_valid['goc_vai'].min()
+        max_goc_vai = df_valid['goc_vai'].max()
+        min_goc_khuyu = df_valid['goc_khuyu'].min()
+        max_goc_khuyu = df_valid['goc_khuyu'].max()
+        
+        std_goc_vai = df_valid['goc_vai'].std()
+        std_goc_khuyu = df_valid['goc_khuyu'].std()
+        
     dung_series = vai_dung & khuyu_dung
     gan_dung_series = (vai_gan_dung & khuyu_gan_dung) & ~dung_series
     
@@ -4467,8 +4579,6 @@ def recalc_metrics(df, ss):
     ty_le_vai_dung = (vai_dung.sum() / total) * 100
     ty_le_khuyu_dung = (khuyu_dung.sum() / total) * 100
     
-    mae_vai = vai_diff.mean()
-    mae_khuyu = khuyu_diff.mean()
     mae_tong = (mae_vai + mae_khuyu) / 2
     
     accuracy = dung_count / total
@@ -4482,17 +4592,17 @@ def recalc_metrics(df, ss):
         "ty_le_gan_dung": ty_le_gan_dung,
         "ty_le_vai_dung": ty_le_vai_dung,
         "ty_le_khuyu_dung": ty_le_khuyu_dung,
-        "tb_goc_vai": df_valid['goc_vai'].mean(),
-        "tb_goc_khuyu": df_valid['goc_khuyu'].mean(),
+        "tb_goc_vai": tb_goc_vai,
+        "tb_goc_khuyu": tb_goc_khuyu,
         "frame_dung": int(dung_count),
         "frame_gan_dung": int(gan_dung_count),
         "frame_sai": int(fail_count),
-        "min_goc_vai": df_valid['goc_vai'].min(),
-        "max_goc_vai": df_valid['goc_vai'].max(),
-        "min_goc_khuyu": df_valid['goc_khuyu'].min(),
-        "max_goc_khuyu": df_valid['goc_khuyu'].max(),
-        "std_goc_vai": df_valid['goc_vai'].std(),
-        "std_goc_khuyu": df_valid['goc_khuyu'].std(),
+        "min_goc_vai": min_goc_vai,
+        "max_goc_vai": max_goc_vai,
+        "min_goc_khuyu": min_goc_khuyu,
+        "max_goc_khuyu": max_goc_khuyu,
+        "std_goc_vai": std_goc_vai,
+        "std_goc_khuyu": std_goc_khuyu,
         "mae_vai": mae_vai,
         "mae_khuyu": mae_khuyu,
         "mae_tong": mae_tong,
@@ -4559,9 +4669,9 @@ def gui_bao_cao_tong_hop_3_giai_doan():
     df_g2 = df.iloc[n1:n2]
     df_g3 = df.iloc[n2:n3]
     
-    metrics_g1 = recalc_metrics(df_g1, 45)
-    metrics_g2 = recalc_metrics(df_g2, 30)
-    metrics_g3 = recalc_metrics(df_g3, 15)
+    metrics_g1 = recalc_metrics(df_g1, 45, correct_ex_name)
+    metrics_g2 = recalc_metrics(df_g2, 30, correct_ex_name)
+    metrics_g3 = recalc_metrics(df_g3, 15, correct_ex_name)
 
     acc_g1 = metrics_g1['do_chinh_xac']
     acc_g2 = metrics_g2['do_chinh_xac']
@@ -4689,12 +4799,64 @@ def tinh_metrics_chi_tiet(df, bt):
     ty_le_khuyu_dung = df_valid['khuyu_dung'].sum() / total * 100
     
     # TÍNH TOÁN SAI SỐ MAE (Mean Absolute Error) so với chuẩn động từng giây
-    if 'vai_chuan' in df_valid.columns and 'khuyu_chuan' in df_valid.columns:
-        mae_vai = np.abs(df_valid['goc_vai'] - df_valid['vai_chuan']).mean()
-        mae_khuyu = np.abs(df_valid['goc_khuyu'] - df_valid['khuyu_chuan']).mean()
+    ex_name = bt.get('ten', '') if isinstance(bt, dict) else str(bt or '')
+    ex_clean = ex_name.lower()
+    is_gay = any(kw in ex_clean for kw in ["gậy", "gay", "pulley", "stick"])
+    is_codman = any(kw in ex_clean for kw in ["codman"])
+    
+    if is_gay:
+        if 'vai_chuan' in df_valid.columns and 'khuyu_chuan' in df_valid.columns:
+            mae_vai_t = np.abs(df_valid['goc_vai_trai'] - df_valid['vai_chuan'])
+            mae_vai_p = np.abs(df_valid['goc_vai_phai'] - df_valid['vai_chuan'])
+            mae_khuyu_t = np.abs(df_valid['goc_khuyu_trai'] - df_valid['khuyu_chuan'])
+            mae_khuyu_p = np.abs(df_valid['goc_khuyu_phai'] - df_valid['khuyu_chuan'])
+        else:
+            mae_vai_t = np.abs(df_valid['goc_vai_trai'] - chuan_vai)
+            mae_vai_p = np.abs(df_valid['goc_vai_phai'] - chuan_vai)
+            mae_khuyu_t = np.abs(df_valid['goc_khuyu_trai'] - chuan_khuyu)
+            mae_khuyu_p = np.abs(df_valid['goc_khuyu_phai'] - chuan_khuyu)
+            
+        mae_vai = (mae_vai_t.mean() + mae_vai_p.mean()) / 2
+        mae_khuyu = (mae_khuyu_t.mean() + mae_khuyu_p.mean()) / 2
+        tb_goc_vai = (df_valid['goc_vai_trai'].mean() + df_valid['goc_vai_phai'].mean()) / 2
+        tb_goc_khuyu = (df_valid['goc_khuyu_trai'].mean() + df_valid['goc_khuyu_phai'].mean()) / 2
+        min_goc_vai = min(df_valid['goc_vai_trai'].min(), df_valid['goc_vai_phai'].min())
+        max_goc_vai = max(df_valid['goc_vai_trai'].max(), df_valid['goc_vai_phai'].max())
+        min_goc_khuyu = min(df_valid['goc_khuyu_trai'].min(), df_valid['goc_khuyu_phai'].min())
+        max_goc_khuyu = max(df_valid['goc_khuyu_trai'].max(), df_valid['goc_khuyu_phai'].max())
+        std_goc_vai = (df_valid['goc_vai_trai'].std() + df_valid['goc_vai_phai'].std()) / 2
+        std_goc_khuyu = (df_valid['goc_khuyu_trai'].std() + df_valid['goc_khuyu_phai'].std()) / 2
+    elif is_codman:
+        if 'vai_chuan' in df_valid.columns and 'khuyu_chuan' in df_valid.columns:
+            mae_vai = np.abs(df_valid['goc_vai_phai'] - df_valid['vai_chuan']).mean()
+            mae_khuyu = np.abs(df_valid['goc_khuyu_phai'] - df_valid['khuyu_chuan']).mean()
+        else:
+            mae_vai = np.abs(df_valid['goc_vai_phai'] - chuan_vai).mean()
+            mae_khuyu = np.abs(df_valid['goc_khuyu_phai'] - chuan_khuyu).mean()
+        tb_goc_vai = df_valid['goc_vai_phai'].mean()
+        tb_goc_khuyu = df_valid['goc_khuyu_phai'].mean()
+        min_goc_vai = df_valid['goc_vai_phai'].min()
+        max_goc_vai = df_valid['goc_vai_phai'].max()
+        min_goc_khuyu = df_valid['goc_khuyu_phai'].min()
+        max_goc_khuyu = df_valid['goc_khuyu_phai'].max()
+        std_goc_vai = df_valid['goc_vai_phai'].std()
+        std_goc_khuyu = df_valid['goc_khuyu_phai'].std()
     else:
-        mae_vai = np.abs(df_valid['goc_vai'] - chuan_vai).mean()
-        mae_khuyu = np.abs(df_valid['goc_khuyu'] - chuan_khuyu).mean()
+        if 'vai_chuan' in df_valid.columns and 'khuyu_chuan' in df_valid.columns:
+            mae_vai = np.abs(df_valid['goc_vai'] - df_valid['vai_chuan']).mean()
+            mae_khuyu = np.abs(df_valid['goc_khuyu'] - df_valid['khuyu_chuan']).mean()
+        else:
+            mae_vai = np.abs(df_valid['goc_vai'] - chuan_vai).mean()
+            mae_khuyu = np.abs(df_valid['goc_khuyu'] - chuan_khuyu).mean()
+        tb_goc_vai = df_valid['goc_vai'].mean()
+        tb_goc_khuyu = df_valid['goc_khuyu'].mean()
+        min_goc_vai = df_valid['goc_vai'].min()
+        max_goc_vai = df_valid['goc_vai'].max()
+        min_goc_khuyu = df_valid['goc_khuyu'].min()
+        max_goc_khuyu = df_valid['goc_khuyu'].max()
+        std_goc_vai = df_valid['goc_vai'].std()
+        std_goc_khuyu = df_valid['goc_khuyu'].std()
+            
     mae_tong = (mae_vai + mae_khuyu) / 2
     
     # TÍNH TOÁN PRECISION, RECALL, F1-SCORE (Dựa trên mô hình đánh giá so với chuẩn)
@@ -4716,16 +4878,16 @@ def tinh_metrics_chi_tiet(df, bt):
         "ty_le_gan_dung": ty_le_gan_dung,
         "ty_le_vai_dung": ty_le_vai_dung,
         "ty_le_khuyu_dung": ty_le_khuyu_dung,
-        "tb_goc_vai": df_valid['goc_vai'].mean(),
-        "tb_goc_khuyu": df_valid['goc_khuyu'].mean(),
+        "tb_goc_vai": tb_goc_vai,
+        "tb_goc_khuyu": tb_goc_khuyu,
         "frame_dung": int(dung_count),
         "frame_gan_dung": int(gan_dung_count),
-        "min_goc_vai": df_valid['goc_vai'].min(),
-        "max_goc_vai": df_valid['goc_vai'].max(),
-        "min_goc_khuyu": df_valid['goc_khuyu'].min(),
-        "max_goc_khuyu": df_valid['goc_khuyu'].max(),
-        "std_goc_vai": df_valid['goc_vai'].std(),
-        "std_goc_khuyu": df_valid['goc_khuyu'].std(),
+        "min_goc_vai": min_goc_vai,
+        "max_goc_vai": max_goc_vai,
+        "min_goc_khuyu": min_goc_khuyu,
+        "max_goc_khuyu": max_goc_khuyu,
+        "std_goc_vai": std_goc_vai,
+        "std_goc_khuyu": std_goc_khuyu,
         "mae_vai": mae_vai,
         "mae_khuyu": mae_khuyu,
         "mae_tong": mae_tong,
@@ -5868,9 +6030,9 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
                                 df_g1 = df.iloc[n0:n1]
                                 df_g2 = df.iloc[n1:n2]
                                 df_g3 = df.iloc[n2:n3]
-                                metrics_g1 = recalc_metrics(df_g1, 45)
-                                metrics_g2 = recalc_metrics(df_g2, 30)
-                                metrics_g3 = recalc_metrics(df_g3, 15)
+                                metrics_g1 = recalc_metrics(df_g1, 45, bt_ncv.get('ten', ''))
+                                metrics_g2 = recalc_metrics(df_g2, 30, bt_ncv.get('ten', ''))
+                                metrics_g3 = recalc_metrics(df_g3, 15, bt_ncv.get('ten', ''))
                                 
                                 # Cập nhật session state
                                 st.session_state.stats = {
@@ -6009,9 +6171,9 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
         df_g1 = df.iloc[n0:n1]
         df_g2 = df.iloc[n1:n2]
         df_g3 = df.iloc[n2:n3]
-        metrics_g1 = recalc_metrics(df_g1, 45)
-        metrics_g2 = recalc_metrics(df_g2, 30)
-        metrics_g3 = recalc_metrics(df_g3, 15)
+        metrics_g1 = recalc_metrics(df_g1, 45, bt.get('ten', ''))
+        metrics_g2 = recalc_metrics(df_g2, 30, bt.get('ten', ''))
+        metrics_g3 = recalc_metrics(df_g3, 15, bt.get('ten', ''))
     else:
         metrics_g1 = tk.get("metrics_g1", tk)
         metrics_g2 = tk.get("metrics_g2", tk)
@@ -10221,9 +10383,9 @@ def main():
                                     df_g1 = df.iloc[n0:n1]
                                     df_g2 = df.iloc[n1:n2]
                                     df_g3 = df.iloc[n2:n3]
-                                    metrics_g1 = recalc_metrics(df_g1, 45)
-                                    metrics_g2 = recalc_metrics(df_g2, 30)
-                                    metrics_g3 = recalc_metrics(df_g3, 15)
+                                    metrics_g1 = recalc_metrics(df_g1, 45, bai_tap_ncv.get('ten', ''))
+                                    metrics_g2 = recalc_metrics(df_g2, 30, bai_tap_ncv.get('ten', ''))
+                                    metrics_g3 = recalc_metrics(df_g3, 15, bai_tap_ncv.get('ten', ''))
                                     
                                     st.session_state.has_data = True
                                     st.session_state.angle_df = df
