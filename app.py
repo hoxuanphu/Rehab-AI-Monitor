@@ -437,7 +437,7 @@ def render_video(video_path):
         playable_path = video_path  # dùng file gốc, để browser tự xử lý
 
     # Bước 3: Chọn phương thức phát
-    is_cloud = bool(os.environ.get('HF_SPACE_ID'))  # chỉ True khi thực sự trên HF Spaces
+    is_cloud = bool(os.environ.get('HF_SPACE_ID')) or bool(os.environ.get('SPACE_ID')) or (os.name != 'nt' and os.path.exists('/data'))
 
     if not is_cloud:
         video_url = _get_video_server_url(playable_path)
@@ -788,8 +788,8 @@ a {{color:{title_color};text-decoration:none}}
 import threading
 
 HF_TOKEN = os.environ.get("HF_TOKEN")
-HF_SPACE_ID = os.environ.get("HF_SPACE_ID")
-HF_DATASET_ID = f"{HF_SPACE_ID}-data" if HF_SPACE_ID else None
+HF_SPACE_ID = os.environ.get("HF_SPACE_ID") or os.environ.get("SPACE_ID")
+HF_DATASET_ID = os.environ.get("HF_DATASET_ID") or (f"{HF_SPACE_ID}-data" if HF_SPACE_ID else None)
 
 def khoi_tao_dong_bo_hf():
     """Tải tất cả dữ liệu từ Hugging Face Dataset về đĩa khi khởi động"""
