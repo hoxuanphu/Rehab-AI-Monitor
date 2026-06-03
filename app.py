@@ -1731,7 +1731,14 @@ st.markdown("""
         padding: 8px 16px !important;
         margin-right: 5px !important;
     }
-    div[data-testid="stSegmentedControl"] button[aria-checked="true"] {
+    div[data-testid="stSegmentedControl"] button[aria-checked="true"],
+    div[data-testid="stSegmentedControl"] button[aria-pressed="true"],
+    div[data-testid="stSegmentedControl"] button[aria-selected="true"],
+    div[data-testid="stSegmentedControl"] button[data-checked="true"],
+    div[data-testid="stSegmentedControl"] [data-baseweb="button"][aria-checked="true"],
+    div[data-testid="stSegmentedControl"] [data-baseweb="button"][aria-pressed="true"],
+    div[data-testid="stSegmentedControl"] [data-baseweb="button"][aria-selected="true"],
+    div[data-testid="stSegmentedControl"] [data-baseweb="button"][data-checked="true"] {
         background: linear-gradient(135deg, #00c6ff 0%, #0072ff 100%) !important;
         color: white !important;
         border: 1px solid #00c6ff !important;
@@ -2373,7 +2380,14 @@ if st.session_state.get('theme') == 'dark':
             color: #ffffff !important;
             border-color: rgba(255, 255, 255, 0.2) !important;
         }
-        div[data-testid="stSegmentedControl"] button[aria-checked="true"] {
+        div[data-testid="stSegmentedControl"] button[aria-checked="true"],
+        div[data-testid="stSegmentedControl"] button[aria-pressed="true"],
+        div[data-testid="stSegmentedControl"] button[aria-selected="true"],
+        div[data-testid="stSegmentedControl"] button[data-checked="true"],
+        div[data-testid="stSegmentedControl"] [data-baseweb="button"][aria-checked="true"],
+        div[data-testid="stSegmentedControl"] [data-baseweb="button"][aria-pressed="true"],
+        div[data-testid="stSegmentedControl"] [data-baseweb="button"][aria-selected="true"],
+        div[data-testid="stSegmentedControl"] [data-baseweb="button"][data-checked="true"] {
             background: linear-gradient(135deg, #00c6ff 0%, #0072ff 100%) !important;
             color: #ffffff !important;
             border: 1px solid #00c6ff !important;
@@ -2660,7 +2674,14 @@ if st.session_state.get('theme') == 'light':
             color: #0072ff !important;
             border-color: #0072ff !important;
         }
-        div[data-testid="stSegmentedControl"] button[aria-checked="true"] {
+        div[data-testid="stSegmentedControl"] button[aria-checked="true"],
+        div[data-testid="stSegmentedControl"] button[aria-pressed="true"],
+        div[data-testid="stSegmentedControl"] button[aria-selected="true"],
+        div[data-testid="stSegmentedControl"] button[data-checked="true"],
+        div[data-testid="stSegmentedControl"] [data-baseweb="button"][aria-checked="true"],
+        div[data-testid="stSegmentedControl"] [data-baseweb="button"][aria-pressed="true"],
+        div[data-testid="stSegmentedControl"] [data-baseweb="button"][aria-selected="true"],
+        div[data-testid="stSegmentedControl"] [data-baseweb="button"][data-checked="true"] {
             background: linear-gradient(135deg, #00c6ff 0%, #0072ff 100%) !important;
             color: #ffffff !important;
             border: 1px solid #00c6ff !important;
