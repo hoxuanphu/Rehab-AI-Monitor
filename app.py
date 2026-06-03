@@ -2297,6 +2297,34 @@ if st.session_state.get('theme') == 'dark':
             color: #ffd700 !important;
             border-color: #ffd700 !important;
         }
+
+        /* Popover Button & Container in Dark Mode */
+        div[data-testid="stPopover"] button {
+            background-color: #1a1a2e !important;
+            color: #ffffff !important;
+            border: 1px solid rgba(255, 255, 255, 0.2) !important;
+            border-radius: 10px !important;
+        }
+        div[data-testid="stPopover"] button * {
+            color: #ffffff !important;
+        }
+        div[data-testid="stPopover"] button:hover {
+            background-color: #2a5298 !important;
+            border-color: #00c6ff !important;
+        }
+        div[data-testid="stPopover"] button:hover * {
+            color: #ffd700 !important;
+        }
+        div[data-baseweb="popover"], 
+        div[data-baseweb="popover"] div, 
+        div[data-baseweb="popover"] ul, 
+        div[data-baseweb="popover"] li {
+            background-color: #1a1a2e !important;
+            color: #ffffff !important;
+        }
+        div[data-baseweb="popover"] * {
+            color: #ffffff !important;
+        }
     </style>
     """, unsafe_allow_html=True)
 
@@ -2520,6 +2548,49 @@ if st.session_state.get('theme') == 'light':
         .metric-value {
             color: #0072ff !important;
             text-shadow: none !important;
+        }
+
+        /* Popover Button in Light Mode */
+        div[data-testid="stPopover"] button {
+            background-color: #ffffff !important;
+            background: #ffffff !important;
+            color: #000000 !important;
+            border: 1px solid #ced4da !important;
+            border-radius: 10px !important;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05) !important;
+        }
+        div[data-testid="stPopover"] button * {
+            color: #000000 !important;
+        }
+        div[data-testid="stPopover"] button:hover {
+            background-color: #f8f9fa !important;
+            background: #f8f9fa !important;
+            border-color: #0072ff !important;
+        }
+        div[data-testid="stPopover"] button:hover * {
+            color: #0072ff !important;
+        }
+
+        /* Popover Container Content in Light Mode */
+        div[data-baseweb="popover"],
+        div[data-baseweb="popover"] div,
+        div[data-baseweb="popover"] ul,
+        div[data-baseweb="popover"] li,
+        div[data-baseweb="popover"] span,
+        div[data-baseweb="popover"] p,
+        div[data-baseweb="popover"] label,
+        div[data-baseweb="popover"] button {
+            background-color: #ffffff !important;
+            background: #ffffff !important;
+            color: #000000 !important;
+        }
+        div[data-baseweb="popover"] * {
+            color: #000000 !important;
+        }
+        div[data-baseweb="popover"] > div {
+            background-color: #ffffff !important;
+            border: 1px solid #ced4da !important;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1) !important;
         }
     </style>
     """, unsafe_allow_html=True)
