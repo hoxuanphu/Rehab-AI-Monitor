@@ -3956,21 +3956,27 @@ def xu_ly_frame(frame, model, chuan, frame_idx, fps=30, dynamic_chuan=None, acti
     chuan_vai = chuan.get("vai", 90)
     chuan_khuyu = chuan.get("khuyu", 170)
     
-    # NẾU CÓ DỮ LIỆU DYNAMIC (BẢN CHUẨN YOUTUBE) -> TÌM GÓC TẠI GIÂY TƯƠNG ỨNG
+    # NẾU CÓ DỮ LIỆU DYNAMIC (BẢN CHUẨN YOUTUBE) -> TỰ ĐỘNG ĐỐI CHIẾU THEO TƯ THẾ TƯƠNG ĐỒNG NHẤT
     if dynamic_chuan:
-        # Tìm frame gần nhất trong dynamic_chuan (dữ liệu thường theo giây)
-        # Giả sử dynamic_chuan là list các dict {'time': 0.1, 'vai': 30, 'khuyu': 175}
-        max_ref_time = max((x['time'] for x in dynamic_chuan), default=10.0) if dynamic_chuan else 10.0
-        if max_ref_time > 0:
-            target_time = round(thoi_gian_giay % max_ref_time, 1)
+        is_gay_ex = any(kw in str(exercise_name or '').lower() for kw in ["gậy", "gay", "pulley", "stick"])
+        is_day_ex = any(kw in str(exercise_name or '').lower() for kw in ["dây", "day", "kháng lực", "khang", "theraband", "band"])
+        is_codman_ex = any(kw in str(exercise_name or '').lower() for kw in ["codman"])
+        
+        current_vai = (goc_vai_t + goc_vai_p) / 2 if is_gay_ex else goc_vai
+        current_khuyu = (goc_khuyu_t + goc_khuyu_p) / 2 if is_gay_ex else goc_khuyu
+        
+        if is_gay_ex or is_codman_ex:
+            # Đối chiếu góc vai tương tự trong video mẫu
+            closest_ref = min(dynamic_chuan, key=lambda x: abs(x.get('vai', 90) - current_vai), default=None)
+        elif is_day_ex:
+            # Đối chiếu góc khuỷu tương tự trong video mẫu
+            closest_ref = min(dynamic_chuan, key=lambda x: abs(x.get('khuyu', 170) - current_khuyu), default=None)
         else:
-            target_time = round(thoi_gian_giay, 1)
+            closest_ref = min(dynamic_chuan, key=lambda x: abs(x.get('vai', 90) - current_vai), default=None)
             
-        # Lặp để tìm (hoặc dùng nội suy nếu muốn mượt hơn, ở đây ta lấy gần đúng nhất)
-        closest_ref = min(dynamic_chuan, key=lambda x: abs(x['time'] - target_time), default=None)
         if closest_ref:
-            chuan_vai = closest_ref['vai']
-            chuan_khuyu = closest_ref['khuyu']
+            chuan_vai = closest_ref.get('vai', chuan_vai)
+            chuan_khuyu = closest_ref.get('khuyu', chuan_khuyu)
 
     ss = chuan["sai_so"]
     
@@ -4122,7 +4128,7 @@ def xu_ly_frame(frame, model, chuan, frame_idx, fps=30, dynamic_chuan=None, acti
     box_x, box_y = int(15 * scale_factor), int(50 * scale_factor)
     is_gay = any(kw in str(exercise_name or '').lower() for kw in ["gậy", "gay", "pulley", "stick"])
     box_w = int(345 * scale_factor)
-    box_h = int(275 * scale_factor) if is_gay else int(235 * scale_factor)   # Tăng chiều cao để chứa thêm 3 giai đoạn
+    box_h = int(205 * scale_factor) if is_gay else int(235 * scale_factor)   # Tăng chiều cao để chứa thêm 3 giai đoạn (gậy ẩn 3 giai đoạn nên thu nhỏ)
     
     # TỐI ƯU: Chỉ tạo overlay cho vùng Box thay vì toàn bộ frame
     # Đảm bảo box không vượt quá biên frame
@@ -4180,26 +4186,33 @@ def xu_ly_frame(frame, model, chuan, frame_idx, fps=30, dynamic_chuan=None, acti
         cv2.putText(frame_output, f"{int(goc_khuyu)}", (box_x + int(180 * scale_factor), box_y + int(108 * scale_factor)), font, font_scale_large, mau_khuyu, text_thick)
         cv2.putText(frame_output, f"/{int(chuan_khuyu)}", (box_x + int(240 * scale_factor), box_y + int(108 * scale_factor)), font, font_scale_small, (140, 140, 140), text_thick_thin)
     
-    # === ĐƯỜNG PHÂN CÁCH ===
+    # === ĐƯỜNG PHÂN CÁCH VÀ CẢNH BÁO / 3 GIAI ĐOẠN ===
     cv2.line(frame_output, (box_x + int(8 * scale_factor), sep_y), (box_x + box_w - int(8 * scale_factor), sep_y), (80, 80, 100), text_thick_thin)
-    cv2.putText(frame_output, "3 GIAI DOAN (45/30/15):", (box_x + int(15 * scale_factor), sep_y + int(17 * scale_factor)), font, font_scale_mini, (150, 200, 255), text_thick_thin)
     
-    # === G1 (45°) ===
-    g1_label = f"G1(45): {g1_text}"
-    cv2.putText(frame_output, g1_label, (box_x + int(15 * scale_factor), sep_y + int(40 * scale_factor)), font, font_scale_g, g1_color, text_thick)
-    
-    # === G2 (30°) ===
-    g2_label = f"G2(30): {g2_text}"
-    cv2.putText(frame_output, g2_label, (box_x + int(15 * scale_factor), sep_y + int(63 * scale_factor)), font, font_scale_g, g2_color, text_thick)
-    
-    # === G3 (15°) ===
-    g3_label = f"G3(15): {g3_text}"
-    cv2.putText(frame_output, g3_label, (box_x + int(15 * scale_factor), sep_y + int(86 * scale_factor)), font, font_scale_g, g3_color, text_thick)
-    
-    warnings_list = get_warning_message(goc_vai, goc_khuyu, chuan_vai, chuan_khuyu, ss)
-    if warnings_list:
-        w_text = warnings_list[0][:38] + ".." if len(warnings_list[0]) > 38 else warnings_list[0]
-        cv2.putText(frame_output, f"! {w_text}", (box_x + int(15 * scale_factor), sep_y + int(108 * scale_factor)), font, font_scale_tiny, (0, 255, 255), text_thick_thin)
+    if not is_gay:
+        cv2.putText(frame_output, "3 GIAI DOAN (45/30/15):", (box_x + int(15 * scale_factor), sep_y + int(17 * scale_factor)), font, font_scale_mini, (150, 200, 255), text_thick_thin)
+        
+        # === G1 (45°) ===
+        g1_label = f"G1(45): {g1_text}"
+        cv2.putText(frame_output, g1_label, (box_x + int(15 * scale_factor), sep_y + int(40 * scale_factor)), font, font_scale_g, g1_color, text_thick)
+        
+        # === G2 (30°) ===
+        g2_label = f"G2(30): {g2_text}"
+        cv2.putText(frame_output, g2_label, (box_x + int(15 * scale_factor), sep_y + int(63 * scale_factor)), font, font_scale_g, g2_color, text_thick)
+        
+        # === G3 (15°) ===
+        g3_label = f"G3(15): {g3_text}"
+        cv2.putText(frame_output, g3_label, (box_x + int(15 * scale_factor), sep_y + int(86 * scale_factor)), font, font_scale_g, g3_color, text_thick)
+        
+        warnings_list = get_warning_message(goc_vai, goc_khuyu, chuan_vai, chuan_khuyu, ss)
+        if warnings_list:
+            w_text = warnings_list[0][:38] + ".." if len(warnings_list[0]) > 38 else warnings_list[0]
+            cv2.putText(frame_output, f"! {w_text}", (box_x + int(15 * scale_factor), sep_y + int(108 * scale_factor)), font, font_scale_tiny, (0, 255, 255), text_thick_thin)
+    else:
+        warnings_list = get_warning_message(goc_vai, goc_khuyu, chuan_vai, chuan_khuyu, ss)
+        if warnings_list:
+            w_text = warnings_list[0][:38] + ".." if len(warnings_list[0]) > 38 else warnings_list[0]
+            cv2.putText(frame_output, f"! {w_text}", (box_x + int(15 * scale_factor), sep_y + int(25 * scale_factor)), font, font_scale_tiny, (0, 255, 255), text_thick_thin)
 
     # Đảm bảo trả về kiểu dữ liệu Python chuẩn
     goc_vai = float(goc_vai)
@@ -4654,13 +4667,18 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
                     frame = cv2.resize(frame, (resize_width, new_h), interpolation=cv2.INTER_LINEAR)
                     
             # Xác định sai số theo giai đoạn hiện tại (G1=45, G2=30, G3=15)
-            idx_in_list = processed_count - 1
-            if idx_in_list < n1:
-                ss_dynamic = 45
-            elif idx_in_list < n2:
-                ss_dynamic = 30
+            # Riêng bài tập gậy, không chia 3 giai đoạn nên giữ nguyên sai số chuẩn
+            is_gay_ex = any(kw in str(ref_name or '').lower() for kw in ["gậy", "gay", "pulley", "stick"])
+            if is_gay_ex:
+                ss_dynamic = chuan.get("sai_so", 30)
             else:
-                ss_dynamic = 15
+                idx_in_list = processed_count - 1
+                if idx_in_list < n1:
+                    ss_dynamic = 45
+                elif idx_in_list < n2:
+                    ss_dynamic = 30
+                else:
+                    ss_dynamic = 15
                 
             chuan_dynamic = chuan.copy()
             chuan_dynamic['sai_so'] = ss_dynamic
@@ -5361,14 +5379,22 @@ def bat_dau_phan_tich_background(
                 df = pd.DataFrame(angle_data)
                 metrics = tinh_metrics_chi_tiet(df, bt_ncv)
                 
-                bounds = segment_frames(df)
-                n0, n1, n2, n3 = bounds
-                df_g1 = df.iloc[n0:n1]
-                df_g2 = df.iloc[n1:n2]
-                df_g3 = df.iloc[n2:n3]
-                metrics_g1 = recalc_metrics(df_g1, 45, bt_ncv.get('ten', ''))
-                metrics_g2 = recalc_metrics(df_g2, 30, bt_ncv.get('ten', ''))
-                metrics_g3 = recalc_metrics(df_g3, 15, bt_ncv.get('ten', ''))
+                is_gay_ex = any(kw in str(exercise_name or '').lower() for kw in ["gậy", "gay", "pulley", "stick"])
+                if is_gay_ex:
+                    metrics_overall = recalc_metrics(df, ss_override, bt_ncv.get('ten', ''))
+                    metrics_g1 = metrics_overall
+                    metrics_g2 = metrics_overall
+                    metrics_g3 = metrics_overall
+                    metrics["ty_le_tong_the"] = metrics_overall["do_chinh_xac"]
+                else:
+                    bounds = segment_frames(df)
+                    n0, n1, n2, n3 = bounds
+                    df_g1 = df.iloc[n0:n1]
+                    df_g2 = df.iloc[n1:n2]
+                    df_g3 = df.iloc[n2:n3]
+                    metrics_g1 = recalc_metrics(df_g1, 45, bt_ncv.get('ten', ''))
+                    metrics_g2 = recalc_metrics(df_g2, 30, bt_ncv.get('ten', ''))
+                    metrics_g3 = recalc_metrics(df_g3, 15, bt_ncv.get('ten', ''))
                 
                 stats_data = {
                     "do_chinh_xac": metrics["ty_le_tong_the"],
@@ -5706,7 +5732,7 @@ def recalc_metrics(df, ss, exercise_name="codman"):
     }
 
 def gui_bao_cao_tong_hop_3_giai_doan():
-    """Gửi báo cáo tổng hợp 3 giai đoạn cho cả Bác sĩ & Bệnh nhân"""
+    """Gửi báo cáo cho cả Bác sĩ & Bệnh nhân"""
     v_meta = st.session_state.get('current_eval_video')
     if not v_meta:
         # Fallback cho trường hợp vừa mới phân tích video xong và chưa có current_eval_video trong session_state
@@ -5746,8 +5772,75 @@ def gui_bao_cao_tong_hop_3_giai_doan():
             pass
 
     if df is None or len(df) == 0:
-        st.error("❌ Không thể nạp dữ liệu tọa độ chi tiết của video để phân tích 3 giai đoạn.")
+        st.error("❌ Không thể nạp dữ liệu tọa độ chi tiết của video để phân tích.")
         return False
+
+    is_gay_ex = any(kw in correct_ex_name.lower() for kw in ["gậy", "gay", "pulley", "stick"])
+    if is_gay_ex:
+        # Riêng bài tập gậy: chỉ có 1 giai đoạn tổng thể, không chia 3 giai đoạn
+        ss_standard = 30 # Hoặc lấy từ v_meta.get('sai_so', 30)
+        # Thử đọc sai_so từ video record
+        video_list_temp = load_data(VIDEOS_FILE)
+        for vx in video_list_temp:
+            if vx.get('video_path') == v_meta.get('video_path') or (vx.get('video_name') == v_meta.get('video_name') and vx.get('username') == v_meta.get('username')):
+                ss_standard = vx.get('sai_so', 30)
+                break
+                
+        metrics_overall = recalc_metrics(df, ss_standard, correct_ex_name)
+        acc_overall = metrics_overall['do_chinh_xac']
+        clinical_res = "Đúng" if acc_overall >= 80 else ("Gần đúng" if acc_overall >= 50 else "Sai")
+        
+        evals = load_data(EVALUATIONS_FILE)
+        evals.append({
+            "patient_username": v_meta['username'],
+            "doctor_username": "AI_Researcher",
+            "video_name": v_meta.get('video_name', 'N/A'),
+            "exercise": correct_ex_name,
+            "ai_accuracy": round(float(acc_overall), 1),
+            "ai_accuracy_g1": round(float(acc_overall), 1),
+            "ai_accuracy_g2": round(float(acc_overall), 1),
+            "ai_accuracy_g3": round(float(acc_overall), 1),
+            "doctor_result": clinical_res,
+            "errors": metrics_overall.get('warnings', []),
+            "comments": (
+                f"BÁO CÁO PHÂN TÍCH BÀI TẬP VỚI GẬY (TỔNG QUAN):\n"
+                f"🏒 Độ chính xác: {acc_overall:.1f}% | Đúng: {metrics_overall['frame_dung']}/{metrics_overall['tong_frame_hop_le']} frames\n"
+                f"🤖 AI đề xuất: " + ("Tập tốt, duy trì." if acc_overall >= 80 else ("Tập khá, lưu ý cùi chỏ." if acc_overall >= 50 else "Cần chuyên gia y tế hướng dẫn."))
+            ),
+            "plan": (
+                f"Kế hoạch luyện tập đề xuất:\n"
+                f"- Bài tập với gậy: Đạt {acc_overall:.1f}% - " + ("Đạt yêu cầu tự tập." if acc_overall >= 80 else "Cần rèn luyện thêm để giảm sai số.")
+            ),
+            "doctor_name": f"NCV: {st.session_state.user_info.get('full_name', 'Nghiên cứu viên')}",
+            "time": get_vn_now().strftime("%H:%M - %d/%m/%Y"),
+            "giai_doan": "Phân tích Tổng quan",
+            "sai_so": ss_standard
+        })
+        save_data(EVALUATIONS_FILE, evals)
+        
+        # Cập nhật VIDEOS_FILE
+        for v in video_list_temp:
+            if v.get('video_path') == v_meta.get('video_path') or (v.get('video_name') == v_meta.get('video_name') and v.get('username') == v_meta.get('username')):
+                v['accuracy'] = round(acc_overall, 1)
+                v['status'] = "Đã phân tích"
+                v['exercise'] = correct_ex_name
+                
+                # Để tương thích ngược với các giao diện mong chờ metrics_g1/g2/g3
+                v['metrics'] = {
+                    "do_chinh_xac": round(acc_overall, 1),
+                    "ty_le_gan_dung": metrics_overall['ty_le_gan_dung'],
+                    "frame_dung": metrics_overall['frame_dung'],
+                    "frame_gan_dung": metrics_overall['frame_gan_dung'],
+                    "tong_frame_hop_le": metrics_overall['tong_frame_hop_le'],
+                    "tb_goc_vai": metrics_overall['tb_goc_vai'],
+                    "tb_goc_khuyu": metrics_overall['tb_goc_khuyu'],
+                    "warnings": metrics_overall.get('warnings', []),
+                    "metrics_g1": metrics_overall,
+                    "metrics_g2": metrics_overall,
+                    "metrics_g3": metrics_overall
+                }
+        save_data(VIDEOS_FILE, video_list_temp)
+        return True
 
     # Tính toán chỉ số cho cả 3 giai đoạn tương ứng với từng phân đoạn
     bounds = segment_frames(df)
@@ -7171,100 +7264,153 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
                 st.rerun()
         st.markdown("<br>", unsafe_allow_html=True)
 
+    is_gay_ex = any(kw in str(bt.get('ten', '')).lower() for kw in ["gậy", "gay", "pulley", "stick"])
+
     # Tính toán chỉ số cho cả 3 giai đoạn
     if df is not None and len(df) > 0:
-        bounds = segment_frames(df)
-        n0, n1, n2, n3 = bounds
-        df_g1 = df.iloc[n0:n1]
-        df_g2 = df.iloc[n1:n2]
-        df_g3 = df.iloc[n2:n3]
-        metrics_g1 = recalc_metrics(df_g1, 45, bt.get('ten', ''))
-        metrics_g2 = recalc_metrics(df_g2, 30, bt.get('ten', ''))
-        metrics_g3 = recalc_metrics(df_g3, 15, bt.get('ten', ''))
+        if is_gay_ex:
+            metrics_overall = recalc_metrics(df, tk.get('sai_so', bt['chuan']['sai_so']), bt.get('ten', ''))
+            metrics_g1 = metrics_overall
+            metrics_g2 = metrics_overall
+            metrics_g3 = metrics_overall
+        else:
+            bounds = segment_frames(df)
+            n0, n1, n2, n3 = bounds
+            df_g1 = df.iloc[n0:n1]
+            df_g2 = df.iloc[n1:n2]
+            df_g3 = df.iloc[n2:n3]
+            metrics_g1 = recalc_metrics(df_g1, 45, bt.get('ten', ''))
+            metrics_g2 = recalc_metrics(df_g2, 30, bt.get('ten', ''))
+            metrics_g3 = recalc_metrics(df_g3, 15, bt.get('ten', ''))
     else:
         metrics_g1 = tk.get("metrics_g1", tk)
         metrics_g2 = tk.get("metrics_g2", tk)
         metrics_g3 = tk.get("metrics_g3", tk)
 
-    # 1. PHÂN CHIA VÀ SO SÁNH 3 GIAI ĐOẠN TẬP LUYỆN
-    st.markdown("### 🏥 HIỆU SUẤT THEO 3 GIAI ĐOẠN HỒI PHỤC (ĐỐI CHIẾU VIDEO YOUTUBE)")
-    col_g1, col_g2, col_g3 = st.columns(3)
-    
-    with col_g1:
+    if is_gay_ex:
+        # 1. HIỂN THỊ HIỆU SUẤT TỔNG QUAN (KHÔNG CHIA GIAI ĐOẠN)
+        st.markdown("### 🏥 HIỆU SUẤT TẬP LUYỆN TỔNG QUAN (ĐỐI CHIẾU VIDEO YOUTUBE)")
+        
         st.markdown(f"""
-        <div style="background: linear-gradient(135deg, rgba(76, 175, 80, 0.1) 0%, rgba(76, 175, 80, 0.2) 100%); 
-                    padding: 15px; border-radius: 12px; border: 1px solid #4CAF50; text-align: center;">
-            <h4 style="margin: 0; color: #4CAF50; font-size: 1.05rem; font-weight: bold;">🌱 Giai đoạn 1: Khởi đầu</h4>
-            <p style="margin: 5px 0; font-size: 0.85rem; color: #ccc;">Sai số cho phép: <b>45°</b></p>
-            <h3 style="margin: 10px 0; color: #fff; font-size: 1.8rem; font-weight: bold;">{metrics_g1['do_chinh_xac']:.1f}%</h3>
-            <p style="margin: 0; font-size: 0.75rem; color: #bbb;">Đúng: <b>{metrics_g1['frame_dung']}</b> | Gần đúng: <b>{metrics_g1['frame_gan_dung']}</b> | Sai: <b>{metrics_g1['frame_sai']}</b></p>
+        <div style="background: linear-gradient(135deg, rgba(0, 198, 255, 0.1) 0%, rgba(0, 114, 255, 0.2) 100%); 
+                    padding: 20px; border-radius: 12px; border: 1px solid #00c6ff; text-align: center; margin-bottom: 15px;">
+            <h4 style="margin: 0; color: #00c6ff; font-size: 1.15rem; font-weight: bold;">🏒 Hiệu suất bài tập với gậy</h4>
+            <p style="margin: 5px 0; font-size: 0.9rem; color: #ccc;">Sai số cho phép: <b>{tk.get('sai_so', bt['chuan']['sai_so'])}°</b></p>
+            <h3 style="margin: 10px 0; color: #fff; font-size: 2.2rem; font-weight: bold;">{metrics_g2['do_chinh_xac']:.1f}%</h3>
+            <p style="margin: 0; font-size: 0.85rem; color: #bbb;">Đúng: <b>{metrics_g2['frame_dung']}</b> | Gần đúng: <b>{metrics_g2['frame_gan_dung']}</b> | Sai: <b>{metrics_g2['frame_sai']}</b></p>
         </div>
         """, unsafe_allow_html=True)
         
-    with col_g2:
+        # AI Suggestion
+        acc_val = metrics_g2['do_chinh_xac']
+        if acc_val >= 80:
+            recommended_gd = "Đạt yêu cầu - Tốt"
+            gd_color = "#4CAF50"
+            reason = f"Bệnh nhân đạt độ chính xác {acc_val:.1f}% ở bài tập với gậy. Kết quả rất tốt, khớp vai di chuyển đồng bộ với mẫu và không bị co cứng hay hạn chế tầm vận động."
+        elif acc_val >= 50:
+            recommended_gd = "Khá - Cần luyện tập thêm"
+            gd_color = "#2196F3"
+            reason = f"Bệnh nhân đạt độ chính xác {acc_val:.1f}%. Cử động khớp vai tương đối tốt nhưng cần lưu ý giữ thẳng tay và kiểm soát góc khuỷu hơn nữa."
+        else:
+            recommended_gd = "Chưa đạt - Cần giám sát"
+            gd_color = "#F44336"
+            reason = f"Độ chính xác chỉ đạt {acc_val:.1f}%. Bệnh nhân nâng gậy chưa đúng biên độ hoặc gập cùi chỏ (khuỷu tay) quá nhiều. Cần chuyên gia y tế hướng dẫn lại."
+            
         st.markdown(f"""
-        <div style="background: linear-gradient(135deg, rgba(33, 150, 243, 0.1) 0%, rgba(33, 150, 243, 0.2) 100%); 
-                    padding: 15px; border-radius: 12px; border: 1px solid #2196F3; text-align: center;">
-            <h4 style="margin: 0; color: #2196F3; font-size: 1.05rem; font-weight: bold;">📈 Giai đoạn 2: Hồi phục</h4>
-            <p style="margin: 5px 0; font-size: 0.85rem; color: #ccc;">Sai số cho phép: <b>30°</b> (Trung bình)</p>
-            <h3 style="margin: 10px 0; color: #fff; font-size: 1.8rem; font-weight: bold;">{metrics_g2['do_chinh_xac']:.1f}%</h3>
-            <p style="margin: 0; font-size: 0.75rem; color: #bbb;">Đúng: <b>{metrics_g2['frame_dung']}</b> | Gần đúng: <b>{metrics_g2['frame_gan_dung']}</b> | Sai: <b>{metrics_g2['frame_sai']}</b></p>
+        <div style="background: rgba(255, 255, 255, 0.03); padding: 18px; border-radius: 12px; border: 1px dashed rgba(255, 255, 255, 0.15); margin-top: 15px; margin-bottom: 10px;">
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+                <span style="font-size: 1.3rem;">🤖</span>
+                <h4 style="margin: 0; color: #00c6ff; font-size: 1.05rem; font-weight: bold;">HỆ THỐNG GỢI Ý ĐÁNH GIÁ PHÙ HỢP (AI CLASSIFIER)</h4>
+            </div>
+            <p style="margin: 5px 0; font-size: 0.9rem;">
+                Dựa trên kết quả tập luyện thực tế đối chiếu với video mẫu YouTube, AI gợi ý:
+                <b style="color: {gd_color}; font-size: 1rem;">{recommended_gd}</b>
+            </p>
+            <p style="margin: 5px 0 0 0; font-size: 0.85rem; color: #bbb; font-style: italic;">
+                <b>Lý do lâm sàng:</b> {reason}
+            </p>
         </div>
         """, unsafe_allow_html=True)
-        
-    with col_g3:
-        st.markdown(f"""
-        <div style="background: linear-gradient(135deg, rgba(244, 67, 54, 0.1) 0%, rgba(244, 67, 54, 0.2) 100%); 
-                    padding: 15px; border-radius: 12px; border: 1px solid #F44336; text-align: center;">
-            <h4 style="margin: 0; color: #F44336; font-size: 1.05rem; font-weight: bold;">🎯 Giai đoạn 3: Chuẩn xác</h4>
-            <p style="margin: 5px 0; font-size: 0.85rem; color: #ccc;">Sai số cho phép: <b>15°</b> (Khắt khe)</p>
-            <h3 style="margin: 10px 0; color: #fff; font-size: 1.8rem; font-weight: bold;">{metrics_g3['do_chinh_xac']:.1f}%</h3>
-            <p style="margin: 0; font-size: 0.75rem; color: #bbb;">Đúng: <b>{metrics_g3['frame_dung']}</b> | Gần đúng: <b>{metrics_g3['frame_gan_dung']}</b> | Sai: <b>{metrics_g3['frame_sai']}</b></p>
-        </div>
-        """, unsafe_allow_html=True)
-
-    # 1.1. AI TỰ ĐỘNG GỢI Ý GIAI ĐOẠN LUYỆN TẬP PHÙ HỢP
-    acc_g1 = metrics_g1['do_chinh_xac']
-    acc_g2 = metrics_g2['do_chinh_xac']
-    acc_g3 = metrics_g3['do_chinh_xac']
-    
-    # Xác định giai đoạn gợi ý tự động dựa trên độ chính xác
-    if acc_g3 >= 80:
-        recommended_gd = "Giai đoạn 3 (Chuẩn xác)"
-        gd_color = "#F44336"
-        reason = f"Bệnh nhân đạt độ chính xác {acc_g3:.1f}% ở mức sai số nhỏ (15°). Đây là kết quả xuất sắc, khớp tập luyện rất tốt và bệnh nhân đã đạt mức hồi phục phục hồi tối đa!"
-    elif acc_g2 >= 75:
-        recommended_gd = "Giai đoạn 3 (Chuẩn xác) - Sắp hoàn thành"
-        gd_color = "#2196F3"
-        reason = f"Bệnh nhân đã tập tốt ở Giai đoạn 2 (độ chính xác {acc_g2:.1f}% với sai số 30°). Bệnh nhân có thể tự tin chuyển sang luyện tập ở Giai đoạn 3 (sai số khắt khe 15°)."
-    elif acc_g2 >= 50:
-        recommended_gd = "Giai đoạn 2 (Hồi phục)"
-        gd_color = "#2196F3"
-        reason = f"Bệnh nhân đạt độ chính xác {acc_g2:.1f}% ở mức sai số 30°. Khớp vai và khuỷu tay đã thích nghi khá tốt, cần tiếp tục tập luyện ở giai đoạn này."
-    elif acc_g1 >= 50:
-        recommended_gd = "Giai đoạn 1 (Khởi đầu)"
-        gd_color = "#4CAF50"
-        reason = f"Bệnh nhân mới tập đạt độ chính xác {acc_g1:.1f}% ở mức sai số lớn (45°). Khớp vai ban đầu còn cứng nên chấp nhận sai số lớn này, khuyên bệnh nhân kiên trì làm quen với khớp."
     else:
-        recommended_gd = "Giai đoạn Học hỏi ban đầu (Dưới chuẩn GĐ1)"
-        gd_color = "#E65100"
-        reason = f"Độ chính xác ở Giai đoạn 1 chỉ đạt {acc_g1:.1f}%. Bệnh nhân đang thực hiện sai tư thế khớp hoặc khớp vai cực kỳ cứng. Cần hướng dẫn trực tiếp từ chuyên gia y tế."
+        # 1. PHÂN CHIA VÀ SO SÁNH 3 GIAI ĐOẠN TẬP LUYỆN
+        st.markdown("### 🏥 HIỆU SUẤT THEO 3 GIAI ĐOẠN HỒI PHỤC (ĐỐI CHIẾU VIDEO YOUTUBE)")
+        col_g1, col_g2, col_g3 = st.columns(3)
         
-    st.markdown(f"""
-    <div style="background: rgba(255, 255, 255, 0.03); padding: 18px; border-radius: 12px; border: 1px dashed rgba(255, 255, 255, 0.15); margin-top: 15px; margin-bottom: 10px;">
-        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
-            <span style="font-size: 1.3rem;">🤖</span>
-            <h4 style="margin: 0; color: #00c6ff; font-size: 1.05rem; font-weight: bold;">HỆ THỐNG GỢI Ý GIAI ĐOẠN TẬP PHÙ HỢP (AI CLASSIFIER)</h4>
+        with col_g1:
+            st.markdown(f"""
+            <div style="background: linear-gradient(135deg, rgba(76, 175, 80, 0.1) 0%, rgba(76, 175, 80, 0.2) 100%); 
+                        padding: 15px; border-radius: 12px; border: 1px solid #4CAF50; text-align: center;">
+                <h4 style="margin: 0; color: #4CAF50; font-size: 1.05rem; font-weight: bold;">🌱 Giai đoạn 1: Khởi đầu</h4>
+                <p style="margin: 5px 0; font-size: 0.85rem; color: #ccc;">Sai số cho phép: <b>45°</b></p>
+                <h3 style="margin: 10px 0; color: #fff; font-size: 1.8rem; font-weight: bold;">{metrics_g1['do_chinh_xac']:.1f}%</h3>
+                <p style="margin: 0; font-size: 0.75rem; color: #bbb;">Đúng: <b>{metrics_g1['frame_dung']}</b> | Gần đúng: <b>{metrics_g1['frame_gan_dung']}</b> | Sai: <b>{metrics_g1['frame_sai']}</b></p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with col_g2:
+            st.markdown(f"""
+            <div style="background: linear-gradient(135deg, rgba(33, 150, 243, 0.1) 0%, rgba(33, 150, 243, 0.2) 100%); 
+                        padding: 15px; border-radius: 12px; border: 1px solid #2196F3; text-align: center;">
+                <h4 style="margin: 0; color: #2196F3; font-size: 1.05rem; font-weight: bold;">📈 Giai đoạn 2: Hồi phục</h4>
+                <p style="margin: 5px 0; font-size: 0.85rem; color: #ccc;">Sai số cho phép: <b>30°</b> (Trung bình)</p>
+                <h3 style="margin: 10px 0; color: #fff; font-size: 1.8rem; font-weight: bold;">{metrics_g2['do_chinh_xac']:.1f}%</h3>
+                <p style="margin: 0; font-size: 0.75rem; color: #bbb;">Đúng: <b>{metrics_g2['frame_dung']}</b> | Gần đúng: <b>{metrics_g2['frame_gan_dung']}</b> | Sai: <b>{metrics_g2['frame_sai']}</b></p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with col_g3:
+            st.markdown(f"""
+            <div style="background: linear-gradient(135deg, rgba(244, 67, 54, 0.1) 0%, rgba(244, 67, 54, 0.2) 100%); 
+                        padding: 15px; border-radius: 12px; border: 1px solid #F44336; text-align: center;">
+                <h4 style="margin: 0; color: #F44336; font-size: 1.05rem; font-weight: bold;">🎯 Giai đoạn 3: Chuẩn xác</h4>
+                <p style="margin: 5px 0; font-size: 0.85rem; color: #ccc;">Sai số cho phép: <b>15°</b> (Khắt khe)</p>
+                <h3 style="margin: 10px 0; color: #fff; font-size: 1.8rem; font-weight: bold;">{metrics_g3['do_chinh_xac']:.1f}%</h3>
+                <p style="margin: 0; font-size: 0.75rem; color: #bbb;">Đúng: <b>{metrics_g3['frame_dung']}</b> | Gần đúng: <b>{metrics_g3['frame_gan_dung']}</b> | Sai: <b>{metrics_g3['frame_sai']}</b></p>
+            </div>
+            """, unsafe_allow_html=True)
+
+        # 1.1. AI TỰ ĐỘNG GỢI Ý GIAI ĐOẠN LUYỆN TẬP PHÙ HỢP
+        acc_g1 = metrics_g1['do_chinh_xac']
+        acc_g2 = metrics_g2['do_chinh_xac']
+        acc_g3 = metrics_g3['do_chinh_xac']
+        
+        # Xác định giai đoạn gợi ý tự động dựa trên độ chính xác
+        if acc_g3 >= 80:
+            recommended_gd = "Giai đoạn 3 (Chuẩn xác)"
+            gd_color = "#F44336"
+            reason = f"Bệnh nhân đạt độ chính xác {acc_g3:.1f}% ở mức sai số nhỏ (15°). Đây là kết quả xuất sắc, khớp tập luyện rất tốt và bệnh nhân đã đạt mức hồi phục phục hồi tối đa!"
+        elif acc_g2 >= 75:
+            recommended_gd = "Giai đoạn 3 (Chuẩn xác) - Sắp hoàn thành"
+            gd_color = "#2196F3"
+            reason = f"Bệnh nhân đã tập tốt ở Giai đoạn 2 (độ chính xác {acc_g2:.1f}% với sai số 30°). Bệnh nhân có thể tự tin chuyển sang luyện tập ở Giai đoạn 3 (sai số khắt khe 15°)."
+        elif acc_g2 >= 50:
+            recommended_gd = "Giai đoạn 2 (Hồi phục)"
+            gd_color = "#2196F3"
+            reason = f"Bệnh nhân đạt độ chính xác {acc_g2:.1f}% ở mức sai số 30°. Khớp vai và khuỷu tay đã thích nghi khá tốt, cần tiếp tục tập luyện ở giai đoạn này."
+        elif acc_g1 >= 50:
+            recommended_gd = "Giai đoạn 1 (Khởi đầu)"
+            gd_color = "#4CAF50"
+            reason = f"Bệnh nhân mới tập đạt độ chính xác {acc_g1:.1f}% ở mức sai số lớn (45°). Khớp vai ban đầu còn cứng nên chấp nhận sai số lớn này, khuyên bệnh nhân kiên trì làm quen với khớp."
+        else:
+            recommended_gd = "Giai đoạn Học hỏi ban đầu (Dưới chuẩn GĐ1)"
+            gd_color = "#E65100"
+            reason = f"Độ chính xác ở Giai đoạn 1 chỉ đạt {acc_g1:.1f}%. Bệnh nhân đang thực hiện sai tư thế khớp hoặc khớp vai cực kỳ cứng. Cần hướng dẫn trực tiếp từ chuyên gia y tế."
+            
+        st.markdown(f"""
+        <div style="background: rgba(255, 255, 255, 0.03); padding: 18px; border-radius: 12px; border: 1px dashed rgba(255, 255, 255, 0.15); margin-top: 15px; margin-bottom: 10px;">
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+                <span style="font-size: 1.3rem;">🤖</span>
+                <h4 style="margin: 0; color: #00c6ff; font-size: 1.05rem; font-weight: bold;">HỆ THỐNG GỢI Ý GIAI ĐOẠN TẬP PHÙ HỢP (AI CLASSIFIER)</h4>
+            </div>
+            <p style="margin: 5px 0; font-size: 0.9rem;">
+                Dựa trên kết quả tập luyện thực tế đối chiếu từng giây với video mẫu YouTube, AI gợi ý mức tập phù hợp của bệnh nhân:
+                <b style="color: {gd_color}; font-size: 1rem;">{recommended_gd}</b>
+            </p>
+            <p style="margin: 5px 0 0 0; font-size: 0.85rem; color: #bbb; font-style: italic;">
+                <b>Lý do lâm sàng:</b> {reason}
+            </p>
         </div>
-        <p style="margin: 5px 0; font-size: 0.9rem;">
-            Dựa trên kết quả tập luyện thực tế đối chiếu từng giây với video mẫu YouTube, AI gợi ý mức tập phù hợp của bệnh nhân:
-            <b style="color: {gd_color}; font-size: 1rem;">{recommended_gd}</b>
-        </p>
-        <p style="margin: 5px 0 0 0; font-size: 0.85rem; color: #bbb; font-style: italic;">
-            <b>Lý do lâm sàng:</b> {reason}
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
 
     if user_role == "Nghiên cứu viên":
         st.markdown("<br>", unsafe_allow_html=True)
@@ -7272,46 +7418,55 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
         cta_bg = "linear-gradient(135deg, rgba(0, 114, 255, 0.1) 0%, rgba(0, 198, 255, 0.1) 100%)" if not is_light else "linear-gradient(135deg, rgba(0, 114, 255, 0.05) 0%, rgba(0, 198, 255, 0.05) 100%)"
         cta_border = "rgba(0, 198, 255, 0.4)"
         
+        btn_label = "📤 GỬI BÁO CÁO PHÂN TÍCH CHO BS & BN" if is_gay_ex else "📤 GỬI BÁO CÁO TỔNG HỢP 3 GIAI ĐOẠN CHO BS & BN"
+        desc_text = "Bấm nút dưới đây để gửi báo cáo phân tích toàn diện cùng ý kiến gợi ý của AI cho cả <b>Bác sĩ điều trị</b> và <b>Bệnh nhân</b> xem."
+        success_text = "✅ Đã gửi báo cáo phân tích thành công!"
+        
         st.markdown(f"""
         <div style="background: {cta_bg}; border: 1px solid {cta_border}; padding: 18px; border-radius: 12px; box-shadow: 0 8px 30px rgba(0, 114, 255, 0.15); margin-bottom: 10px;">
             <h4 style="margin: 0 0 8px 0; color: #00c6ff; font-weight: bold; font-size: 1.1rem; display: flex; align-items: center; gap: 10px;">
-                📤 GỬI KẾT QUẢ TỔNG HỢP CẢ 3 GIAI ĐOẠN CHO BS & BN
+                {btn_label}
             </h4>
             <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #ccc;">
-                Bấm nút dưới đây để gửi báo cáo phân tích toàn diện <b>cả 3 giai đoạn</b> (ngưỡng 45°, 30°, 15°) cùng ý kiến gợi ý của AI cho cả <b>Bác sĩ điều trị</b> và <b>Bệnh nhân</b> xem.
+                {desc_text}
             </p>
         </div>
         """, unsafe_allow_html=True)
         
-        if st.button("📤 GỬI BÁO CÁO TỔNG HỢP 3 GIAI ĐOẠN CHO BS & BN", key=f"btn_send_3_stages_main_{key_suffix}", type="primary", use_container_width=True):
+        if st.button(btn_label, key=f"btn_send_3_stages_main_{key_suffix}", type="primary", use_container_width=True):
             if gui_bao_cao_tong_hop_3_giai_doan():
-                st.success("✅ Đã gửi báo cáo tổng hợp 3 giai đoạn thành công!")
+                st.success(success_text)
                 st.balloons()
                 st.rerun()
 
     st.markdown("<br>", unsafe_allow_html=True)
     
-    # 2. BỘ CHỌN CHI TIẾT TẬP TRỰC QUAN
-    gd_selected = st.radio("🔍 Chọn Giai đoạn hiển thị chi tiết biểu đồ & Nhận định lâm sàng:",
-                           ["Giai đoạn 1 (Khởi đầu - Sai số 45°)", 
-                            "Giai đoạn 2 (Hồi phục - Sai số 30°)", 
-                            "Giai đoạn 3 (Chuẩn xác - Sai số 15°)"],
-                           index=1,
-                           horizontal=True,
-                           key=f"analysis_stage_sel_{key_suffix}")
-    
-    if "Giai đoạn 1" in gd_selected:
-        tk_selected = metrics_g1
-        sai_so_selected = 45
-        giai_doan_label = "Giai đoạn 1"
-    elif "Giai đoạn 3" in gd_selected:
-        tk_selected = metrics_g3
-        sai_so_selected = 15
-        giai_doan_label = "Giai đoạn 3"
-    else:
+    if is_gay_ex:
         tk_selected = metrics_g2
-        sai_so_selected = 30
-        giai_doan_label = "Giai đoạn 2"
+        sai_so_selected = tk.get('sai_so', bt['chuan']['sai_so'])
+        giai_doan_label = "Tổng quan bài tập"
+    else:
+        # 2. BỘ CHỌN CHI TIẾT TẬP TRỰC QUAN
+        gd_selected = st.radio("🔍 Chọn Giai đoạn hiển thị chi tiết biểu đồ & Nhận định lâm sàng:",
+                               ["Giai đoạn 1 (Khởi đầu - Sai số 45°)", 
+                                "Giai đoạn 2 (Hồi phục - Sai số 30°)", 
+                                "Giai đoạn 3 (Chuẩn xác - Sai số 15°)"],
+                               index=1,
+                               horizontal=True,
+                               key=f"analysis_stage_sel_{key_suffix}")
+        
+        if "Giai đoạn 1" in gd_selected:
+            tk_selected = metrics_g1
+            sai_so_selected = 45
+            giai_doan_label = "Giai đoạn 1"
+        elif "Giai đoạn 3" in gd_selected:
+            tk_selected = metrics_g3
+            sai_so_selected = 15
+            giai_doan_label = "Giai đoạn 3"
+        else:
+            tk_selected = metrics_g2
+            sai_so_selected = 30
+            giai_doan_label = "Giai đoạn 2"
 
     # Chuẩn bị dữ liệu thống kê tổng hợp (Mở rộng cho NCV)
     fail_count_total = tk_selected['tong_frame_hop_le'] - tk_selected['frame_dung'] - tk_selected['frame_gan_dung']
@@ -7588,88 +7743,155 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
             rmse_val2 = metrics_g2.get('mae_tong', 0) * 1.25
             rmse_val3 = metrics_g3.get('mae_tong', 0) * 1.25
             
-            st.markdown(f"""
-            <div class="research-table-container">
-                <table style="width: 100%; border-collapse: collapse; font-size: 0.95rem;">
-                    <thead style="background: rgba(56, 189, 248, 0.1);">
-                        <tr style="border-bottom: 2px solid #38bdf8; text-align: left;">
-                            <th style="padding: 12px;">Chỉ số nghiên cứu</th>
-                            <th style="padding: 12px; text-align: center;">Ký hiệu</th>
-                            <th style="padding: 12px; text-align: center;">Giai đoạn 1 (Sai số 45°)</th>
-                            <th style="padding: 12px; text-align: center;">Giai đoạn 2 (Sai số 30°)</th>
-                            <th style="padding: 12px; text-align: center;">Giai đoạn 3 (Sai số 15°)</th>
-                            <th style="padding: 12px;">Phân loại / Chuyên môn</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
-                            <td style="padding: 10px;">Độ chính xác hệ thống</td>
-                            <td style="padding: 10px; text-align: center;"><b>ACC</b></td>
-                            <td style="padding: 10px; text-align: center; color: #10b981; font-weight: bold;">{metrics_g1['do_chinh_xac']:.1f}%</td>
-                            <td style="padding: 10px; text-align: center; color: #10b981; font-weight: bold;">{metrics_g2['do_chinh_xac']:.1f}%</td>
-                            <td style="padding: 10px; text-align: center; color: #10b981; font-weight: bold;">{metrics_g3['do_chinh_xac']:.1f}%</td>
-                            <td style="padding: 10px;">Được đối soát theo từng giây với video YouTube mẫu</td>
-                        </tr>
-                        <tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
-                            <td style="padding: 10px;">Sai số tuyệt đối trung bình</td>
-                            <td style="padding: 10px; text-align: center;"><b>MAE</b></td>
-                            <td style="padding: 10px; text-align: center; color: #f43f5e;">{metrics_g1.get('mae_tong', 0):.1f}°</td>
-                            <td style="padding: 10px; text-align: center; color: #f43f5e;">{metrics_g2.get('mae_tong', 0):.1f}°</td>
-                            <td style="padding: 10px; text-align: center; color: #f43f5e;">{metrics_g3.get('mae_tong', 0):.1f}°</td>
-                            <td style="padding: 10px;">{'✅ Tốt' if metrics_g2.get('mae_tong', 0) < 5 else '⚠️ Sai số góc cao'}</td>
-                        </tr>
-                        <tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
-                            <td style="padding: 10px;">Sai số bình phương trung bình</td>
-                            <td style="padding: 10px; text-align: center;"><b>RMSE</b></td>
-                            <td style="padding: 10px; text-align: center; color: #f43f5e;">{rmse_val1:.1f}°</td>
-                            <td style="padding: 10px; text-align: center; color: #f43f5e;">{rmse_val2:.1f}°</td>
-                            <td style="padding: 10px; text-align: center; color: #f43f5e;">{rmse_val3:.1f}°</td>
-                            <td style="padding: 10px;">Ước lượng sai số bình phương trung bình</td>
-                        </tr>
-                        <tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
-                            <td style="padding: 10px;">Hệ số tương quan nội lớp</td>
-                            <td style="padding: 10px; text-align: center;"><b>ICC</b></td>
-                            <td style="padding: 10px; text-align: center; color: #38bdf8;">{metrics_g1.get('icc', 0):.2f}</td>
-                            <td style="padding: 10px; text-align: center; color: #38bdf8;">{metrics_g2.get('icc', 0):.2f}</td>
-                            <td style="padding: 10px; text-align: center; color: #38bdf8;">{metrics_g3.get('icc', 0):.2f}</td>
-                            <td style="padding: 10px;">{'✅ Rất tốt' if metrics_g2.get('icc', 0) >= 0.75 else '⚠️ Trung bình'}</td>
-                        </tr>
-                        <tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
-                            <td style="padding: 10px;">Độ nhạy phân loại</td>
-                            <td style="padding: 10px; text-align: center;"><b>Recall</b></td>
-                            <td style="padding: 10px; text-align: center;">{metrics_g1.get('recall', 0):.2f}</td>
-                            <td style="padding: 10px; text-align: center;">{metrics_g2.get('recall', 0):.2f}</td>
-                            <td style="padding: 10px; text-align: center;">{metrics_g3.get('recall', 0):.2f}</td>
-                            <td style="padding: 10px;">Khả năng phát hiện đúng tư thế</td>
-                        </tr>
-                        <tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
-                            <td style="padding: 10px;">Độ đặc hiệu phân loại</td>
-                            <td style="padding: 10px; text-align: center;"><b>Precision</b></td>
-                            <td style="padding: 10px; text-align: center;">{metrics_g1.get('precision', 0):.2f}</td>
-                            <td style="padding: 10px; text-align: center;">{metrics_g2.get('precision', 0):.2f}</td>
-                            <td style="padding: 10px; text-align: center;">{metrics_g3.get('precision', 0):.2f}</td>
-                            <td style="padding: 10px;">Độ tin cậy cảnh báo sai tư thế</td>
-                        </tr>
-                        <tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
-                            <td style="padding: 10px;">Chỉ số cân bằng F1</td>
-                            <td style="padding: 10px; text-align: center;"><b>F1-Score</b></td>
-                            <td style="padding: 10px; text-align: center; color: #fbbf24;">{metrics_g1.get('f1_score', 0):.2f}</td>
-                            <td style="padding: 10px; text-align: center; color: #fbbf24;">{metrics_g2.get('f1_score', 0):.2f}</td>
-                            <td style="padding: 10px; text-align: center; color: #fbbf24;">{metrics_g3.get('f1_score', 0):.2f}</td>
-                            <td style="padding: 10px;">Hiệu suất AI tổng hợp chéo</td>
-                        </tr>
-                        <tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
-                            <td style="padding: 10px;">Số lần tập đúng (Pass)</td>
-                            <td style="padding: 10px; text-align: center;"><b>Pass</b></td>
-                            <td style="padding: 10px; text-align: center;">{metrics_g1['frame_dung']}</td>
-                            <td style="padding: 10px; text-align: center;">{metrics_g2['frame_dung']}</td>
-                            <td style="padding: 10px; text-align: center;">{metrics_g3['frame_dung']}</td>
-                            <td style="padding: 10px;">Số lượng khung hình đạt chuẩn theo giai đoạn</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-            """, unsafe_allow_html=True)
+            if is_gay_ex:
+                rmse_val = tk_selected.get('mae_tong', 0) * 1.25
+                st.markdown(f"""
+                <div class="research-table-container">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.95rem;">
+                        <thead style="background: rgba(56, 189, 248, 0.1);">
+                            <tr style="border-bottom: 2px solid #38bdf8; text-align: left;">
+                                <th style="padding: 12px;">Chỉ số nghiên cứu</th>
+                                <th style="padding: 12px; text-align: center;">Ký hiệu</th>
+                                <th style="padding: 12px; text-align: center;">Tổng quan (Sai số {sai_so_selected}°)</th>
+                                <th style="padding: 12px;">Phân loại / Chuyên môn</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
+                                <td style="padding: 10px;">Độ chính xác hệ thống</td>
+                                <td style="padding: 10px; text-align: center;"><b>ACC</b></td>
+                                <td style="padding: 10px; text-align: center; color: #10b981; font-weight: bold;">{tk_selected['do_chinh_xac']:.1f}%</td>
+                                <td style="padding: 10px;">Được đối soát theo tư thế tương đương với video YouTube mẫu</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
+                                <td style="padding: 10px;">Sai số tuyệt đối trung bình</td>
+                                <td style="padding: 10px; text-align: center;"><b>MAE</b></td>
+                                <td style="padding: 10px; text-align: center; color: #f43f5e;">{tk_selected.get('mae_tong', 0):.1f}°</td>
+                                <td style="padding: 10px;">{'✅ Tốt' if tk_selected.get('mae_tong', 0) < 5 else '⚠️ Sai số góc cao'}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
+                                <td style="padding: 10px;">Sai số bình phương trung bình</td>
+                                <td style="padding: 10px; text-align: center;"><b>RMSE</b></td>
+                                <td style="padding: 10px; text-align: center; color: #f43f5e;">{rmse_val:.1f}°</td>
+                                <td style="padding: 10px;">Ước lượng sai số bình phương trung bình</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
+                                <td style="padding: 10px;">Hệ số tương quan nội lớp</td>
+                                <td style="padding: 10px; text-align: center;"><b>ICC</b></td>
+                                <td style="padding: 10px; text-align: center; color: #38bdf8;">{tk_selected.get('icc', 0):.2f}</td>
+                                <td style="padding: 10px;">{'✅ Rất tốt' if tk_selected.get('icc', 0) >= 0.75 else '⚠️ Trung bình'}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
+                                <td style="padding: 10px;">Độ nhạy phân loại</td>
+                                <td style="padding: 10px; text-align: center;"><b>Recall</b></td>
+                                <td style="padding: 10px; text-align: center;">{tk_selected.get('recall', 0):.2f}</td>
+                                <td style="padding: 10px;">Khả năng phát hiện đúng tư thế</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
+                                <td style="padding: 10px;">Độ đặc hiệu phân loại</td>
+                                <td style="padding: 10px; text-align: center;"><b>Precision</b></td>
+                                <td style="padding: 10px; text-align: center;">{tk_selected.get('precision', 0):.2f}</td>
+                                <td style="padding: 10px;">Độ tin cậy cảnh báo sai tư thế</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
+                                <td style="padding: 10px;">Chỉ số cân bằng F1</td>
+                                <td style="padding: 10px; text-align: center;"><b>F1-Score</b></td>
+                                <td style="padding: 10px; text-align: center; color: #fbbf24;">{tk_selected.get('f1_score', 0):.2f}</td>
+                                <td style="padding: 10px;">Hiệu suất AI tổng hợp chéo</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
+                                <td style="padding: 10px;">Số lần tập đúng (Pass)</td>
+                                <td style="padding: 10px; text-align: center;"><b>Pass</b></td>
+                                <td style="padding: 10px; text-align: center;">{tk_selected['frame_dung']}</td>
+                                <td style="padding: 10px;">Số lượng khung hình đạt chuẩn theo giai đoạn</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown(f"""
+                <div class="research-table-container">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.95rem;">
+                        <thead style="background: rgba(56, 189, 248, 0.1);">
+                            <tr style="border-bottom: 2px solid #38bdf8; text-align: left;">
+                                <th style="padding: 12px;">Chỉ số nghiên cứu</th>
+                                <th style="padding: 12px; text-align: center;">Ký hiệu</th>
+                                <th style="padding: 12px; text-align: center;">Giai đoạn 1 (Sai số 45°)</th>
+                                <th style="padding: 12px; text-align: center;">Giai đoạn 2 (Sai số 30°)</th>
+                                <th style="padding: 12px; text-align: center;">Giai đoạn 3 (Sai số 15°)</th>
+                                <th style="padding: 12px;">Phân loại / Chuyên môn</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
+                                <td style="padding: 10px;">Độ chính xác hệ thống</td>
+                                <td style="padding: 10px; text-align: center;"><b>ACC</b></td>
+                                <td style="padding: 10px; text-align: center; color: #10b981; font-weight: bold;">{metrics_g1['do_chinh_xac']:.1f}%</td>
+                                <td style="padding: 10px; text-align: center; color: #10b981; font-weight: bold;">{metrics_g2['do_chinh_xac']:.1f}%</td>
+                                <td style="padding: 10px; text-align: center; color: #10b981; font-weight: bold;">{metrics_g3['do_chinh_xac']:.1f}%</td>
+                                <td style="padding: 10px;">Được đối soát theo từng giây với video YouTube mẫu</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
+                                <td style="padding: 10px;">Sai số tuyệt đối trung bình</td>
+                                <td style="padding: 10px; text-align: center;"><b>MAE</b></td>
+                                <td style="padding: 10px; text-align: center; color: #f43f5e;">{metrics_g1.get('mae_tong', 0):.1f}°</td>
+                                <td style="padding: 10px; text-align: center; color: #f43f5e;">{metrics_g2.get('mae_tong', 0):.1f}°</td>
+                                <td style="padding: 10px; text-align: center; color: #f43f5e;">{metrics_g3.get('mae_tong', 0):.1f}°</td>
+                                <td style="padding: 10px;">{'✅ Tốt' if metrics_g2.get('mae_tong', 0) < 5 else '⚠️ Sai số góc cao'}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
+                                <td style="padding: 10px;">Sai số bình phương trung bình</td>
+                                <td style="padding: 10px; text-align: center;"><b>RMSE</b></td>
+                                <td style="padding: 10px; text-align: center; color: #f43f5e;">{rmse_val1:.1f}°</td>
+                                <td style="padding: 10px; text-align: center; color: #f43f5e;">{rmse_val2:.1f}°</td>
+                                <td style="padding: 10px; text-align: center; color: #f43f5e;">{rmse_val3:.1f}°</td>
+                                <td style="padding: 10px;">Ước lượng sai số bình phương trung bình</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
+                                <td style="padding: 10px;">Hệ số tương quan nội lớp</td>
+                                <td style="padding: 10px; text-align: center;"><b>ICC</b></td>
+                                <td style="padding: 10px; text-align: center; color: #38bdf8;">{metrics_g1.get('icc', 0):.2f}</td>
+                                <td style="padding: 10px; text-align: center; color: #38bdf8;">{metrics_g2.get('icc', 0):.2f}</td>
+                                <td style="padding: 10px; text-align: center; color: #38bdf8;">{metrics_g3.get('icc', 0):.2f}</td>
+                                <td style="padding: 10px;">{'✅ Rất tốt' if metrics_g2.get('icc', 0) >= 0.75 else '⚠️ Trung bình'}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
+                                <td style="padding: 10px;">Độ nhạy phân loại</td>
+                                <td style="padding: 10px; text-align: center;"><b>Recall</b></td>
+                                <td style="padding: 10px; text-align: center;">{metrics_g1.get('recall', 0):.2f}</td>
+                                <td style="padding: 10px; text-align: center;">{metrics_g2.get('recall', 0):.2f}</td>
+                                <td style="padding: 10px; text-align: center;">{metrics_g3.get('recall', 0):.2f}</td>
+                                <td style="padding: 10px;">Khả năng phát hiện đúng tư thế</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
+                                <td style="padding: 10px;">Độ đặc hiệu phân loại</td>
+                                <td style="padding: 10px; text-align: center;"><b>Precision</b></td>
+                                <td style="padding: 10px; text-align: center;">{metrics_g1.get('precision', 0):.2f}</td>
+                                <td style="padding: 10px; text-align: center;">{metrics_g2.get('precision', 0):.2f}</td>
+                                <td style="padding: 10px; text-align: center;">{metrics_g3.get('precision', 0):.2f}</td>
+                                <td style="padding: 10px;">Độ tin cậy cảnh báo sai tư thế</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
+                                <td style="padding: 10px;">Chỉ số cân bằng F1</td>
+                                <td style="padding: 10px; text-align: center;"><b>F1-Score</b></td>
+                                <td style="padding: 10px; text-align: center; color: #fbbf24;">{metrics_g1.get('f1_score', 0):.2f}</td>
+                                <td style="padding: 10px; text-align: center; color: #fbbf24;">{metrics_g2.get('f1_score', 0):.2f}</td>
+                                <td style="padding: 10px; text-align: center; color: #fbbf24;">{metrics_g3.get('f1_score', 0):.2f}</td>
+                                <td style="padding: 10px;">Hiệu suất AI tổng hợp chéo</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.1);">
+                                <td style="padding: 10px;">Số lần tập đúng (Pass)</td>
+                                <td style="padding: 10px; text-align: center;"><b>Pass</b></td>
+                                <td style="padding: 10px; text-align: center;">{metrics_g1['frame_dung']}</td>
+                                <td style="padding: 10px; text-align: center;">{metrics_g2['frame_dung']}</td>
+                                <td style="padding: 10px; text-align: center;">{metrics_g3['frame_dung']}</td>
+                                <td style="padding: 10px;">Số lượng khung hình đạt chuẩn theo giai đoạn</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                """, unsafe_allow_html=True)
 
     # === TAB 6: XUẤT BÁO CÁO (CONSOLIDATED) ===
     if "📁 XUẤT BÁO CÁO" in t_map:
@@ -8266,6 +8488,7 @@ def hien_thi_noi_dung_ket_qua(selected_v, my_evals):
             st.info("Không có nhận xét nào cho video này.")
         for e in v_evals:
             is_ai = e.get('doctor_username') == "AI_Researcher"
+            is_gay_ex = any(kw in str(e.get('exercise', '')).lower() for kw in ["gậy", "gay", "pulley", "stick"])
             title_color = "#00CED1" if is_ai else "#ffd700"
             icon = "🤖" if is_ai else "👨‍⚕️"
             
@@ -8308,58 +8531,83 @@ def hien_thi_noi_dung_ket_qua(selected_v, my_evals):
                         _ag2_str = f"{_ag2:.1f}%" if _ag2 is not None else "N/A"
                         _ag3_str = f"{_ag3:.1f}%" if _ag3 is not None else "N/A"
 
-                        # Tính trung bình có trọng số 3 giai đoạn
-                        # GĐ1(khởi đầu): 25% | GĐ2(hồi phục): 40% | GĐ3(chuẩn xác): 35%
-                        _vals = [(v, w) for v, w in [(_ag1, 0.25), (_ag2, 0.40), (_ag3, 0.35)] if v is not None]
-                        if _vals:
-                            _total_w = sum(w for _, w in _vals)
-                            _avg_acc = sum(v * w for v, w in _vals) / _total_w
-                        else:
-                            _avg_acc = None
-                        _avg_str = f"{_avg_acc:.1f}%" if _avg_acc is not None else "N/A"
-                        _avg_clr = _c(_avg_acc) if _avg_acc is not None else "#888"
-
-                        # Kết luận tổng thể dựa trên trung bình 3 giai đoạn
-                        if _avg_acc is not None:
-                            _overall = "Đúng" if _avg_acc >= 80 else ("Gần đúng" if _avg_acc >= 60 else "Sai")
+                        if is_gay_ex:
+                            _overall_acc = e.get('ai_accuracy') or _ag1 or 0.0
+                            _avg_clr = _c(_overall_acc)
+                            _overall = "Đúng" if _overall_acc >= 80 else ("Gần đúng" if _overall_acc >= 50 else "Sai")
                             _overall_color = {"Đúng": "#00e676", "Gần đúng": "#ffd700", "Sai": "#ff5252"}[_overall]
+                            st.markdown(f"""
+                            <div style="text-align:center; background:{eval_card_bg}; padding:18px 12px;
+                                        border-radius:14px; border:1px solid {eval_card_border};
+                                        box-shadow:0 4px 15px rgba(0,0,0,0.1);">
+                                <p style="margin:0 0 4px 0; color:{eval_text_color}; font-size:0.72rem;
+                                          letter-spacing:1px; font-weight:600;">ĐỘ CHÍNH XÁC</p>
+                                <h1 style="margin:0; color:{_avg_clr}; font-size:2.2rem; font-weight:900;">
+                                    {_overall_acc:.1f}%
+                                </h1>
+                                <p style="margin:2px 0 0 0; font-size:0.7rem; color:{eval_text_color};">
+                                    Đánh giá tư thế tương đương
+                                </p>
+                                <hr style="margin:10px 0; border:0; border-top:1px solid {_divider_color};">
+                                <p style="margin:0 0 2px 0; font-size:0.7rem; color:{eval_text_color};">KẾT LUẬN</p>
+                                <h3 style="margin:0; color:{_overall_color}; font-size:1.15rem; font-weight:800;">
+                                    {_overall}
+                                </h3>
+                            </div>
+                            """, unsafe_allow_html=True)
                         else:
-                            _overall = e.get('doctor_result', 'N/A')
-                            _overall_color = _verdict_color
+                            # Tính trung bình có trọng số 3 giai đoạn
+                            # GĐ1(khởi đầu): 25% | GĐ2(hồi phục): 40% | GĐ3(chuẩn xác): 35%
+                            _vals = [(v, w) for v, w in [(_ag1, 0.25), (_ag2, 0.40), (_ag3, 0.35)] if v is not None]
+                            if _vals:
+                                _total_w = sum(w for _, w in _vals)
+                                _avg_acc = sum(v * w for v, w in _vals) / _total_w
+                            else:
+                                _avg_acc = None
+                            _avg_str = f"{_avg_acc:.1f}%" if _avg_acc is not None else "N/A"
+                            _avg_clr = _c(_avg_acc) if _avg_acc is not None else "#888"
 
-                        st.markdown(f"""
-                        <div style="text-align:center; background:{eval_card_bg}; padding:18px 12px;
-                                    border-radius:14px; border:1px solid {eval_card_border};
-                                    box-shadow:0 4px 15px rgba(0,0,0,0.1);">
-                            <p style="margin:0 0 4px 0; color:{eval_text_color}; font-size:0.72rem;
-                                      letter-spacing:1px; font-weight:600;">ĐỘ CHÍNH XÁC TỔNG HỢP</p>
-                            <h1 style="margin:0; color:{_avg_clr}; font-size:2.2rem; font-weight:900;">
-                                {_avg_str}
-                            </h1>
-                            <p style="margin:2px 0 0 0; font-size:0.7rem; color:{eval_text_color};">
-                                Trung bình có trọng số 3 giai đoạn
-                            </p>
-                            <hr style="margin:10px 0; border:0; border-top:1px solid {_divider_color};">
-                            <p style="margin:0 0 2px 0; font-size:0.7rem; color:{eval_text_color};">KẾT LUẬN TỔNG THỂ</p>
-                            <h3 style="margin:0; color:{_overall_color}; font-size:1.15rem; font-weight:800;">
-                                {_overall}
-                            </h3>
-                        </div>
-                        """, unsafe_allow_html=True)
+                            # Kết luận tổng thể dựa trên trung bình 3 giai đoạn
+                            if _avg_acc is not None:
+                                _overall = "Đúng" if _avg_acc >= 80 else ("Gần đúng" if _avg_acc >= 60 else "Sai")
+                                _overall_color = {"Đúng": "#00e676", "Gần đúng": "#ffd700", "Sai": "#ff5252"}[_overall]
+                            else:
+                                _overall = e.get('doctor_result', 'N/A')
+                                _overall_color = _verdict_color
 
-                        st.markdown(f"""
-                        <div style="margin-top:8px; font-size:0.8rem; line-height:1.9;">
-                            <span style="color:#00e676;">🌱 GĐ1 (25%):</span>
-                            <b style="color:{_c(_ag1)};">{_ag1_str}</b>
-                            <span style="color:#aaa; font-size:0.7rem;">{_lbl(_ag1)}</span><br>
-                            <span style="color:#ffd700;">📈 GĐ2 (40%):</span>
-                            <b style="color:{_c(_ag2)};">{_ag2_str}</b>
-                            <span style="color:#aaa; font-size:0.7rem;">{_lbl(_ag2)}</span><br>
-                            <span style="color:#00c6ff;">🎯 GĐ3 (35%):</span>
-                            <b style="color:{_c(_ag3)};">{_ag3_str}</b>
-                            <span style="color:#aaa; font-size:0.7rem;">{_lbl(_ag3)}</span>
-                        </div>
-                        """, unsafe_allow_html=True)
+                            st.markdown(f"""
+                            <div style="text-align:center; background:{eval_card_bg}; padding:18px 12px;
+                                        border-radius:14px; border:1px solid {eval_card_border};
+                                        box-shadow:0 4px 15px rgba(0,0,0,0.1);">
+                                <p style="margin:0 0 4px 0; color:{eval_text_color}; font-size:0.72rem;
+                                          letter-spacing:1px; font-weight:600;">ĐỘ CHÍNH XÁC TỔNG HỢP</p>
+                                <h1 style="margin:0; color:{_avg_clr}; font-size:2.2rem; font-weight:900;">
+                                    {_avg_str}
+                                </h1>
+                                <p style="margin:2px 0 0 0; font-size:0.7rem; color:{eval_text_color};">
+                                    Trung bình có trọng số 3 giai đoạn
+                                </p>
+                                <hr style="margin:10px 0; border:0; border-top:1px solid {_divider_color};">
+                                <p style="margin:0 0 2px 0; font-size:0.7rem; color:{eval_text_color};">KẾT LUẬN TỔNG THỂ</p>
+                                <h3 style="margin:0; color:{_overall_color}; font-size:1.15rem; font-weight:800;">
+                                    {_overall}
+                                </h3>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                            st.markdown(f"""
+                            <div style="margin-top:8px; font-size:0.8rem; line-height:1.9;">
+                                <span style="color:#00e676;">🌱 GĐ1 (25%):</span>
+                                <b style="color:{_c(_ag1)};">{_ag1_str}</b>
+                                <span style="color:#aaa; font-size:0.7rem;">{_lbl(_ag1)}</span><br>
+                                <span style="color:#ffd700;">📈 GĐ2 (40%):</span>
+                                <b style="color:{_c(_ag2)};">{_ag2_str}</b>
+                                <span style="color:#aaa; font-size:0.7rem;">{_lbl(_ag2)}</span><br>
+                                <span style="color:#00c6ff;">🎯 GĐ3 (35%):</span>
+                                <b style="color:{_c(_ag3)};">{_ag3_str}</b>
+                                <span style="color:#aaa; font-size:0.7rem;">{_lbl(_ag3)}</span>
+                            </div>
+                            """, unsafe_allow_html=True)
                     else:
                         st.markdown(f"""
                         <div style="text-align: center; background: {eval_card_bg}; padding: 15px; border-radius: 12px; border: 1px solid {eval_card_border}; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
@@ -8379,84 +8627,110 @@ def hien_thi_noi_dung_ket_qua(selected_v, my_evals):
                         st.markdown(f"**Lỗi sai:** {', '.join(errors)}")
                     
                     if is_ai:
-                        # ===== HIỂN THỊ 3 GIAI ĐOẠN RIÊNG BIỆT - TIÊU ĐỀ TO =====
-                        acc_g1 = e.get('ai_accuracy_g1')
-                        acc_g2 = e.get('ai_accuracy_g2')
-                        acc_g3 = e.get('ai_accuracy_g3')
-                        
-                        # Parse từ comments nếu không có field riêng
-                        raw_comments = e.get('comments', '')
-                        if acc_g1 is None or acc_g2 is None or acc_g3 is None:
-                            import re
-                            def _parse_acc(text, label):
-                                m = re.search(label + r'.*?(\d+\.?\d*)%', text)
-                                return float(m.group(1)) if m else None
-                            acc_g1 = acc_g1 or _parse_acc(raw_comments, r'GĐ 1|GD1|Giai đoạn 1')
-                            acc_g2 = acc_g2 or _parse_acc(raw_comments, r'GĐ 2|GD2|Giai đoạn 2')
-                            acc_g3 = acc_g3 or _parse_acc(raw_comments, r'GĐ 3|GD3|Giai đoạn 3')
-
-                        def _acc_color(v):
-                            if v is None: return "#888"
-                            if v >= 80: return "#00e676"
-                            if v >= 60: return "#ffd700"
-                            return "#ff5252"
-
-                        def _acc_label(v):
-                            if v is None: return "N/A"
-                            if v >= 80: return "✅ Đạt"
-                            if v >= 60: return "⚠️ Gần đạt"
-                            return "❌ Cần tập thêm"
-
-                        # Tách phần kế hoạch từ plan
-                        plan_raw = e.get('plan', '')
-                        plan_lines = [l.strip() for l in plan_raw.split('\n') if l.strip() and l.strip().startswith('-')]
-
-                        gd_configs = [
-                            {"idx": 1, "label": "GIAI ĐOẠN 1", "sub": "Khởi đầu · Sai số 45°", "icon": "🌱",
-                             "acc": acc_g1, "bg": "rgba(0,230,118,0.06)", "border": "#00e676"},
-                            {"idx": 2, "label": "GIAI ĐOẠN 2", "sub": "Hồi phục · Sai số 30°", "icon": "📈",
-                             "acc": acc_g2, "bg": "rgba(255,215,0,0.06)", "border": "#ffd700"},
-                            {"idx": 3, "label": "GIAI ĐOẠN 3", "sub": "Chuẩn xác · Sai số 15°", "icon": "🎯",
-                             "acc": acc_g3, "bg": "rgba(0,198,255,0.06)", "border": "#00c6ff"},
-                        ]
-
-                        for gd in gd_configs:
-                            v_acc = gd["acc"]
-                            clr = _acc_color(v_acc)
-                            lbl = _acc_label(v_acc)
-                            acc_str = f"{v_acc:.1f}%" if v_acc is not None else "N/A"
-                            # Tìm dòng kế hoạch tương ứng
-                            plan_gd = next((l for l in plan_lines if f"GĐ{gd['idx']}" in l or f"GD{gd['idx']}" in l), "")
-                            plan_detail = plan_gd.split("-", 2)[-1].strip() if plan_gd else ""
+                        if is_gay_ex:
+                            acc_overall = e.get('ai_accuracy') or e.get('ai_accuracy_g1') or 0.0
+                            clr = _acc_color(acc_overall)
+                            lbl = _acc_label(acc_overall)
+                            
                             st.markdown(f"""
-                            <div style="background:{gd['bg']}; border:1.5px solid {gd['border']}; border-radius:14px;
+                            <div style="background:rgba(0,198,255,0.06); border:1.5px solid #00c6ff; border-radius:14px;
                                         padding:14px 18px; margin-bottom:12px;">
                                 <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
-                                    <span style="font-size:1.5rem;">{gd['icon']}</span>
+                                    <span style="font-size:1.5rem;">🏒</span>
                                     <div>
-                                        <h3 style="margin:0; color:{gd['border']}; font-size:1.1rem; font-weight:800; letter-spacing:0.5px;">
-                                            {gd['label']}
+                                        <h3 style="margin:0; color:#00c6ff; font-size:1.1rem; font-weight:800; letter-spacing:0.5px;">
+                                            BÀI TẬP VỚI GẬY
                                         </h3>
-                                        <span style="color:#aaa; font-size:0.82rem;">{gd['sub']}</span>
+                                        <span style="color:#aaa; font-size:0.82rem;">Đánh giá tư thế tương đương</span>
                                     </div>
                                     <div style="margin-left:auto; text-align:right;">
-                                        <span style="font-size:1.6rem; font-weight:900; color:{clr};">{acc_str}</span><br>
+                                        <span style="font-size:1.6rem; font-weight:900; color:{clr};">{acc_overall:.1f}%</span><br>
                                         <span style="font-size:0.8rem; color:{clr};">{lbl}</span>
                                     </div>
                                 </div>
-                                {"<p style='margin:4px 0 0 0; font-size:0.85rem; color:#ccc;'>💡 " + plan_detail + "</p>" if plan_detail else ""}
+                                <p style='margin:4px 0 0 0; font-size:0.85rem; color:#ccc; white-space: pre-line;'>{e.get('comments', '')}</p>
+                                <p style='margin:10px 0 0 0; font-size:0.85rem; color:#ccc; font-weight: bold; white-space: pre-line;'>{e.get('plan', '')}</p>
                             </div>
                             """, unsafe_allow_html=True)
+                        else:
+                            # ===== HIỂN THỊ 3 GIAI ĐOẠN RIÊNG BIỆT - TIÊU ĐỀ TO =====
+                            acc_g1 = e.get('ai_accuracy_g1')
+                            acc_g2 = e.get('ai_accuracy_g2')
+                            acc_g3 = e.get('ai_accuracy_g3')
+                            
+                            # Parse từ comments nếu không có field riêng
+                            raw_comments = e.get('comments', '')
+                            if acc_g1 is None or acc_g2 is None or acc_g3 is None:
+                                import re
+                                def _parse_acc(text, label):
+                                    m = re.search(label + r'.*?(\d+\.?\d*)%', text)
+                                    return float(m.group(1)) if m else None
+                                acc_g1 = acc_g1 or _parse_acc(raw_comments, r'GĐ 1|GD1|Giai đoạn 1')
+                                acc_g2 = acc_g2 or _parse_acc(raw_comments, r'GĐ 2|GD2|Giai đoạn 2')
+                                acc_g3 = acc_g3 or _parse_acc(raw_comments, r'GĐ 3|GD3|Giai đoạn 3')
 
-                        # AI đề xuất
-                        ai_suggest_line = next((l for l in raw_comments.split('\n') if 'AI đề xuất' in l or 'Phù hợp' in l), "")
-                        if ai_suggest_line:
-                            st.markdown(f"""
-                            <div style="background:rgba(0,114,255,0.07); border:1px solid rgba(0,198,255,0.3);
-                                        border-radius:10px; padding:10px 14px; margin-top:4px;">
-                                <span style="font-size:0.9rem; color:#00c6ff;">🤖 {ai_suggest_line.strip()}</span>
-                            </div>
-                            """, unsafe_allow_html=True)
+                            def _acc_color(v):
+                                if v is None: return "#888"
+                                if v >= 80: return "#00e676"
+                                if v >= 60: return "#ffd700"
+                                return "#ff5252"
+
+                            def _acc_label(v):
+                                if v is None: return "N/A"
+                                if v >= 80: return "✅ Đạt"
+                                if v >= 60: return "⚠️ Gần đạt"
+                                return "❌ Cần tập thêm"
+
+                            # Tách phần kế hoạch từ plan
+                            plan_raw = e.get('plan', '')
+                            plan_lines = [l.strip() for l in plan_raw.split('\n') if l.strip() and l.strip().startswith('-')]
+
+                            gd_configs = [
+                                {"idx": 1, "label": "GIAI ĐOẠN 1", "sub": "Khởi đầu · Sai số 45°", "icon": "🌱",
+                                 "acc": acc_g1, "bg": "rgba(0,230,118,0.06)", "border": "#00e676"},
+                                {"idx": 2, "label": "GIAI ĐOẠN 2", "sub": "Hồi phục · Sai số 30°", "icon": "📈",
+                                 "acc": acc_g2, "bg": "rgba(255,215,0,0.06)", "border": "#ffd700"},
+                                {"idx": 3, "label": "GIAI ĐOẠN 3", "sub": "Chuẩn xác · Sai số 15°", "icon": "🎯",
+                                 "acc": acc_g3, "bg": "rgba(0,198,255,0.06)", "border": "#00c6ff"},
+                            ]
+
+                            for gd in gd_configs:
+                                v_acc = gd["acc"]
+                                clr = _acc_color(v_acc)
+                                lbl = _acc_label(v_acc)
+                                acc_str = f"{v_acc:.1f}%" if v_acc is not None else "N/A"
+                                # Tìm dòng kế hoạch tương ứng
+                                plan_gd = next((l for l in plan_lines if f"GĐ{gd['idx']}" in l or f"GD{gd['idx']}" in l), "")
+                                plan_detail = plan_gd.split("-", 2)[-1].strip() if plan_gd else ""
+                                st.markdown(f"""
+                                <div style="background:{gd['bg']}; border:1.5px solid {gd['border']}; border-radius:14px;
+                                            padding:14px 18px; margin-bottom:12px;">
+                                    <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+                                        <span style="font-size:1.5rem;">{gd['icon']}</span>
+                                        <div>
+                                            <h3 style="margin:0; color:{gd['border']}; font-size:1.1rem; font-weight:800; letter-spacing:0.5px;">
+                                                {gd['label']}
+                                            </h3>
+                                            <span style="color:#aaa; font-size:0.82rem;">{gd['sub']}</span>
+                                        </div>
+                                        <div style="margin-left:auto; text-align:right;">
+                                            <span style="font-size:1.6rem; font-weight:900; color:{clr};">{acc_str}</span><br>
+                                            <span style="font-size:0.8rem; color:{clr};">{lbl}</span>
+                                        </div>
+                                    </div>
+                                    {"<p style='margin:4px 0 0 0; font-size:0.85rem; color:#ccc;'>💡 " + plan_detail + "</p>" if plan_detail else ""}
+                                </div>
+                                """, unsafe_allow_html=True)
+
+                            # AI đề xuất
+                            ai_suggest_line = next((l for l in raw_comments.split('\n') if 'AI đề xuất' in l or 'Phù hợp' in l), "")
+                            if ai_suggest_line:
+                                st.markdown(f"""
+                                <div style="background:rgba(0,114,255,0.07); border:1px solid rgba(0,198,255,0.3);
+                                            border-radius:10px; padding:10px 14px; margin-top:4px;">
+                                    <span style="font-size:0.9rem; color:#00c6ff;">🤖 {ai_suggest_line.strip()}</span>
+                                </div>
+                                """, unsafe_allow_html=True)
                     else:
                         st.markdown(f"**Nhận xét:** {e.get('comments', 'Không có')}")
                         st.markdown(f"**Kế hoạch:** {e.get('plan', 'N/A')}")
@@ -9229,6 +9503,8 @@ def load_all_frames_data_cached(path):
 def hien_thi_frames_day_du(key_suffix=""):
     """Hiển thị frames với Streamlit Fragment (Chỉ load lại vùng này, cực nhanh)"""
     user_role = st.session_state.user_info.get('role')
+    exercise_name = st.session_state.get('exercise', {}).get('ten', '')
+    is_gay_ex = any(kw in str(exercise_name).lower() or kw in str(st.session_state.get('current_eval_video', {}).get('exercise', '')).lower() for kw in ["gậy", "gay", "pulley", "stick"])
 
     all_frames_data_path = get_local_frame_path(st.session_state.get('all_frames_data_path'))
     if not all_frames_data_path:
@@ -9305,12 +9581,15 @@ def hien_thi_frames_day_du(key_suffix=""):
                 f"🔴 Video G3 (Lượt 3 lặp lại: {n3 - n2} F)"
             ]
             
-            sel_giai_doan = st.radio(
-                "Chọn phân đoạn video hiển thị:",
-                options=giai_doan_options,
-                horizontal=True,
-                key=f"sel_giai_doan_{key_suffix}"
-            )
+            if is_gay_ex:
+                sel_giai_doan = "📋 Video Tất cả"
+            else:
+                sel_giai_doan = st.radio(
+                    "Chọn phân đoạn video hiển thị:",
+                    options=giai_doan_options,
+                    horizontal=True,
+                    key=f"sel_giai_doan_{key_suffix}"
+                )
             
             st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
             
@@ -9416,7 +9695,7 @@ def hien_thi_frames_day_du(key_suffix=""):
         v_stats_text = "#000000" if is_light else "#ffffff"
         
         # Tạo phần HTML hiển thị độ chính xác
-        if acc_g1 > 0 or acc_g2 > 0 or acc_g3 > 0:
+        if (acc_g1 > 0 or acc_g2 > 0 or acc_g3 > 0) and not is_gay_ex:
             accuracy_html = (
                 f"<div style='margin-bottom:10px;'>"
                 f"<b>Độ chính xác 3 giai đoạn:</b>"
@@ -9449,10 +9728,12 @@ def hien_thi_frames_day_du(key_suffix=""):
         
         if user_role == "Nghiên cứu viên":
             st.write("")
-            if st.button("📤 GỬI BÁO CÁO TỔNG HỢP 3 GIAI ĐOẠN CHO BS & BN", key=f"btn_send_ncv_3_stages_{key_suffix}", use_container_width=True, type="primary"):
+            btn_label = "📤 GỬI BÁO CÁO PHÂN TÍCH CHO BS & BN" if is_gay_ex else "📤 GỬI BÁO CÁO TỔNG HỢP 3 GIAI ĐOẠN CHO BS & BN"
+            if st.button(btn_label, key=f"btn_send_ncv_3_stages_{key_suffix}", use_container_width=True, type="primary"):
                 if gui_bao_cao_tong_hop_3_giai_doan():
                     v_meta = st.session_state.get('current_eval_video') or {}
-                    st.success(f"✅ Đã gửi báo cáo tổng hợp 3 giai đoạn cho BN {v_meta.get('full_name', 'Bệnh nhân')}!")
+                    msg = f"✅ Đã gửi báo cáo phân tích cho BN {v_meta.get('full_name', 'Bệnh nhân')}!" if is_gay_ex else f"✅ Đã gửi báo cáo tổng hợp 3 giai đoạn cho BN {v_meta.get('full_name', 'Bệnh nhân')}!"
+                    st.success(msg)
                     st.balloons()
                     st.rerun()
 
@@ -9794,51 +10075,56 @@ def hien_thi_frames_day_du(key_suffix=""):
                 else:
                     st.error("Ảnh lỗi")
 
-    # Lấy ranh giới phân đoạn đã tính toán ở trên
-    if 'segment_bounds' not in st.session_state or st.session_state.get('last_processed_video_for_bounds') != processed_video_path:
-        st.session_state.segment_bounds = segment_frames(all_frames_data)
-        st.session_state.last_processed_video_for_bounds = processed_video_path
+    if is_gay_ex:
+        st.info("📋 **Bài tập với gậy:** Đánh giá động thái khớp vai & khuỷu theo tư thế chuẩn tương đương.")
+        ss_chuan = tk.get('sai_so', 30)
+        _render_frame_grid(list(range(len(all_frames_data))), all_frames_data, None, ss_chuan, "all", key_suffix)
+    else:
+        # Lấy ranh giới phân đoạn đã tính toán ở trên
+        if 'segment_bounds' not in st.session_state or st.session_state.get('last_processed_video_for_bounds') != processed_video_path:
+            st.session_state.segment_bounds = segment_frames(all_frames_data)
+            st.session_state.last_processed_video_for_bounds = processed_video_path
+            
+        n0, n1, n2, n3 = st.session_state.segment_bounds
+
+        # Tất cả frame indices
+        all_indices = list(range(len(all_frames_data)))
         
-    n0, n1, n2, n3 = st.session_state.segment_bounds
+        # Phân chia chỉ số theo từng phân đoạn giai đoạn
+        g1_indices = all_indices[n0:n1]
+        g2_indices = all_indices[n1:n2]
+        g3_indices = all_indices[n2:n3]
 
-    # Tất cả frame indices
-    all_indices = list(range(len(all_frames_data)))
-    
-    # Phân chia chỉ số theo từng phân đoạn giai đoạn
-    g1_indices = all_indices[n0:n1]
-    g2_indices = all_indices[n1:n2]
-    g3_indices = all_indices[n2:n3]
+        # Tính trước số frame pass cho từng giai đoạn để hiển thị trên tiêu đề tab
+        def _count_pass_segment(indices_list, threshold):
+            return sum(1 for i in indices_list if _frame_phase_status(all_frames_data[i], threshold) == "PASS")
+            
+        g1_pass = _count_pass_segment(g1_indices, 45)
+        g2_pass = _count_pass_segment(g2_indices, 30)
+        g3_pass = _count_pass_segment(g3_indices, 15)
 
-    # Tính trước số frame pass cho từng giai đoạn để hiển thị trên tiêu đề tab
-    def _count_pass_segment(indices_list, threshold):
-        return sum(1 for i in indices_list if _frame_phase_status(all_frames_data[i], threshold) == "PASS")
-        
-    g1_pass = _count_pass_segment(g1_indices, 45)
-    g2_pass = _count_pass_segment(g2_indices, 30)
-    g3_pass = _count_pass_segment(g3_indices, 15)
+        tab_all, tab_g1, tab_g2, tab_g3 = st.tabs([
+            f"📋 Tất cả ({total_frames})",
+            f"🟢 G1 (Lượt 1: {len(g1_indices)} frames | {g1_pass} PASS)",
+            f"🟡 G2 (Lượt 2 lặp: {len(g2_indices)} frames | {g2_pass} PASS)",
+            f"🔴 G3 (Lượt 3 lặp: {len(g3_indices)} frames | {g3_pass} PASS)",
+        ])
 
-    tab_all, tab_g1, tab_g2, tab_g3 = st.tabs([
-        f"📋 Tất cả ({total_frames})",
-        f"🟢 G1 (Lượt 1: {len(g1_indices)} frames | {g1_pass} PASS)",
-        f"🟡 G2 (Lượt 2 lặp: {len(g2_indices)} frames | {g2_pass} PASS)",
-        f"🔴 G3 (Lượt 3 lặp: {len(g3_indices)} frames | {g3_pass} PASS)",
-    ])
+        with tab_all:
+            st.caption("Hiển thị tất cả khung hình. Badge màu theo **giai đoạn mặc định** bạn đã chọn trước khi phân tích.")
+            _render_frame_grid(all_indices, all_frames_data, None, None, "all", key_suffix)
 
-    with tab_all:
-        st.caption("Hiển thị tất cả khung hình. Badge màu theo **giai đoạn mặc định** bạn đã chọn trước khi phân tích.")
-        _render_frame_grid(all_indices, all_frames_data, None, None, "all", key_suffix)
+        with tab_g1:
+            st.info("🟢 **Giai đoạn 1 — Khởi đầu (Sai số 45°):** Chỉ hiển thị các khung hình thuộc **Lượt tập 1**. Badge **PASS** = lệch chuẩn ≤ 45°.")
+            _render_frame_grid(g1_indices, all_frames_data, None, 45, "g1", key_suffix)
 
-    with tab_g1:
-        st.info("🟢 **Giai đoạn 1 — Khởi đầu (Sai số 45°):** Chỉ hiển thị các khung hình thuộc **Lượt tập 1**. Badge **PASS** = lệch chuẩn ≤ 45°.")
-        _render_frame_grid(g1_indices, all_frames_data, None, 45, "g1", key_suffix)
+        with tab_g2:
+            st.info("🟡 **Giai đoạn 2 — Hồi phục (Sai số 30°):** Chỉ hiển thị các khung hình thuộc **Lượt lặp lại lần 2**. Badge **PASS** = lệch chuẩn ≤ 30°.")
+            _render_frame_grid(g2_indices, all_frames_data, None, 30, "g2", key_suffix)
 
-    with tab_g2:
-        st.info("🟡 **Giai đoạn 2 — Hồi phục (Sai số 30°):** Chỉ hiển thị các khung hình thuộc **Lượt lặp lại lần 2**. Badge **PASS** = lệch chuẩn ≤ 30°.")
-        _render_frame_grid(g2_indices, all_frames_data, None, 30, "g2", key_suffix)
-
-    with tab_g3:
-        st.info("🔴 **Giai đoạn 3 — Chuẩn xác (Sai số 15°):** Chỉ hiển thị các khung hình thuộc **Lượt lặp lại lần 3**. Badge **PASS** = lệch chuẩn ≤ 15°.")
-        _render_frame_grid(g3_indices, all_frames_data, None, 15, "g3", key_suffix)
+        with tab_g3:
+            st.info("🔴 **Giai đoạn 3 — Chuẩn xác (Sai số 15°):** Chỉ hiển thị các khung hình thuộc **Lượt lặp lại lần 3**. Badge **PASS** = lệch chuẩn ≤ 15°.")
+            _render_frame_grid(g3_indices, all_frames_data, None, 15, "g3", key_suffix)
 
     st.write("")  # Final spacer
 
@@ -10608,6 +10894,7 @@ def hien_thi_danh_sach_video_fragment(user_role):
                                         st.error(f"❌ Lỗi ghi file: {e}")
                         with col_v2:
                             st.write(f"**Người tập:** {v['full_name']}")
+                            is_gay_ex = any(kw in str(v.get('exercise', '')).lower() for kw in ["gậy", "gay", "pulley", "stick"])
                             
                             if user_role == "Bác sĩ / KTV PHCN" and not v_has_ai:
                                 st.write("**Độ chính xác AI:** ⏳ Chờ NCV phân tích")
@@ -10625,7 +10912,7 @@ def hien_thi_danh_sach_video_fragment(user_role):
                                     acc_g2 = ai_eval_record.get('ai_accuracy_g2', acc_g2)
                                     acc_g3 = ai_eval_record.get('ai_accuracy_g3', acc_g3)
                                 
-                                if acc_g1 is not None and acc_g2 is not None and acc_g3 is not None:
+                                if acc_g1 is not None and acc_g2 is not None and acc_g3 is not None and not is_gay_ex:
                                     st.write("**Độ chính xác AI theo 3 giai đoạn:**")
                                     st.markdown(
                                         f"<ul style='margin: 0 0 10px 10px; padding: 0; list-style-type: none;'>"
@@ -10637,7 +10924,7 @@ def hien_thi_danh_sach_video_fragment(user_role):
                                     )
                                 else:
                                     acc_val = ai_eval_record['ai_accuracy'] if ai_eval_record else v.get('accuracy', 0)
-                                    acc_text = f"{acc_val}%" if acc_val > 0 else "Chưa phân tích"
+                                    acc_text = f"{acc_val:.1f}%" if isinstance(acc_val, (int, float)) and acc_val > 0 else ("Chưa phân tích" if acc_val == 0 else f"{acc_val}%")
                                     st.write(f"**Độ chính xác AI:** {acc_text}")
                                 
                             st.write(f"**Trạng thái:** {v['status']}")
