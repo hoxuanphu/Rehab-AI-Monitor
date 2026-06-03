@@ -1715,24 +1715,52 @@ st.markdown("""
     /* Tối ưu hóa giao diện st.segmented_control thành tab bar */
     .st-key-active_tab_widget,
     div[data-testid="stSegmentedControl"] {
-        display: flex !important;
-        justify-content: flex-start !important; /* Căn trái như tab hệ thống */
         background: transparent !important; /* Xóa nền container */
         border: none !important; /* Xóa viền bao ngoài container */
-        gap: 8px !important;
         margin-bottom: 25px !important;
         padding: 5px 0px 10px 0px !important;
-        overflow-x: auto !important; /* Cuộn ngang nếu màn hình nhỏ */
         width: 100% !important;
     }
+
+    /* Thiết lập flexbox không xuống dòng và cho phép cuộn ngang cho container bên trong */
+    .st-key-active_tab_widget div,
+    .st-key-active_tab_widget [role="radiogroup"],
+    .st-key-active_tab_widget [role="group"],
+    div[data-testid="stSegmentedControl"] > div {
+        display: flex !important;
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
+        justify-content: flex-start !important;
+        gap: 8px !important;
+        overflow-x: auto !important;
+        overflow-y: hidden !important;
+        width: 100% !important;
+    }
+
+    /* Tối ưu thanh cuộn ngang cực kỳ mảnh và đẹp mắt */
+    .st-key-active_tab_widget div::-webkit-scrollbar,
+    .st-key-active_tab_widget [role="radiogroup"]::-webkit-scrollbar,
+    .st-key-active_tab_widget [role="group"]::-webkit-scrollbar,
+    div[data-testid="stSegmentedControl"] > div::-webkit-scrollbar {
+        height: 5px !important;
+    }
+    .st-key-active_tab_widget div::-webkit-scrollbar-thumb,
+    .st-key-active_tab_widget [role="radiogroup"]::-webkit-scrollbar-thumb,
+    .st-key-active_tab_widget [role="group"]::-webkit-scrollbar-thumb,
+    div[data-testid="stSegmentedControl"] > div::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.2) !important;
+        border-radius: 4px !important;
+    }
+
     .st-key-active_tab_widget button,
     div[data-testid="stSegmentedControl"] button {
-        border-radius: 10px !important; /* Bo góc dạng pill */
+        border-radius: 10px 10px 0 0 !important; /* Bo góc trên, dưới phẳng để giống tab thật */
         font-weight: bold !important;
         font-size: 0.95rem !important;
         transition: all 0.3s ease !important;
-        padding: 8px 16px !important;
+        padding: 10px 20px !important;
         margin-right: 5px !important;
+        border-bottom: 3px solid transparent !important; /* Viền chân mặc định trong suốt */
     }
     .st-key-active_tab_widget button p,
     div[data-testid="stSegmentedControl"] button p,
@@ -1743,25 +1771,20 @@ st.markdown("""
         font-size: 0.95rem !important;
         font-weight: bold !important;
     }
-    .st-key-active_tab_widget button[aria-checked="true"],
-    .st-key-active_tab_widget button[aria-pressed="true"],
-    .st-key-active_tab_widget button[aria-selected="true"],
-    .st-key-active_tab_widget button[data-checked="true"],
-    .st-key-active_tab_widget [data-baseweb="button"][aria-checked="true"],
-    .st-key-active_tab_widget [data-baseweb="button"][aria-pressed="true"],
-    .st-key-active_tab_widget [data-baseweb="button"][aria-selected="true"],
-    .st-key-active_tab_widget [data-baseweb="button"][data-checked="true"],
-    div[data-testid="stSegmentedControl"] button[aria-checked="true"],
-    div[data-testid="stSegmentedControl"] button[aria-pressed="true"],
-    div[data-testid="stSegmentedControl"] button[aria-selected="true"],
-    div[data-testid="stSegmentedControl"] button[data-checked="true"],
-    div[data-testid="stSegmentedControl"] [data-baseweb="button"][aria-checked="true"],
-    div[data-testid="stSegmentedControl"] [data-baseweb="button"][aria-pressed="true"],
-    div[data-testid="stSegmentedControl"] [data-baseweb="button"][aria-selected="true"],
-    div[data-testid="stSegmentedControl"] [data-baseweb="button"][data-checked="true"] {
+    .st-key-active_tab_widget [aria-pressed="true"],
+    .st-key-active_tab_widget [aria-checked="true"],
+    .st-key-active_tab_widget [aria-selected="true"],
+    .st-key-active_tab_widget [data-checked="true"],
+    .st-key-active_tab_widget [class*="selected"],
+    .st-key-active_tab_widget [class*="active"],
+    div[data-testid="stSegmentedControl"] [aria-pressed="true"],
+    div[data-testid="stSegmentedControl"] [aria-checked="true"],
+    div[data-testid="stSegmentedControl"] [aria-selected="true"],
+    div[data-testid="stSegmentedControl"] [data-checked="true"] {
         background: linear-gradient(135deg, #00c6ff 0%, #0072ff 100%) !important;
         color: white !important;
         border: 1px solid #00c6ff !important;
+        border-bottom: 3px solid #ff4b4b !important; /* Gạch đỏ dưới chân tab được chọn */
         box-shadow: 0 4px 15px rgba(0, 198, 255, 0.4) !important;
     }
     
@@ -2389,13 +2412,14 @@ if st.session_state.get('theme') == 'dark':
         /* Phong cách st.segmented_control trong chế độ tối giống tab ảnh 2 */
         .st-key-active_tab_widget,
         div[data-testid="stSegmentedControl"] {
-            border-bottom: 2px solid #ff4b4b !important; /* Đường gạch đỏ dưới tab bar */
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important; /* Đường gạch xám nhạt dưới tab bar */
         }
         .st-key-active_tab_widget button,
         div[data-testid="stSegmentedControl"] button {
             background-color: rgba(255, 255, 255, 0.05) !important;
             color: #ffffff !important;
             border: 1px solid rgba(255, 255, 255, 0.1) !important;
+            border-bottom: 3px solid transparent !important;
         }
         .st-key-active_tab_widget button:hover,
         div[data-testid="stSegmentedControl"] button:hover {
@@ -2403,25 +2427,20 @@ if st.session_state.get('theme') == 'dark':
             color: #ffffff !important;
             border-color: rgba(255, 255, 255, 0.2) !important;
         }
-        .st-key-active_tab_widget button[aria-checked="true"],
-        .st-key-active_tab_widget button[aria-pressed="true"],
-        .st-key-active_tab_widget button[aria-selected="true"],
-        .st-key-active_tab_widget button[data-checked="true"],
-        .st-key-active_tab_widget [data-baseweb="button"][aria-checked="true"],
-        .st-key-active_tab_widget [data-baseweb="button"][aria-pressed="true"],
-        .st-key-active_tab_widget [data-baseweb="button"][aria-selected="true"],
-        .st-key-active_tab_widget [data-baseweb="button"][data-checked="true"],
-        div[data-testid="stSegmentedControl"] button[aria-checked="true"],
-        div[data-testid="stSegmentedControl"] button[aria-pressed="true"],
-        div[data-testid="stSegmentedControl"] button[aria-selected="true"],
-        div[data-testid="stSegmentedControl"] button[data-checked="true"],
-        div[data-testid="stSegmentedControl"] [data-baseweb="button"][aria-checked="true"],
-        div[data-testid="stSegmentedControl"] [data-baseweb="button"][aria-pressed="true"],
-        div[data-testid="stSegmentedControl"] [data-baseweb="button"][aria-selected="true"],
-        div[data-testid="stSegmentedControl"] [data-baseweb="button"][data-checked="true"] {
+        .st-key-active_tab_widget [aria-pressed="true"],
+        .st-key-active_tab_widget [aria-checked="true"],
+        .st-key-active_tab_widget [aria-selected="true"],
+        .st-key-active_tab_widget [data-checked="true"],
+        .st-key-active_tab_widget [class*="selected"],
+        .st-key-active_tab_widget [class*="active"],
+        div[data-testid="stSegmentedControl"] [aria-pressed="true"],
+        div[data-testid="stSegmentedControl"] [aria-checked="true"],
+        div[data-testid="stSegmentedControl"] [aria-selected="true"],
+        div[data-testid="stSegmentedControl"] [data-checked="true"] {
             background: linear-gradient(135deg, #00c6ff 0%, #0072ff 100%) !important;
             color: #ffffff !important;
             border: 1px solid #00c6ff !important;
+            border-bottom: 3px solid #ff4b4b !important; /* Gạch đỏ dưới chân tab được chọn */
         }
     </style>
     """, unsafe_allow_html=True)
@@ -2694,13 +2713,14 @@ if st.session_state.get('theme') == 'light':
         /* Phong cách st.segmented_control trong chế độ sáng giống tab ảnh 2 */
         .st-key-active_tab_widget,
         div[data-testid="stSegmentedControl"] {
-            border-bottom: 2px solid #ff4b4b !important; /* Đường gạch đỏ dưới tab bar */
+            border-bottom: 1px solid rgba(0, 0, 0, 0.1) !important; /* Đường gạch xám nhạt dưới tab bar */
         }
         .st-key-active_tab_widget button,
         div[data-testid="stSegmentedControl"] button {
             background-color: #f1f3f5 !important;
             color: #495057 !important;
             border: 1px solid #ced4da !important;
+            border-bottom: 3px solid transparent !important;
         }
         .st-key-active_tab_widget button:hover,
         div[data-testid="stSegmentedControl"] button:hover {
@@ -2708,25 +2728,20 @@ if st.session_state.get('theme') == 'light':
             color: #0072ff !important;
             border-color: #0072ff !important;
         }
-        .st-key-active_tab_widget button[aria-checked="true"],
-        .st-key-active_tab_widget button[aria-pressed="true"],
-        .st-key-active_tab_widget button[aria-selected="true"],
-        .st-key-active_tab_widget button[data-checked="true"],
-        .st-key-active_tab_widget [data-baseweb="button"][aria-checked="true"],
-        .st-key-active_tab_widget [data-baseweb="button"][aria-pressed="true"],
-        .st-key-active_tab_widget [data-baseweb="button"][aria-selected="true"],
-        .st-key-active_tab_widget [data-baseweb="button"][data-checked="true"],
-        div[data-testid="stSegmentedControl"] button[aria-checked="true"],
-        div[data-testid="stSegmentedControl"] button[aria-pressed="true"],
-        div[data-testid="stSegmentedControl"] button[aria-selected="true"],
-        div[data-testid="stSegmentedControl"] button[data-checked="true"],
-        div[data-testid="stSegmentedControl"] [data-baseweb="button"][aria-checked="true"],
-        div[data-testid="stSegmentedControl"] [data-baseweb="button"][aria-pressed="true"],
-        div[data-testid="stSegmentedControl"] [data-baseweb="button"][aria-selected="true"],
-        div[data-testid="stSegmentedControl"] [data-baseweb="button"][data-checked="true"] {
+        .st-key-active_tab_widget [aria-pressed="true"],
+        .st-key-active_tab_widget [aria-checked="true"],
+        .st-key-active_tab_widget [aria-selected="true"],
+        .st-key-active_tab_widget [data-checked="true"],
+        .st-key-active_tab_widget [class*="selected"],
+        .st-key-active_tab_widget [class*="active"],
+        div[data-testid="stSegmentedControl"] [aria-pressed="true"],
+        div[data-testid="stSegmentedControl"] [aria-checked="true"],
+        div[data-testid="stSegmentedControl"] [aria-selected="true"],
+        div[data-testid="stSegmentedControl"] [data-checked="true"] {
             background: linear-gradient(135deg, #00c6ff 0%, #0072ff 100%) !important;
             color: #ffffff !important;
             border: 1px solid #00c6ff !important;
+            border-bottom: 3px solid #ff4b4b !important; /* Gạch đỏ dưới chân tab được chọn */
         }
     </style>
     """, unsafe_allow_html=True)
