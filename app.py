@@ -1715,27 +1715,27 @@ st.markdown("""
     /* Tối ưu hóa giao diện st.segmented_control thành tab bar */
     div[data-testid="stSegmentedControl"] {
         display: flex !important;
-        justify-content: center !important;
-        background: rgba(255, 255, 255, 0.03) !important;
-        border-radius: 12px !important;
-        padding: 5px !important;
-        border: 1px solid rgba(255, 255, 255, 0.1) !important;
-        gap: 5px !important;
+        justify-content: flex-start !important; /* Căn trái như tab hệ thống */
+        background: transparent !important; /* Xóa nền container */
+        border: none !important; /* Xóa viền bao ngoài container */
+        gap: 8px !important;
         margin-bottom: 25px !important;
+        padding: 5px 0px 10px 0px !important;
+        overflow-x: auto !important; /* Cuộn ngang nếu màn hình nhỏ */
+        width: 100% !important;
     }
     div[data-testid="stSegmentedControl"] button {
-        background: transparent !important;
-        border: none !important;
-        border-radius: 8px !important;
-        color: #aaa !important;
+        border-radius: 10px !important; /* Bo góc dạng pill */
         font-weight: bold !important;
         transition: all 0.3s ease !important;
         padding: 8px 16px !important;
+        margin-right: 5px !important;
     }
     div[data-testid="stSegmentedControl"] button[aria-checked="true"] {
         background: linear-gradient(135deg, #00c6ff 0%, #0072ff 100%) !important;
         color: white !important;
-        box-shadow: 0 4px 15px rgba(0, 198, 255, 0.3) !important;
+        border: 1px solid #00c6ff !important;
+        box-shadow: 0 4px 15px rgba(0, 198, 255, 0.4) !important;
     }
     
     /* === STYLE HEADER & NÚT BẤM THÍCH ỨNG THEO CHỦ ĐỀ (THEME-AWARE) === */
@@ -2358,6 +2358,26 @@ if st.session_state.get('theme') == 'dark':
         div[data-baseweb="popover"] * {
             color: #ffffff !important;
         }
+
+        /* Phong cách st.segmented_control trong chế độ tối giống tab ảnh 2 */
+        div[data-testid="stSegmentedControl"] {
+            border-bottom: 2px solid #ff4b4b !important; /* Đường gạch đỏ dưới tab bar */
+        }
+        div[data-testid="stSegmentedControl"] button {
+            background-color: rgba(255, 255, 255, 0.05) !important;
+            color: #ffffff !important;
+            border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        }
+        div[data-testid="stSegmentedControl"] button:hover {
+            background-color: rgba(255, 255, 255, 0.1) !important;
+            color: #ffffff !important;
+            border-color: rgba(255, 255, 255, 0.2) !important;
+        }
+        div[data-testid="stSegmentedControl"] button[aria-checked="true"] {
+            background: linear-gradient(135deg, #00c6ff 0%, #0072ff 100%) !important;
+            color: #ffffff !important;
+            border: 1px solid #00c6ff !important;
+        }
     </style>
     """, unsafe_allow_html=True)
 
@@ -2624,6 +2644,26 @@ if st.session_state.get('theme') == 'light':
             background-color: #ffffff !important;
             border: 1px solid #ced4da !important;
             box-shadow: 0 4px 15px rgba(0,0,0,0.1) !important;
+        }
+
+        /* Phong cách st.segmented_control trong chế độ sáng giống tab ảnh 2 */
+        div[data-testid="stSegmentedControl"] {
+            border-bottom: 2px solid #ff4b4b !important; /* Đường gạch đỏ dưới tab bar */
+        }
+        div[data-testid="stSegmentedControl"] button {
+            background-color: #f1f3f5 !important;
+            color: #495057 !important;
+            border: 1px solid #ced4da !important;
+        }
+        div[data-testid="stSegmentedControl"] button:hover {
+            background-color: #e9ecef !important;
+            color: #0072ff !important;
+            border-color: #0072ff !important;
+        }
+        div[data-testid="stSegmentedControl"] button[aria-checked="true"] {
+            background: linear-gradient(135deg, #00c6ff 0%, #0072ff 100%) !important;
+            color: #ffffff !important;
+            border: 1px solid #00c6ff !important;
         }
     </style>
     """, unsafe_allow_html=True)
