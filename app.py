@@ -9671,8 +9671,9 @@ def hien_thi_frames_day_du(key_suffix=""):
 # Callback xử lý đổi theme nhanh (Để ngoài hàm main để tránh lỗi WebSocket Cache)
 
 def update_theme_callback():
-    if "theme_toggle_top" in st.session_state:
-        st.session_state.theme = 'dark' if st.session_state.theme_toggle_top else 'light'
+    val = st.session_state.get('theme_toggle_top')
+    if val is not None:
+        st.session_state.theme = 'dark' if val else 'light'
 
 
 # ============================================
@@ -9685,7 +9686,7 @@ def hien_thi_dang_nhap_dang_ky():
         t_label = "🌙 Chế độ Tối" if current_theme == 'dark' else "☀️ Chế độ Sáng"
         st.toggle(t_label, value=(current_theme == 'dark'), 
                   key="theme_toggle_login", 
-                  on_change=lambda: st.session_state.update({"theme": "dark" if st.session_state.theme_toggle_login else "light"}))
+                  on_change=lambda: st.session_state.update({"theme": "dark" if st.session_state.get("theme_toggle_login", True) else "light"}))
         st.markdown("---")
 
     # Định nghĩa màu sắc tiêu đề theo theme để tránh lỗi nền trắng chữ trắng
@@ -10589,7 +10590,7 @@ def main():
 
     # Callback xử lý đổi theme nhanh
     def update_theme_callback():
-        st.session_state.theme = 'dark' if st.session_state.theme_toggle_top else 'light'
+        st.session_state.theme = 'dark' if st.session_state.get('theme_toggle_top', True) else 'light'
 
     # Chuyển các điều khiển hệ thống vào Sidebar
     with st.sidebar:
