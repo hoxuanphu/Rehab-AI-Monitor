@@ -9552,6 +9552,19 @@ def hien_thi_frames_day_du(key_suffix=""):
     pass_count = sum(1 for f in all_frames_data if f.get('dung'))
     nearly_count = sum(1 for f in all_frames_data if f.get('gan_dung') and not f.get('dung'))
     fail_count = total_frames - pass_count - nearly_count
+
+    if is_gay_ex:
+        df = st.session_state.get('angle_df')
+        ss_val = tk.get('sai_so', 30) if isinstance(tk, dict) else 30
+        if df is not None and len(df) > 0:
+            m_overall = recalc_metrics(df, ss_val, exercise_name)
+        else:
+            m_overall = tk
+            
+        if isinstance(m_overall, dict) and 'frame_dung' in m_overall:
+            pass_count = int(m_overall.get('frame_dung', 0))
+            nearly_count = int(m_overall.get('frame_gan_dung', 0))
+            fail_count = int(m_overall.get('frame_sai', 0))
     tk = st.session_state.get('stats') or {}
     filename = st.session_state.get('uploaded_file_name') or os.path.basename(st.session_state.get('processed_video_path', '') or 'Video hệ thống')
     v_meta = st.session_state.get('current_eval_video') or {}
@@ -9790,23 +9803,41 @@ def hien_thi_frames_day_du(key_suffix=""):
                     threshold = 30
             else:
                 threshold = 30
-        goc_v = f_data.get('goc_vai')
-        goc_k = f_data.get('goc_khuyu')
+        
         eval_info = f_data.get('eval_info', {})
-        if goc_v is None or goc_k is None:
-            return "FAIL"
-        # Lấy góc chuẩn từ eval_info nếu có (đã được lưu trong xu_ly_frame)
         cv = eval_info.get('shoulder_ref', 90)
         ck = eval_info.get('elbow_ref', 170)
-        vd = abs(goc_v - cv) <= threshold
-        kd = abs(goc_k - ck) <= threshold
-        vn = abs(goc_v - cv) <= threshold * 1.5
-        kn = abs(goc_k - ck) <= threshold * 1.5
-        if vd and kd:
-            return "PASS"
-        elif vn and kn:
-            return "NEAR"
-        return "FAIL"
+
+        if is_gay_ex:
+            vt = f_data.get('goc_vai_trai')
+            vp = f_data.get('goc_vai_phai')
+            kt = f_data.get('goc_khuyu_trai')
+            kp = f_data.get('goc_khuyu_phai')
+            if vt is None or vp is None or kt is None or kp is None:
+                return "FAIL"
+            vd = (abs(vt - cv) <= threshold) and (abs(vp - cv) <= threshold)
+            kd = (abs(kt - ck) <= threshold) and (abs(kp - ck) <= threshold)
+            vn = (abs(vt - cv) <= threshold * 1.5) and (abs(vp - cv) <= threshold * 1.5)
+            kn = (abs(kt - ck) <= threshold * 1.5) and (abs(kp - ck) <= threshold * 1.5)
+            if vd and kd:
+                return "PASS"
+            elif vn and kn:
+                return "NEAR"
+            return "FAIL"
+        else:
+            goc_v = f_data.get('goc_vai')
+            goc_k = f_data.get('goc_khuyu')
+            if goc_v is None or goc_k is None:
+                return "FAIL"
+            vd = abs(goc_v - cv) <= threshold
+            kd = abs(goc_k - ck) <= threshold
+            vn = abs(goc_v - cv) <= threshold * 1.5
+            kn = abs(goc_k - ck) <= threshold * 1.5
+            if vd and kd:
+                return "PASS"
+            elif vn and kn:
+                return "NEAR"
+            return "FAIL"
 
     # Hàm helper render grid HTML frames
     def _render_frame_grid(indices_list, frame_data_list, quality_mode_val, tab_threshold, tab_key, key_suffix_val):
