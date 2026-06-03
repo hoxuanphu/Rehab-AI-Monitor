@@ -2050,6 +2050,44 @@ st.markdown("""
         box-shadow: 0 4px 15px rgba(0, 0, 0, 0.45) !important;
         object-fit: contain !important;
     }
+
+    /* ===== CUSTOM SCROLLBAR - CHỈ ÁP DỤNG TRONG APP (KHÔNG ẢNH HƯỞNG CHROME/FIREFOX) ===== */
+    /* Webkit (Chrome, Edge, Safari) - dùng các thẻ cụ thể để tránh ghi đè browser scrollbar */
+    .stApp ::-webkit-scrollbar,
+    [data-testid="stAppViewContainer"] ::-webkit-scrollbar,
+    [data-testid="stSidebar"] ::-webkit-scrollbar,
+    .main ::-webkit-scrollbar,
+    [data-testid="stVerticalBlock"] ::-webkit-scrollbar,
+    textarea::-webkit-scrollbar {
+        width: 6px !important;
+        height: 6px !important;
+    }
+
+    .stApp ::-webkit-scrollbar-track,
+    [data-testid="stAppViewContainer"] ::-webkit-scrollbar-track,
+    [data-testid="stSidebar"] ::-webkit-scrollbar-track,
+    .main ::-webkit-scrollbar-track,
+    [data-testid="stVerticalBlock"] ::-webkit-scrollbar-track,
+    textarea::-webkit-scrollbar-track {
+        background: transparent !important;
+        border-radius: 10px !important;
+    }
+
+    .stApp ::-webkit-scrollbar-thumb,
+    [data-testid="stAppViewContainer"] ::-webkit-scrollbar-thumb,
+    [data-testid="stSidebar"] ::-webkit-scrollbar-thumb,
+    .main ::-webkit-scrollbar-thumb,
+    [data-testid="stVerticalBlock"] ::-webkit-scrollbar-thumb,
+    textarea::-webkit-scrollbar-thumb {
+        border-radius: 10px !important;
+        border: 2px solid transparent !important;
+        background-clip: padding-box !important;
+    }
+
+    .stApp ::-webkit-scrollbar-corner,
+    [data-testid="stAppViewContainer"] ::-webkit-scrollbar-corner {
+        background: transparent !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -2502,6 +2540,36 @@ if st.session_state.get('theme') == 'dark':
             border: 1px solid #00c6ff !important;
             border-bottom: 4px solid #ff4b4b !important; /* Gạch đỏ dưới chân tab được chọn */
         }
+
+        /* ===== SCROLLBAR MÀU TỐI (DARK MODE) ===== */
+        .stApp ::-webkit-scrollbar-track,
+        [data-testid="stAppViewContainer"] ::-webkit-scrollbar-track,
+        [data-testid="stSidebar"] ::-webkit-scrollbar-track,
+        .main ::-webkit-scrollbar-track,
+        textarea::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05) !important;
+        }
+        .stApp ::-webkit-scrollbar-thumb,
+        [data-testid="stAppViewContainer"] ::-webkit-scrollbar-thumb,
+        [data-testid="stSidebar"] ::-webkit-scrollbar-thumb,
+        .main ::-webkit-scrollbar-thumb,
+        textarea::-webkit-scrollbar-thumb {
+            background: linear-gradient(180deg, #00c6ff 0%, #0072ff 100%) !important;
+            box-shadow: 0 0 6px rgba(0, 198, 255, 0.4) !important;
+        }
+        .stApp ::-webkit-scrollbar-thumb:hover,
+        [data-testid="stAppViewContainer"] ::-webkit-scrollbar-thumb:hover,
+        [data-testid="stSidebar"] ::-webkit-scrollbar-thumb:hover,
+        .main ::-webkit-scrollbar-thumb:hover,
+        textarea::-webkit-scrollbar-thumb:hover {
+            background: linear-gradient(180deg, #33d1ff 0%, #1a8fff 100%) !important;
+            box-shadow: 0 0 10px rgba(0, 198, 255, 0.7) !important;
+        }
+        /* Firefox scrollbar dark mode */
+        .stApp, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], .main, textarea {
+            scrollbar-width: thin !important;
+            scrollbar-color: #0072ff rgba(255,255,255,0.05) !important;
+        }
     </style>
     """, unsafe_allow_html=True)
 
@@ -2824,6 +2892,37 @@ if st.session_state.get('theme') == 'light':
             color: #ffffff !important;
             border: 1px solid #00c6ff !important;
             border-bottom: 4px solid #ff4b4b !important; /* Gạch đỏ dưới chân tab được chọn */
+        }
+
+        /* ===== SCROLLBAR MÀU SÁNG (LIGHT MODE) ===== */
+        .stApp ::-webkit-scrollbar-track,
+        [data-testid="stAppViewContainer"] ::-webkit-scrollbar-track,
+        [data-testid="stSidebar"] ::-webkit-scrollbar-track,
+        .main ::-webkit-scrollbar-track,
+        textarea::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.06) !important;
+            border-radius: 10px !important;
+        }
+        .stApp ::-webkit-scrollbar-thumb,
+        [data-testid="stAppViewContainer"] ::-webkit-scrollbar-thumb,
+        [data-testid="stSidebar"] ::-webkit-scrollbar-thumb,
+        .main ::-webkit-scrollbar-thumb,
+        textarea::-webkit-scrollbar-thumb {
+            background: linear-gradient(180deg, #90caf9 0%, #1565c0 100%) !important;
+            border-radius: 10px !important;
+        }
+        .stApp ::-webkit-scrollbar-thumb:hover,
+        [data-testid="stAppViewContainer"] ::-webkit-scrollbar-thumb:hover,
+        [data-testid="stSidebar"] ::-webkit-scrollbar-thumb:hover,
+        .main ::-webkit-scrollbar-thumb:hover,
+        textarea::-webkit-scrollbar-thumb:hover {
+            background: linear-gradient(180deg, #42a5f5 0%, #0d47a1 100%) !important;
+            box-shadow: 0 0 8px rgba(21, 101, 192, 0.5) !important;
+        }
+        /* Firefox scrollbar light mode */
+        .stApp, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], .main, textarea {
+            scrollbar-width: thin !important;
+            scrollbar-color: #1565c0 rgba(0,0,0,0.06) !important;
         }
     </style>
     """, unsafe_allow_html=True)
