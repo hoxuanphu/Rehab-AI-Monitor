@@ -635,6 +635,8 @@ def render_video(video_path):
     if isinstance(video_path, str) and (video_path.startswith('http://') or video_path.startswith('https://')):
         try:
             import streamlit.components.v1 as _stcomp
+            import hashlib
+            url_hash = hashlib.md5(video_path.encode()).hexdigest()[:8]
             _stcomp.html(f"""
 <!DOCTYPE html><html><head>
 <style>
@@ -642,12 +644,12 @@ def render_video(video_path):
   video{{width:100%;border-radius:8px;display:block;height:240px;background:#000;}}
 </style>
 </head><body>
-<video id="vp" controls preload="metadata">
+<video id="vp" controls preload="auto" playsinline>
   <source src="{video_path}" type="video/mp4">
   Trình duyệt không hỗ trợ video HTML5.
 </video>
 </body></html>
-""", height=255)
+""", height=255, key=f"cloud_direct_vid_{url_hash}")
         except Exception as e:
             st.error(f'⚠️ Lỗi hiển thị video: {e}')
         return
@@ -704,7 +706,7 @@ def render_video(video_path):
 
         # ─────────────────────────────────────────────────────────────────
         # CHIẾN LƯỢC PHÁT VIDEO HIỆU NĂNG CAO (HỖ TRỢ FILE LỚN):
-        # Sao chép file vào thư mục static/ và phát qua đường dẫn static của Streamlit.
+        # Tạo liên kết cứng (hard link) hoặc sao chép file vào thư mục static/ và phát qua đường dẫn static của Streamlit.
         # Phương pháp này kích hoạt HTTP Range Requests giúp stream video mượt mà,
         # cho phép tua nhanh và không bị tràn RAM/crash websocket với tệp dung lượng lớn.
         # ─────────────────────────────────────────────────────────────────
@@ -717,23 +719,37 @@ def render_video(video_path):
             os.makedirs(static_dir, exist_ok=True)
             
             # Đặt tên file an toàn (ASCII) để tránh lỗi ký tự Unicode tiếng Việt
-            safe_name = f"stream_{hashlib.md5(target_path.encode()).hexdigest()[:10]}.mp4"
+            path_hash = hashlib.md5(target_path.encode()).hexdigest()[:10]
+            safe_name = f"stream_{path_hash}.mp4"
             static_path = os.path.join(static_dir, safe_name)
+            video_key = f"st_vid_{path_hash}"
             
-            # Đồng bộ file từ /data hoặc local sang thư mục static
-            if not os.path.exists(static_path) or os.path.getsize(static_path) != os.path.getsize(target_path):
-                shutil.copy2(target_path, static_path)
+            # Đồng bộ file từ /data hoặc local sang thư mục static bằng hard link (tốc độ ánh sáng, 0ms)
+            if not os.path.exists(static_path):
+                try:
+                    os.link(target_path, static_path)
+                except:
+                    shutil.copy2(target_path, static_path)
+            elif os.path.getsize(static_path) != os.path.getsize(target_path):
+                try:
+                    os.remove(static_path)
+                    os.link(target_path, static_path)
+                except:
+                    shutil.copy2(target_path, static_path)
                 
             # Phát bằng URL tĩnh của Streamlit (bắt buộc cấu hình enableStaticServing = true)
-            st.video(f"static/{safe_name}", format="video/mp4")
+            # Sử dụng stable key để không bị reload lại khi user click form
+            st.video(f"static/{safe_name}", format="video/mp4", key=video_key)
             return
         except Exception as _ve:
             # Fallback dự phòng nếu static serving gặp trục trặc: phát qua bytes
             try:
+                path_hash = hashlib.md5(target_path.encode()).hexdigest()[:10]
+                video_key = f"st_bytes_vid_{path_hash}"
                 with open(target_path, 'rb') as _vf:
                     _vbytes = _vf.read()
                 if _vbytes:
-                    st.video(_vbytes, format="video/mp4")
+                    st.video(_vbytes, format="video/mp4", key=video_key)
                     return
             except Exception as _ve2:
                 st.error(f"❌ Không thể phát video: {_ve2}")
@@ -779,6 +795,8 @@ def render_video(video_path):
                 sources_html = f'<source src="{cloud_url_raw}">'
 
             import streamlit.components.v1 as _stcomp
+            import hashlib
+            url_hash = hashlib.md5(video_path.encode()).hexdigest()[:8]
             _stcomp.html(f"""
 <!DOCTYPE html><html><head>
 <style>
@@ -786,7 +804,7 @@ def render_video(video_path):
   video{{width:100%;border-radius:8px;display:block;height:240px;background:#000;}}
 </style>
 </head><body>
-<video id="vp" controls preload="metadata" onerror="this.outerHTML='<div style=\\'padding:20px;background:#442222;color:#ff8888;border-radius:8px;text-align:center;height:240px;display:flex;align-items:center;justify-content:center;\\'>⚠️ Lỗi phát video: Định dạng gốc chưa được nén xong (HEVC/H.265 không hỗ trợ trình duyệt).<br>Vui lòng đợi hệ thống nén xong rồi tải lại trang!</div>'">
+<video id="vp" controls preload="auto" playsinline onerror="this.outerHTML=\'<div style=\\'padding:20px;background:#442222;color:#ff8888;border-radius:8px;text-align:center;height:240px;display:flex;align-items:center;justify-content:center;\\'>⚠️ Lỗi phát video: Định dạng gốc chưa được nén xong (HEVC/H.265 không hỗ trợ trình duyệt).<br>Vui lòng đợi hệ thống nén xong rồi tải lại trang!</div>\'">
   {sources_html}
   Trình duyệt không hỗ trợ video HTML5.
 </video>
@@ -794,7 +812,7 @@ def render_video(video_path):
   ☁️ Đang stream trực tiếp từ Cloud&nbsp;&nbsp;|&nbsp;&nbsp;📹 {os.path.basename(video_path)}
 </div>
 </body></html>
-""", height=270)
+""", height=270, key=f"cloud_stream_vid_{url_hash}")
             return
         except:
             pass
