@@ -9740,9 +9740,12 @@ def hien_thi_frames_day_du(key_suffix=""):
     st.markdown("---")
 
     # ================================================================
-    # PHẦN HIỂN THỊ KHUNG HÌNH THEO 3 GIAI ĐOẠN (NCV)
+    # PHẦN HIỂN THỊ KHUNG HÌNH TRÍCH XUẤT (NCV)
     # ================================================================
-    st.markdown("### 📷 KHUNG HÌNH TRÍCH XUẤT — PHÂN LOẠI THEO 3 GIAI ĐOẠN")
+    if is_gay_ex:
+        st.markdown("### 📷 KHUNG HÌNH TRÍCH XUẤT")
+    else:
+        st.markdown("### 📷 KHUNG HÌNH TRÍCH XUẤT — PHÂN LOẠI THEO 3 GIAI ĐOẠN")
 
     # Hàm helper tính G1/G2/G3 status cho một frame_data
     def _frame_phase_status(f_data, threshold):
