@@ -1729,9 +1729,19 @@ st.markdown("""
     div[data-testid="stSegmentedControl"] button {
         border-radius: 10px !important; /* Bo góc dạng pill */
         font-weight: bold !important;
+        font-size: 0.95rem !important;
         transition: all 0.3s ease !important;
         padding: 8px 16px !important;
         margin-right: 5px !important;
+    }
+    .st-key-active_tab_widget button p,
+    div[data-testid="stSegmentedControl"] button p,
+    .st-key-active_tab_widget button div,
+    div[data-testid="stSegmentedControl"] button div,
+    .st-key-active_tab_widget button span,
+    div[data-testid="stSegmentedControl"] button span {
+        font-size: 0.95rem !important;
+        font-weight: bold !important;
     }
     .st-key-active_tab_widget button[aria-checked="true"],
     .st-key-active_tab_widget button[aria-pressed="true"],
