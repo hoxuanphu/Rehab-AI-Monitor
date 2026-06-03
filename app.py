@@ -1714,7 +1714,8 @@ st.markdown("""
 
     /* Tối ưu hóa giao diện st.segmented_control thành tab bar */
     .st-key-active_tab_widget,
-    div[data-testid="stSegmentedControl"] {
+    div[data-testid="stSegmentedControl"],
+    div[data-testid="stButtonGroup"] {
         position: relative !important;
         background: transparent !important; /* Xóa nền container */
         border: none !important; /* Xóa viền bao ngoài container */
@@ -1730,7 +1731,9 @@ st.markdown("""
     .st-key-active_tab_widget [role="radiogroup"],
     .st-key-active_tab_widget [role="group"],
     div[data-testid="stSegmentedControl"] [role="radiogroup"],
-    div[data-testid="stSegmentedControl"] [role="group"] {
+    div[data-testid="stSegmentedControl"] [role="group"],
+    div[data-testid="stButtonGroup"] [role="radiogroup"],
+    div[data-testid="stButtonGroup"] [role="group"] {
         display: flex !important;
         flex-direction: row !important;
         flex-wrap: nowrap !important;
@@ -1750,12 +1753,15 @@ st.markdown("""
     .st-key-active_tab_widget [role="radiogroup"]::-webkit-scrollbar,
     .st-key-active_tab_widget [role="group"]::-webkit-scrollbar,
     div[data-testid="stSegmentedControl"] [role="radiogroup"]::-webkit-scrollbar,
-    div[data-testid="stSegmentedControl"] [role="group"]::-webkit-scrollbar {
+    div[data-testid="stSegmentedControl"] [role="group"]::-webkit-scrollbar,
+    div[data-testid="stButtonGroup"] [role="radiogroup"]::-webkit-scrollbar,
+    div[data-testid="stButtonGroup"] [role="group"]::-webkit-scrollbar {
         display: none !important;
     }
 
     .st-key-active_tab_widget button,
-    div[data-testid="stSegmentedControl"] button {
+    div[data-testid="stSegmentedControl"] button,
+    div[data-testid="stButtonGroup"] button {
         border-radius: 10px 10px 0 0 !important; /* Bo góc trên, dưới phẳng để giống tab thật */
         font-weight: 800 !important;
         transition: all 0.3s ease !important;
@@ -1773,10 +1779,13 @@ st.markdown("""
     }
     .st-key-active_tab_widget button p,
     div[data-testid="stSegmentedControl"] button p,
+    div[data-testid="stButtonGroup"] button p,
     .st-key-active_tab_widget button div,
     div[data-testid="stSegmentedControl"] button div,
+    div[data-testid="stButtonGroup"] button div,
     .st-key-active_tab_widget button span,
-    div[data-testid="stSegmentedControl"] button span {
+    div[data-testid="stSegmentedControl"] button span,
+    div[data-testid="stButtonGroup"] button span {
         font-size: 1.15rem !important; /* Tăng kích thước chữ giống ảnh số 3 */
         font-weight: 800 !important;
         text-transform: uppercase !important;
@@ -1796,7 +1805,13 @@ st.markdown("""
     div[data-testid="stSegmentedControl"] [aria-selected="true"],
     div[data-testid="stSegmentedControl"] [data-checked="true"],
     div[data-testid="stSegmentedControl"] button[data-testid*="Active"],
-    div[data-testid="stSegmentedControl"] button[kind*="Active"] {
+    div[data-testid="stSegmentedControl"] button[kind*="Active"],
+    div[data-testid="stButtonGroup"] [aria-pressed="true"],
+    div[data-testid="stButtonGroup"] [aria-checked="true"],
+    div[data-testid="stButtonGroup"] [aria-selected="true"],
+    div[data-testid="stButtonGroup"] [data-checked="true"],
+    div[data-testid="stButtonGroup"] button[data-testid*="Active"],
+    div[data-testid="stButtonGroup"] button[kind*="Active"] {
         background: linear-gradient(135deg, #00c6ff 0%, #0072ff 100%) !important;
         color: white !important;
         border: 1px solid #00c6ff !important;
@@ -2427,11 +2442,13 @@ if st.session_state.get('theme') == 'dark':
 
         /* Phong cách st.segmented_control trong chế độ tối giống tab ảnh 2 */
         .st-key-active_tab_widget,
-        div[data-testid="stSegmentedControl"] {
+        div[data-testid="stSegmentedControl"],
+        div[data-testid="stButtonGroup"] {
             border-bottom: none !important; /* Xóa đường gạch xám nhạt dưới tab bar */
         }
         .st-key-active_tab_widget button,
-        div[data-testid="stSegmentedControl"] button {
+        div[data-testid="stSegmentedControl"] button,
+        div[data-testid="stButtonGroup"] button {
             background-color: rgba(255, 255, 255, 0.05) !important;
             color: rgba(255, 255, 255, 0.8) !important;
             border: 1px solid rgba(255, 255, 255, 0.1) !important;
@@ -2440,7 +2457,8 @@ if st.session_state.get('theme') == 'dark':
             min-height: 52px !important;
         }
         .st-key-active_tab_widget button:hover,
-        div[data-testid="stSegmentedControl"] button:hover {
+        div[data-testid="stSegmentedControl"] button:hover,
+        div[data-testid="stButtonGroup"] button:hover {
             background-color: rgba(255, 255, 255, 0.1) !important;
             color: #ffffff !important;
             border-color: rgba(255, 255, 255, 0.2) !important;
@@ -2458,7 +2476,13 @@ if st.session_state.get('theme') == 'dark':
         div[data-testid="stSegmentedControl"] [aria-selected="true"],
         div[data-testid="stSegmentedControl"] [data-checked="true"],
         div[data-testid="stSegmentedControl"] button[data-testid*="Active"],
-        div[data-testid="stSegmentedControl"] button[kind*="Active"] {
+        div[data-testid="stSegmentedControl"] button[kind*="Active"],
+        div[data-testid="stButtonGroup"] [aria-pressed="true"],
+        div[data-testid="stButtonGroup"] [aria-checked="true"],
+        div[data-testid="stButtonGroup"] [aria-selected="true"],
+        div[data-testid="stButtonGroup"] [data-checked="true"],
+        div[data-testid="stButtonGroup"] button[data-testid*="Active"],
+        div[data-testid="stButtonGroup"] button[kind*="Active"] {
             background: linear-gradient(135deg, #00c6ff 0%, #0072ff 100%) !important;
             color: #ffffff !important;
             border: 1px solid #00c6ff !important;
@@ -2734,11 +2758,13 @@ if st.session_state.get('theme') == 'light':
 
         /* Phong cách st.segmented_control trong chế độ sáng giống tab ảnh 2 */
         .st-key-active_tab_widget,
-        div[data-testid="stSegmentedControl"] {
+        div[data-testid="stSegmentedControl"],
+        div[data-testid="stButtonGroup"] {
             border-bottom: none !important; /* Xóa đường gạch dưới chân tab bar */
         }
         .st-key-active_tab_widget button,
-        div[data-testid="stSegmentedControl"] button {
+        div[data-testid="stSegmentedControl"] button,
+        div[data-testid="stButtonGroup"] button {
             background-color: #f1f3f5 !important;
             color: #495057 !important;
             border: 1px solid #ced4da !important;
@@ -2747,7 +2773,8 @@ if st.session_state.get('theme') == 'light':
             min-height: 52px !important;
         }
         .st-key-active_tab_widget button:hover,
-        div[data-testid="stSegmentedControl"] button:hover {
+        div[data-testid="stSegmentedControl"] button:hover,
+        div[data-testid="stButtonGroup"] button:hover {
             background-color: #e9ecef !important;
             color: #0072ff !important;
             border-color: #0072ff !important;
@@ -2765,7 +2792,13 @@ if st.session_state.get('theme') == 'light':
         div[data-testid="stSegmentedControl"] [aria-selected="true"],
         div[data-testid="stSegmentedControl"] [data-checked="true"],
         div[data-testid="stSegmentedControl"] button[data-testid*="Active"],
-        div[data-testid="stSegmentedControl"] button[kind*="Active"] {
+        div[data-testid="stSegmentedControl"] button[kind*="Active"],
+        div[data-testid="stButtonGroup"] [aria-pressed="true"],
+        div[data-testid="stButtonGroup"] [aria-checked="true"],
+        div[data-testid="stButtonGroup"] [aria-selected="true"],
+        div[data-testid="stButtonGroup"] [data-checked="true"],
+        div[data-testid="stButtonGroup"] button[data-testid*="Active"],
+        div[data-testid="stButtonGroup"] button[kind*="Active"] {
             background: linear-gradient(135deg, #00c6ff 0%, #0072ff 100%) !important;
             color: #ffffff !important;
             border: 1px solid #00c6ff !important;
@@ -10871,8 +10904,8 @@ def main():
         (function() {
             function setupScrollArrows() {
                 const doc = window.parent.document;
-                // Chỉ nhắm vào phần tử stSegmentedControl bên trong active_tab_widget để tránh trùng lặp
-                const containers = doc.querySelectorAll('.st-key-active_tab_widget div[data-testid="stSegmentedControl"]');
+                // Chỉ nhắm vào phần tử stSegmentedControl hoặc stButtonGroup bên trong active_tab_widget để tránh trùng lặp
+                const containers = doc.querySelectorAll('.st-key-active_tab_widget div[data-testid="stSegmentedControl"], .st-key-active_tab_widget div[data-testid="stButtonGroup"]');
                 
                 containers.forEach(container => {
                     // Tìm phần tử cuộn thực sự (div có role=radiogroup hoặc role=group chứa nút bấm)
