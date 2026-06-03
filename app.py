@@ -5701,7 +5701,7 @@ def recalc_metrics(df, ss, exercise_name="codman"):
     
     dung_count = dung_series.sum()
     gan_dung_count = gan_dung_series.sum()
-    fail_count = total - dung_count - gan_dung_count
+    fail_count = total_raw - dung_count - gan_dung_count
     
     ty_le_tong_the = (dung_count / total) * 100
     ty_le_gan_dung = (gan_dung_count / total) * 100
