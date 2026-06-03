@@ -8568,7 +8568,7 @@ def hien_thi_noi_dung_ket_qua(selected_v, my_evals):
                         _ag3_str = f"{_ag3:.1f}%" if _ag3 is not None else "N/A"
 
                         if is_gay_ex:
-                            _overall_acc = (selected_v.get('accuracy') if selected_v else None) or e.get('ai_accuracy') or _ag1 or 0.0
+                            _overall_acc = lay_do_chinh_xac_ai_chuan(selected_v) or e.get('ai_accuracy') or _ag1 or 0.0
                             _avg_clr = _c(_overall_acc)
                             _overall = "Đúng" if _overall_acc >= 80 else ("Gần đúng" if _overall_acc >= 50 else "Sai")
                             _overall_color = {"Đúng": "#00e676", "Gần đúng": "#ffd700", "Sai": "#ff5252"}[_overall]
@@ -8664,7 +8664,7 @@ def hien_thi_noi_dung_ket_qua(selected_v, my_evals):
                     
                     if is_ai:
                         if is_gay_ex:
-                            acc_overall = (selected_v.get('accuracy') if selected_v else None) or e.get('ai_accuracy') or e.get('ai_accuracy_g1') or 0.0
+                            acc_overall = lay_do_chinh_xac_ai_chuan(selected_v) or e.get('ai_accuracy') or e.get('ai_accuracy_g1') or 0.0
                             clr = _acc_color(acc_overall)
                             lbl = _acc_label(acc_overall)
                             
