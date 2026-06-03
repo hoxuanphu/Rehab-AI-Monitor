@@ -8567,10 +8567,22 @@ def hien_thi_lich_nhac_nho():
 
     col1, col2, col3, col4 = st.columns(4)
     
+    day_mapping = {
+        "Monday": "Thứ Hai",
+        "Tuesday": "Thứ Ba",
+        "Wednesday": "Thứ Tư",
+        "Thursday": "Thứ Năm",
+        "Friday": "Thứ Sáu",
+        "Saturday": "Thứ Bảy",
+        "Sunday": "Chủ Nhật"
+    }
+    english_day = current_time.strftime("%A")
+    vietnamese_day = day_mapping.get(english_day, english_day)
+
     metrics_data = [
         ("📅 Hôm nay", current_time.strftime("%d/%m/%Y")),
         ("⏰ Hiện tại", current_time.strftime("%H:%M:%S")),
-        ("📆 Thứ", current_time.strftime("%A")),
+        ("📆 Thứ", vietnamese_day),
         ("📊 Tổng lịch", len(display_schedules))
     ]
     
