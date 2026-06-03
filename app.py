@@ -9553,6 +9553,8 @@ def hien_thi_frames_day_du(key_suffix=""):
     nearly_count = sum(1 for f in all_frames_data if f.get('gan_dung') and not f.get('dung'))
     fail_count = total_frames - pass_count - nearly_count
 
+    tk = st.session_state.get('stats') or {}
+
     if is_gay_ex:
         df = st.session_state.get('angle_df')
         ss_val = tk.get('sai_so', 30) if isinstance(tk, dict) else 30
@@ -9565,7 +9567,6 @@ def hien_thi_frames_day_du(key_suffix=""):
             pass_count = int(m_overall.get('frame_dung', 0))
             nearly_count = int(m_overall.get('frame_gan_dung', 0))
             fail_count = int(m_overall.get('frame_sai', 0))
-    tk = st.session_state.get('stats') or {}
     filename = st.session_state.get('uploaded_file_name') or os.path.basename(st.session_state.get('processed_video_path', '') or 'Video hệ thống')
     v_meta = st.session_state.get('current_eval_video') or {}
     ai_acc = lay_do_chinh_xac_ai_chuan(v_meta) or (tk.get('do_chinh_xac', 0.0) if isinstance(tk, dict) else 0.0)
