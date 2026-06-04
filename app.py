@@ -5614,10 +5614,18 @@ def bat_dau_phan_tich_background(
                 else:
                     prog_val = p * 0.95
                 
+                # Tạo status_msg sinh động để hiển thị chi tiết tiến trình
+                if p <= 0.5:
+                    p1_pct = (p / 0.5) * 100
+                    status_msg = f"🔬 Bước 1/2: Trích xuất khung xương ({p1_pct:.0f}%)"
+                else:
+                    p2_pct = ((p - 0.5) / 0.5) * 100
+                    status_msg = f"🎨 Bước 2/2: Vẽ đè khớp & tính chỉ số ({p2_pct:.0f}%)"
+                
                 percent = int(prog_val * 100)
                 # Chỉ ghi tiến độ xuống đĩa nếu phần trăm thay đổi HOẶC trôi qua ít nhất 1.5 giây để tránh thắt nút cổ chai I/O đĩa
                 if percent != last_prog_percent[0] or (now - last_write_time[0] >= 1.5):
-                    write_progress(progress_video_path, "processing", username=username, video_name=video_name, progress=prog_val, elapsed=elap, start_time=start_t)
+                    write_progress(progress_video_path, "processing", username=username, video_name=video_name, progress=prog_val, elapsed=elap, start_time=start_t, status_msg=status_msg)
                     last_write_time[0] = now
                     last_prog_percent[0] = percent
                 
