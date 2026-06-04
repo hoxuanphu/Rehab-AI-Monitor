@@ -659,6 +659,12 @@ def render_video(video_path):
 
     # Bước 1: Kiểm tra xem file H264 có sẵn local và hợp lệ không
     final_h264 = get_final_h264_path(video_path)
+    # Thử tải _f.mp4 từ HF Dataset nếu chưa có local (file chỉ ~10MB, tải rất nhanh)
+    if not os.path.exists(final_h264) or os.path.getsize(final_h264) < 5 * 1024:
+        try:
+            ensure_local_file(final_h264)
+        except:
+            pass
     is_local_h264 = False
     if os.path.exists(final_h264) and os.path.getsize(final_h264) >= 5 * 1024:
         try:
