@@ -5088,6 +5088,15 @@ def read_progress(video_path):
                         except:
                             pass
                         return None
+            elif data and data.get("status") == "error":
+                # Tự động dọn dẹp file lỗi cũ của phiên bản trước
+                err_msg = data.get("error_msg", "")
+                if "final_h264" in err_msg or "referenced before assignment" in err_msg:
+                    try:
+                        os.remove(p_file)
+                    except:
+                        pass
+                    return None
             return data
         except:
             pass
