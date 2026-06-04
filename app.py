@@ -4615,18 +4615,11 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
             processed_count += 1
             
             h_orig, w_orig = frame.shape[:2]
-            if w_orig > h_orig:
-                scale = resize_width / h_orig
-                new_w = int(w_orig * scale)
-                if new_w % 2 != 0: new_w -= 1
-                frame = cv2.resize(frame, (new_w, resize_width), interpolation=cv2.INTER_LINEAR)
-                frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
-            else:
-                if w_orig != resize_width:
-                    scale = resize_width / w_orig
-                    new_h = int(h_orig * scale)
-                    if new_h % 2 != 0: new_h -= 1
-                    frame = cv2.resize(frame, (resize_width, new_h), interpolation=cv2.INTER_LINEAR)
+            if w_orig != resize_width:
+                scale = resize_width / w_orig
+                new_h = int(h_orig * scale)
+                if new_h % 2 != 0: new_h -= 1
+                frame = cv2.resize(frame, (resize_width, new_h), interpolation=cv2.INTER_LINEAR)
             
             h, w = frame.shape[:2]
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -4785,18 +4778,11 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
             processed_count += 1
             
             h_orig, w_orig = frame.shape[:2]
-            if w_orig > h_orig:
-                scale = resize_width / h_orig
-                new_w = int(w_orig * scale)
-                if new_w % 2 != 0: new_w -= 1
-                frame = cv2.resize(frame, (new_w, resize_width), interpolation=cv2.INTER_LINEAR)
-                frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
-            else:
-                if w_orig != resize_width:
-                    scale = resize_width / w_orig
-                    new_h = int(h_orig * scale)
-                    if new_h % 2 != 0: new_h -= 1
-                    frame = cv2.resize(frame, (resize_width, new_h), interpolation=cv2.INTER_LINEAR)
+            if w_orig != resize_width:
+                scale = resize_width / w_orig
+                new_h = int(h_orig * scale)
+                if new_h % 2 != 0: new_h -= 1
+                frame = cv2.resize(frame, (resize_width, new_h), interpolation=cv2.INTER_LINEAR)
                     
             # Xác định sai số theo giai đoạn hiện tại (G1=45, G2=30, G3=15)
             # Riêng bài tập gậy, không chia 3 giai đoạn nên giữ nguyên sai số chuẩn
