@@ -4589,6 +4589,8 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
             ket_qua = model.process(rgb)
             
             current_landmarks = None
+            detected_this_frame = False
+            filtered_stranger_this_frame = False
             if ket_qua and ket_qua.pose_landmarks:
                 # Trích xuất trọng tâm thân người (Torso center) để theo dõi và lọc người lạ
                 lm = ket_qua.pose_landmarks.landmark
@@ -4603,6 +4605,7 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
                     last_known_center = current_center
                     current_landmarks = ket_qua.pose_landmarks
                     last_pose_landmarks = current_landmarks
+                    detected_this_frame = True
                 else:
                     # Tính khoảng cách dịch chuyển trọng tâm
                     dist = math.sqrt((current_center[0] - last_known_center[0])**2 + (current_center[1] - last_known_center[1])**2)
@@ -4612,14 +4615,17 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
                         last_known_center = current_center
                         current_landmarks = ket_qua.pose_landmarks
                         last_pose_landmarks = current_landmarks
+                        detected_this_frame = True
                     else:
-                        # Bỏ qua không nhận dạng người lạ nhảy vào khung hình
-                        print(f"[AI Tracking Filter] Lọc bỏ người lạ/nhảy vị trí đột ngột (Khoảng cách: {dist:.3f})")
-                        if not has_multiple_people_warning:
-                            all_warnings.append("⚠️ Phát hiện có người thứ hai xuất hiện hoặc thay đổi góc camera đột ngột trong video. AI đã tự động lọc bỏ và chỉ nhận dạng/theo dõi người tập đầu tiên.")
-                            has_multiple_people_warning = True
+                        filtered_stranger_this_frame = True
+            elif last_pose_landmarks is None:
+                # Không có gì cả - thực sự không nhận dạng được người nào
+                detected_this_frame = False
+                filtered_stranger_this_frame = False
             elif last_pose_landmarks:
                 current_landmarks = last_pose_landmarks
+                detected_this_frame = False
+                filtered_stranger_this_frame = False
                 
             goc_v_left, goc_k_left = None, None
             goc_v_right, goc_k_right = None, None
@@ -4643,6 +4649,8 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
                 'frame_idx': frame_count,
                 'processed_count': processed_count,
                 'landmarks': current_landmarks,
+                'detected': detected_this_frame,           # True = AI thực sự nhận dạng bệnh nhân frame này
+                'filtered_stranger': filtered_stranger_this_frame,  # True = có người lạ bị lọc bỏ
                 'goc_vai_left': goc_v_left,
                 'goc_khuyu_left': goc_k_left,
                 'goc_vai_right': goc_v_right,
@@ -4819,7 +4827,9 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
                 'goc_vai_phai': p1_data.get('goc_vai_right'), 'goc_khuyu_phai': p1_data.get('goc_khuyu_right'),
                 'dung': dung,
                 'gan_dung': eval_info['nearly_correct'] if eval_info else False,
-                'eval_info': eval_info if eval_info else {}
+                'eval_info': eval_info if eval_info else {},
+                'detected': p1_data.get('detected', False),            # AI thực sự nhận dạng BN frame này
+                'filtered_stranger': p1_data.get('filtered_stranger', False)  # Có người lạ bị lọc bỏ
             }
             danh_sach_frame_data.append(d_frame)
             
@@ -9833,9 +9843,17 @@ def hien_thi_frames_day_du(key_suffix=""):
 <div style='display:flex; justify-content:space-between; margin-bottom:5px;'>
 <span>⚠️ NEARLY:</span> <b>{nearly_count}</b>
 </div>
-<div style='display:flex; justify-content:space-between;'>
+<div style='display:flex; justify-content:space-between; margin-bottom:8px;'>
 <span>❌ FAIL:</span> <b>{fail_count}</b>
 </div>
+<hr style='opacity:0.15; margin:10px 0;'>
+<div style='display:flex; justify-content:space-between; margin-bottom:5px;'>
+<span>👤 Không nhận dạng BN:</span> <b style='color:#f97316;'>{sum(1 for f in all_frames_data if f.get('goc_vai') is None and f.get('goc_vai_trai') is None and f.get('goc_vai_phai') is None)}</b>
+</div>
+<div style='display:flex; justify-content:space-between; margin-bottom:5px;'>
+<span>🚫 Lọc người lạ:</span> <b style='color:#a855f7;'>{sum(1 for f in all_frames_data if f.get('filtered_stranger', False))}</b>
+</div>
+<div style='font-size:0.75rem; color:#94a3b8; margin-top:4px;'>ℹ️ AI chỉ theo dõi bệnh nhân đầu tiên phát hiện</div>
 </div>""", unsafe_allow_html=True)
         
         if user_role == "Nghiên cứu viên":
