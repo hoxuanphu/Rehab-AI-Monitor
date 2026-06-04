@@ -687,7 +687,8 @@ def render_video(video_path):
 
     # 1. TRƯỜNG HỢP 1: Có sẵn file cục bộ (local)
     if target_path:
-        # Nếu file raw chưa có H264 và là định dạng không tương thích, thông báo và chặn hiển thị
+        # Nếu file raw chưa có H264 và là định dạng không tương thích
+        # → KHÔNG chặn, thử stream từ Cloud URL ngay lập tức thay vì chờ nền
         if target_path == video_path and is_local_raw and not is_local_h264:
             v_codec = None
             try:
@@ -698,11 +699,38 @@ def render_video(video_path):
             # Kiểm tra xem video gốc có tương thích trực tiếp với trình duyệt hay không (phải là h264 MP4)
             is_compatible = (v_codec == 'h264' and video_path.lower().endswith('.mp4'))
             if not is_compatible:
-                st.warning("⏳ **Trình duyệt hiện tại chưa hỗ trợ phát trực tiếp định dạng video gốc này.**\n\n"
-                           "Hệ thống đang tự động tối ưu hóa và nén video sang định dạng H.264 chuẩn dưới nền. "
-                           "Vui lòng chờ khoảng 1 phút rồi tải lại trang (F5) để xem video.")
+                # Kích hoạt transcode nền nhưng KHÔNG chặn UI
+                # Thử stream thẳng từ Cloud URL của HF Dataset để người dùng xem được ngay
+                if HF_TOKEN and HF_DATASET_ID:
+                    try:
+                        import urllib.parse, hashlib as _hlib
+                        _rel = get_clean_rel_path(video_path)
+                        _rel_enc = urllib.parse.quote(_rel, safe='/')
+                        _cloud_url = f"https://huggingface.co/datasets/{HF_DATASET_ID}/resolve/main/{_rel_enc}?token={HF_TOKEN}"
+                        _url_hash = _hlib.md5(video_path.encode()).hexdigest()[:8]
+                        import streamlit.components.v1 as _stcomp_
+                        st.info("🔄 Video đang được tối ưu hóa sang H.264 ở nền. Đang stream từ Cloud... (nếu không xem được, nhấn F5 sau 1-2 phút để reload)")
+                        _stcomp_.html(f"""
+<!DOCTYPE html><html><head>
+<style>
+  body{{margin:0;padding:0;background:transparent;overflow:hidden;}}
+  video{{width:100%;border-radius:8px;display:block;height:300px;background:#000;}}
+</style>
+</head><body>
+<video id="cvp_{_url_hash}" controls preload="metadata" playsinline>
+  <source src="{_cloud_url}" type="video/mp4">
+  Trình duyệt không hỗ trợ video HTML5.
+</video>
+</body></html>
+""", height=315, key=f"incompatible_cloud_{_url_hash}")
+                        return
+                    except Exception as _cloud_err:
+                        pass  # fallthrough to static serving below
+                
+                # Nếu không có cloud URL, hiện thông báo
                 import hashlib as _hashlib
                 safe_btn_key = f"reload_btn_{_hashlib.md5(video_path.encode()).hexdigest()[:8]}"
+                st.warning("⏳ **Hệ thống đang nén video sang H.264. Vui lòng đợi 1-2 phút rồi nhấn F5.**")
                 if st.button("🔄 Tải lại trang (F5)", key=safe_btn_key):
                     st.rerun()
                 return
