@@ -4594,6 +4594,18 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
         try: resize_width = st.session_state.get('ncv_resize_width', RESIZE_WIDTH)
         except: resize_width = RESIZE_WIDTH
 
+    # Tự động điều chỉnh skip_step nếu video quá dài để tránh quá tải CPU và chạy siêu nhanh
+    if tong_frame > 800:
+        current_skip = skip_step if skip_step is not None else 0
+        target_max_frames = 500  # Phân tích khoảng 500 frames là tối ưu
+        needed_skip = int(tong_frame / target_max_frames) - 1
+        if needed_skip > current_skip:
+            old_skip = current_skip
+            skip_step = max(current_skip, needed_skip)
+            msg = f"⚡ Video dài ({tong_frame} frames). Tự động tối ưu hóa tốc độ (bỏ qua {skip_step} frames thay vì {old_skip}) để hoàn tất dưới 1 phút!"
+            print(f"[AI Process] {msg}")
+            all_warnings.append(f"Tốc độ xử lý được tối ưu hóa tự động (bỏ qua {skip_step} frames) do video dài.")
+
     # Tự động phát hiện bên tay tập chủ đạo (LEFT hoặc RIGHT) để tránh nhảy bên gây lỗi trích xuất
     # Riêng bài tập Codman, cố định tay tập chủ đạo là tay phải (RIGHT) theo yêu cầu chuyên môn
     active_side = "RIGHT"
