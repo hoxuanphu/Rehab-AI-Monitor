@@ -4594,8 +4594,6 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
         try: resize_width = st.session_state.get('ncv_resize_width', RESIZE_WIDTH)
         except: resize_width = RESIZE_WIDTH
 
-
-
     # Tự động phát hiện bên tay tập chủ đạo (LEFT hoặc RIGHT) để tránh nhảy bên gây lỗi trích xuất
     # Riêng bài tập Codman, cố định tay tập chủ đạo là tay phải (RIGHT) theo yêu cầu chuyên môn
     active_side = "RIGHT"
