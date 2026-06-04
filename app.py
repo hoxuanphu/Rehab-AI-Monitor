@@ -5539,10 +5539,10 @@ def bat_dau_phan_tich_background(
             # Tối ưu hóa: Nếu video gốc không có sẵn local và chưa có H264 (_f.mp4) local,
             # kiểm tra xem đã có _f.mp4 trên cloud chưa để tải và phân tích trực tiếp cho nhanh!
             analysis_input_path = video_path
+            final_h264 = get_final_h264_path(video_path)
             is_raw_local = os.path.exists(video_path) and os.path.getsize(video_path) >= 5 * 1024
             
             if not is_raw_local:
-                final_h264 = get_final_h264_path(video_path)
                 if final_h264 != video_path:
                     write_progress(progress_video_path, "processing", username=username, video_name=video_name, progress=0.10, elapsed=time.time()-start_t, start_time=start_t, status_msg="⬇️ Kiểm tra video H.264 đã tối ưu...")
                     dl_h264_ok = download_file_with_progress(final_h264, write_progress, start_t, username, video_name)
