@@ -864,6 +864,12 @@ def render_video(video_path, check_h264=True):
                         h264_cloud_valid = True
                 except:
                     pass
+            
+            if not h264_cloud_valid:
+                is_mp4 = video_path.lower().endswith('.mp4')
+                if not is_mp4:
+                    st.warning("⚠️ Video gốc định dạng HEVC/MOV chưa được tối ưu hóa. Vui lòng bấm **PHÂN TÍCH VÀ TRÍCH XUẤT KHUNG XƯƠNG NGAY** bên cạnh để trích xuất và nén tự động sang MP4 H.264.")
+                    return
 
             # Thông báo nếu đang transcode dưới nền
             is_transcoding = '_transcoding_jobs' in globals() and h264_local in _transcoding_jobs
@@ -5193,6 +5199,31 @@ def check_and_populate_background_result(video_path):
             st.session_state.temp_frames_dir = result.get("temp_frames_dir")
             st.session_state.reanalyze_triggered = False
             
+            # Cập nhật st.session_state.current_eval_video để đồng bộ trạng thái phân tích
+            try:
+                all_vids = load_data(VIDEOS_FILE)
+                updated_v = next((vid for vid in all_vids if vid.get('video_path') == video_path), None)
+                if updated_v:
+                    st.session_state.current_eval_video = updated_v
+                else:
+                    # Fallback dict nếu chưa cập nhật kịp vào file database
+                    st.session_state.current_eval_video = {
+                        "username": prog.get("username"),
+                        "full_name": prog.get("full_name", "Bệnh nhân"),
+                        "video_name": prog.get("video_name"),
+                        "exercise": result.get("exercise", {}).get("ten", "codman") if isinstance(result.get("exercise"), dict) else "Bài tập",
+                        "accuracy": result.get("stats", {}).get("do_chinh_xac", 0.0) if isinstance(result.get("stats"), dict) else 0.0,
+                        "time": get_vn_now().strftime("%H:%M - %d/%m/%Y"),
+                        "video_path": video_path,
+                        "processed_path": result.get("processed_video_path"),
+                        "metrics": result.get("stats"),
+                        "df_path": df_path,
+                        "all_frames_data_path": result.get("all_frames_data_path"),
+                        "status": "Đã phân tích"
+                    }
+            except Exception as e_sync:
+                print("Lỗi đồng bộ current_eval_video:", e_sync)
+            
             # Xóa progress file sau khi đã nạp kết quả
             p_file = get_progress_file(video_path)
             try:
@@ -5372,33 +5403,64 @@ def hien_thi_tien_trinh_background_home_fragment(video_path):
             st.rerun()
 
 @st.fragment(run_every=3)
-def hien_thi_tien_trinh_phan_tich_fragment(video_path, key_suffix):
+def hien_thi_khu_vuc_phan_tich_chuyen_sau_fragment(v, key_suffix):
+    video_path = v['video_path']
     prog_data = read_progress(video_path)
+    
+    is_processing = False
+    p_val = 0.0
+    elapsed = 0.0
+    is_error = False
+    err_msg = ""
+    status_msg = ""
+    
     if prog_data:
         status = prog_data.get("status")
         if status == "processing":
+            is_processing = True
             p_val = prog_data.get("progress", 0.0)
             elapsed = prog_data.get("elapsed", 0.0)
             status_msg = prog_data.get("status_msg", "")
-            st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
-            st.progress(p_val)
-            detail = f" — {status_msg}" if status_msg else ""
-            st.info(f"🔄 Đang xử lý... **{p_val*100:.0f}%** | ⏱️ {elapsed:.1f}s{detail}")
+        elif status == "error":
+            is_error = True
+            err_msg = prog_data.get("error_msg", "Lỗi không xác định")
         elif status == "success":
             st.rerun()
-        elif status == "error":
-            err_msg = prog_data.get("error_msg", "Lỗi không xác định")
-            st.error(f"❌ Phân tích thất bại: {err_msg}")
-            if st.button("🔄 THỬ LẠI PHÂN TÍCH", width="stretch", type="primary", key=f"btn_retry_bg_{key_suffix}"):
-                p_file = get_progress_file(video_path)
-                try:
-                    if os.path.exists(p_file):
-                        os.remove(p_file)
-                except:
-                    pass
-                st.rerun()
+            
+    st.info("💡 Bạn có thể thực hiện phân tích ngay bây giờ để xem kết quả khung xương và chỉ số lâm sàng.")
+    
+    if is_error:
+        st.error(f"❌ Phân tích thất bại: {err_msg}")
+        if st.button("🔄 THỬ LẠI PHÂN TÍCH", width="stretch", type="primary", key=f"btn_retry_bg_{key_suffix}"):
+            p_file = get_progress_file(video_path)
+            try:
+                if os.path.exists(p_file):
+                    os.remove(p_file)
+            except:
+                pass
+            st.rerun()
+    elif is_processing:
+        st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
+        st.progress(p_val)
+        detail = f" — {status_msg}" if status_msg else ""
+        st.info(f"🔄 Đang xử lý... **{p_val*100:.0f}%** | ⏱️ {elapsed:.1f}s{detail}")
+        st.button("🚀 ĐANG TRÍCH XUẤT KHUNG XƯƠNG...", width="stretch", type="primary", key=f"btn_analyze_disabled_{key_suffix}", disabled=True)
     else:
-        st.rerun()
+        if st.button("🚀 PHÂN TÍCH VÀ TRÍCH XUẤT KHUNG XƯƠNG NGAY", width="stretch", type="primary", key=f"btn_analyze_now_{key_suffix}"):
+            ncv_gd = st.session_state.get('ncv_giai_doan', 'Giai đoạn 2: Hồi phục (Sai số vừa - 30°)')
+            bat_dau_phan_tich_background(
+                video_path=video_path,
+                username=v['username'],
+                full_name=v['full_name'],
+                video_name=v.get('video_name'),
+                exercise_name=v['exercise'],
+                giai_doan=ncv_gd,
+                model_type=st.session_state.get('ncv_model_type', 'MediaPipe Heavy'),
+                confidence=st.session_state.get('ncv_confidence', 0.5),
+                skip_step=st.session_state.get('ncv_skip_frames', 0),
+                resize_width=st.session_state.get('ncv_resize_width', 720)
+            )
+            st.toast("🚀 Đã khởi chạy phân tích dưới nền thành công!", icon="⚡")
 
 def download_file_with_progress(file_path, write_progress_fn, start_t, username, video_name):
     """Tải file từ Hugging Face Dataset có cập nhật tiến độ (progress bar) từng chunk"""
@@ -7442,55 +7504,30 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
                 
                 # Nếu video CHƯA CÓ metrics hoặc NCV muốn chạy lại
                 st.warning(f"⚠️ Video '{v.get('video_name')}' của BN {v.get('full_name')} chưa được phân tích.")
+                # Kiểm tra trạng thái tiến trình để ẩn video player khi đang phân tích
+                prog_data = read_progress(v['video_path'])
+                is_processing = prog_data and prog_data.get("status") == "processing"
+                
                 col_v1, col_v2 = st.columns([1.3, 1.0])
                 with col_v1:
-                    # Kiểm tra xem video đã tồn tại cục bộ chưa để hiển thị spinner khi cần
-                    video_exists = False
-                    if v.get('video_path') and os.path.exists(v['video_path']) and os.path.getsize(v['video_path']) >= 5 * 1024:
-                        video_exists = True
-                        
-                    # Chỉ hiển thị video player, không cần spinner block UI
-                    render_video(v['video_path'], check_h264=False)
+                    if is_processing:
+                        st.markdown(f"""
+                        <div style="background: rgba(30, 41, 59, 0.5); border: 1px solid rgba(59, 130, 246, 0.2); border-radius: 12px; padding: 30px; text-align: center; height: 270px; display: flex; flex-direction: column; justify-content: center; align-items: center;">
+                            <div style="font-size: 2.5rem; margin-bottom: 12px; animation: pulse 2s infinite;">🎬</div>
+                            <h4 style="color: #00c6ff; margin: 0 0 8px 0; font-weight: bold;">Đang chuẩn bị dữ liệu video</h4>
+                            <p style="color: #aaa; font-size: 0.85rem; margin: 0;">Video gốc đang được tải về máy chủ và phân tích khung xương.</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        # Kiểm tra xem video đã tồn tại cục bộ chưa để hiển thị spinner khi cần
+                        video_exists = False
+                        if v.get('video_path') and os.path.exists(v['video_path']) and os.path.getsize(v['video_path']) >= 5 * 1024:
+                            video_exists = True
+                            
+                        # Chỉ hiển thị video player, không cần spinner block UI
+                        render_video(v['video_path'], check_h264=False)
                 with col_v2:
-                    prog_data = read_progress(v['video_path'])
-                    st.info("💡 Bạn có thể thực hiện phân tích ngay bây giờ để xem kết quả khung xương và chỉ số lâm sàng.")
-                    
-                    is_processing = False
-                    p_val = 0.0
-                    elapsed = 0.0
-                    is_error = False
-                    err_msg = ""
-                    
-                    if prog_data:
-                        status = prog_data.get("status")
-                        if status == "processing":
-                            is_processing = True
-                            p_val = prog_data.get("progress", 0.0)
-                            elapsed = prog_data.get("elapsed", 0.0)
-                        elif status == "error":
-                            is_error = True
-                            err_msg = prog_data.get("error_msg", "Lỗi không xác định")
-                    
-                    if st.button("🚀 PHÂN TÍCH VÀ TRÍCH XUẤT KHUNG XƯƠNG NGAY", width="stretch", type="primary", key=f"btn_analyze_now_{key_suffix}", disabled=is_processing):
-                        ncv_gd = st.session_state.get('ncv_giai_doan', 'Giai đoạn 2: Hồi phục (Sai số vừa - 30°)')
-                        bat_dau_phan_tich_background(
-                            video_path=v['video_path'],
-                            username=v['username'],
-                            full_name=v['full_name'],
-                            video_name=v.get('video_name'),
-                            exercise_name=v['exercise'],
-                            giai_doan=ncv_gd,
-                            model_type=st.session_state.get('ncv_model_type', 'MediaPipe Heavy'),
-                            confidence=st.session_state.get('ncv_confidence', 0.5),
-                            skip_step=st.session_state.get('ncv_skip_frames', 0),
-                            resize_width=st.session_state.get('ncv_resize_width', 720)
-                        )
-                        st.toast("🚀 Đã khởi chạy phân tích dưới nền thành công!", icon="⚡")
-                        st.rerun()
-                    
-                    # Gọi fragment tự động cập nhật tiến trình mỗi 1 giây
-                    if prog_data:
-                        hien_thi_tien_trinh_phan_tich_fragment(v['video_path'], key_suffix)
+                    hien_thi_khu_vuc_phan_tich_chuyen_sau_fragment(v, key_suffix)
                 return
             else:
                 st.info("ℹ️ Chưa có video nào để phân tích. Vui lòng chọn một video ở trang chủ hoặc upload video mới.")
