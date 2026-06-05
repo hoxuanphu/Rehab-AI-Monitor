@@ -2079,7 +2079,7 @@ st.markdown("""
     }
     
     .main-header h1 {
-        font-size: clamp(2.2rem, 6vw, 3.2rem) !important;
+        font-size: clamp(2.5rem, 7vw, 3.8rem) !important;
     }
     .main-header p {
         font-size: clamp(1.0rem, 2.5vw, 1.25rem) !important;
@@ -10613,7 +10613,7 @@ def hien_thi_dang_nhap_dang_ky():
     
     st.markdown(f"""
     <div style="text-align: center; padding: 0.5rem 0 2rem 0;">
-        <h1 style="color: {header_color}; font-family: 'Outfit', sans-serif !important; font-weight: bold; font-size: 3.2rem; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); margin-bottom: 0.5rem;">🏥 Rehab AI Monitor</h1>
+        <h1 style="color: {header_color}; font-family: 'Outfit', sans-serif !important; font-weight: bold; font-size: 3.8rem; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); margin-bottom: 0.5rem;">🏥 Giám sát PHCN bằng AI</h1>
         <p style="color: {sub_color}; font-family: 'Outfit', sans-serif !important; font-size: 1.3rem; font-style: italic; opacity: 0.9;">Hệ thống giám sát tập luyện Phục hồi chức năng thông minh cao cấp</p>
     </div>
     """, unsafe_allow_html=True)
@@ -11571,7 +11571,7 @@ def main():
     
     st.markdown(f"""
     <div class="main-header" style="text-align: center; margin-bottom: 2rem; background: transparent !important; border: none !important; box-shadow: none !important;">
-        <h1 style="color: {header_h1_color}; font-family: 'Outfit', sans-serif !important; font-weight: bold; font-size: 3rem; margin-bottom: 0.5rem; text-shadow: 2px 2px 4px rgba(0,0,0,0.5);">🏥 Rehab AI Monitor</h1>
+        <h1 style="color: {header_h1_color}; font-family: 'Outfit', sans-serif !important; font-weight: bold; font-size: 3.6rem; margin-bottom: 0.5rem; text-shadow: 2px 2px 4px rgba(0,0,0,0.5);">🏥 Giám sát PHCN bằng AI</h1>
         <p style="color: {header_p_color}; font-family: 'Outfit', sans-serif !important; font-style: italic; font-size: 1.25rem;">Hệ thống giám sát tập luyện Phục hồi chức năng thông minh cao cấp</p>
         <div class="research-badge" style="margin-top: 1rem;">
             <span style="background: {badge_bg}; color: {header_h1_color}; padding: 6px 18px; border-radius: 20px; border: 1px solid {badge_border}; font-size: 0.9rem; font-weight: bold; font-family: 'Outfit', sans-serif !important;">
