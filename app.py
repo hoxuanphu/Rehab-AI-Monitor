@@ -1801,7 +1801,7 @@ st.markdown("""
         border: none !important; /* Xóa viền bao ngoài container */
         border-bottom: none !important;
         box-shadow: none !important;
-        margin-bottom: -10px !important; /* Kéo nội dung bên dưới lên gần hơn */
+        margin-bottom: -3px !important; /* Kéo nội dung bên dưới lên gần hơn, chừa chỗ cho thanh cuộn mỏng */
         padding: 0px 5px 0px 5px !important; /* Thu nhỏ padding khi không còn mũi tên */
         width: 100% !important;
         overflow: visible !important;
@@ -1822,21 +1822,36 @@ st.markdown("""
         overflow-x: auto !important;
         overflow-y: hidden !important;
         width: 100% !important;
-        scrollbar-width: none !important; /* Firefox */
-        -ms-overflow-style: none !important; /* IE 10+ */
+        scrollbar-width: thin !important; /* Firefox: thanh cuộn mỏng */
+        scrollbar-color: #0072ff rgba(255, 255, 255, 0.05) !important; /* Firefox màu thanh cuộn */
         border: none !important;
         border-bottom: none !important;
         box-shadow: none !important;
     }
 
-    /* Ẩn hoàn toàn thanh cuộn ngang của segmented control */
+    /* Thiết kế thanh cuộn ngang mỏng và hiện đại cho WebKit (Chrome, Safari, Edge) */
     .st-key-active_tab_widget [role="radiogroup"]::-webkit-scrollbar,
     .st-key-active_tab_widget [role="group"]::-webkit-scrollbar,
     div[data-testid="stSegmentedControl"] [role="radiogroup"]::-webkit-scrollbar,
     div[data-testid="stSegmentedControl"] [role="group"]::-webkit-scrollbar,
     div[data-testid="stButtonGroup"] [role="radiogroup"]::-webkit-scrollbar,
     div[data-testid="stButtonGroup"] [role="group"]::-webkit-scrollbar {
-        display: none !important;
+        height: 5px !important; /* Rất mỏng và tinh tế */
+        display: block !important;
+    }
+    
+    .st-key-active_tab_widget [role="radiogroup"]::-webkit-scrollbar-track,
+    div[data-testid="stSegmentedControl"] [role="radiogroup"]::-webkit-scrollbar-track,
+    div[data-testid="stButtonGroup"] [role="radiogroup"]::-webkit-scrollbar-track {
+        background: rgba(255, 255, 255, 0.03) !important;
+        border-radius: 10px !important;
+    }
+    
+    .st-key-active_tab_widget [role="radiogroup"]::-webkit-scrollbar-thumb,
+    div[data-testid="stSegmentedControl"] [role="radiogroup"]::-webkit-scrollbar-thumb,
+    div[data-testid="stButtonGroup"] [role="radiogroup"]::-webkit-scrollbar-thumb {
+        background: linear-gradient(90deg, #00c6ff, #0072ff) !important;
+        border-radius: 10px !important;
     }
 
     .st-key-active_tab_widget button,
@@ -11913,7 +11928,34 @@ def main():
     else:
         selected_tab = st.session_state.active_tab
 
-    # Bỏ nút mũi tên cuộn ngang (chấm đen) theo yêu cầu của user để người dùng tự cuộn tay
+    import streamlit.components.v1 as components
+    components.html("""
+    <script>
+        (function() {
+            function setupTabWheelScroll() {
+                const doc = window.parent.document;
+                const containers = doc.querySelectorAll('.st-key-active_tab_widget div[data-testid="stSegmentedControl"], .st-key-active_tab_widget div[data-testid="stButtonGroup"]');
+                
+                containers.forEach(container => {
+                    let scrollChild = container.querySelector('[role="radiogroup"]') || container.querySelector('[role="group"]');
+                    if (!scrollChild) return;
+                    
+                    // Tránh gán sự kiện nhiều lần
+                    if (scrollChild.dataset.wheelListenerAdded) return;
+                    scrollChild.dataset.wheelListenerAdded = "true";
+                    
+                    scrollChild.addEventListener('wheel', function(e) {
+                        if (e.deltaY !== 0) {
+                            e.preventDefault();
+                            scrollChild.scrollLeft += e.deltaY * 1.5; // Nhân thêm 1.5 để cuộn mượt và nhanh hơn
+                        }
+                    }, { passive: false });
+                });
+            }
+            setInterval(setupTabWheelScroll, 500);
+        })();
+    </script>
+    """, height=0, width=0)
     
     # ==================== TAB 1: TRANG CHỦ ====================
     if selected_tab == "🏠 TRANG CHỦ":
