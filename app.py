@@ -1983,12 +1983,12 @@ st.markdown("""
     .stMarkdown .main-header h1,
     h1.app-title,
     .main-header h1 {
-        font-size: 5.2rem !important; /* Cỡ chữ siêu to khổng lồ cực kỳ rõ ràng */
-        line-height: 1.30 !important;
+        font-size: 48px !important; /* Cỡ chữ to lớn cố định */
+        line-height: 1.25 !important;
         font-weight: 850 !important; /* Độ dày cân đối */
         text-transform: uppercase !important;
-        letter-spacing: 0.05em !important; /* Khoảng cách chữ rõ ràng như ảnh 2 */
-        word-spacing: 0.15em !important; /* Khoảng cách từ rõ ràng */
+        letter-spacing: -0.01em !important; /* Khôi phục khoảng cách chữ bình thường */
+        word-spacing: normal !important; /* Khôi phục khoảng cách từ bình thường */
         white-space: normal !important;
         word-break: normal !important;
         display: block !important;
@@ -7285,17 +7285,17 @@ st.markdown(f"""
     }}
     .main-header h1 {{ 
         color: {header_text} !important; 
-        font-size: 3.8rem !important; /* Cỡ chữ to cố định cực kỳ rõ ràng */
+        font-size: 48px !important; /* Cỡ chữ to lớn cố định, tránh lỗi trên Chrome */
         margin: 0 !important;
-        line-height: 1.2 !important;
-        letter-spacing: 0.05em !important;
-        word-spacing: 0.15em !important;
+        line-height: 1.25 !important;
+        letter-spacing: -0.01em !important; /* Bình thường hóa khoảng cách chữ */
+        word-spacing: normal !important; /* Bình thường hóa khoảng cách từ */
     }}
     .app-title {{
-        font-size: 3.8rem !important; /* Cấu hình cỡ chữ cho trang đăng nhập */
-        letter-spacing: 0.05em !important;
-        word-spacing: 0.15em !important;
-        line-height: 1.2 !important;
+        font-size: 48px !important; /* Cấu hình cỡ chữ cho trang đăng nhập */
+        letter-spacing: -0.01em !important;
+        word-spacing: normal !important;
+        line-height: 1.25 !important;
     }}
     .main-header p {{ color: {sub_text} !important; margin: 0.3rem 0 0 0 !important; }}
     
@@ -10672,7 +10672,7 @@ def hien_thi_dang_nhap_dang_ky():
     
     st.markdown(f"""
     <div style="text-align: center; padding: 0.5rem 0 2rem 0;">
-        <h1 class="app-title" style="font-size: 5.2rem !important; color: {header_color}; font-family: 'Outfit', sans-serif !important; font-weight: 900; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); margin-bottom: 0.4rem; letter-spacing: 0.05em !important; word-spacing: 0.15em !important;">GIÁM SÁT PHỤC HỒI CHỨC NĂNG BẰNG TRÍ TUỆ NHÂN TẠO 🏥</h1>
+        <h1 class="app-title" style="font-size: 48px !important; color: {header_color}; font-family: 'Outfit', sans-serif !important; font-weight: 900; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); margin-bottom: 0.4rem; letter-spacing: -0.01em !important; word-spacing: normal !important;">GIÁM SÁT PHỤC HỒI CHỨC NĂNG BẰNG TRÍ TUỆ NHÂN TẠO 🏥</h1>
         <div style="width: 120px; height: 4px; background: linear-gradient(90deg, #00c6ff, #0072ff); margin: 0.4rem auto; border-radius: 2px;"></div>
         <p style="color: {sub_color}; font-family: 'Outfit', sans-serif !important; font-size: 1.3rem; font-style: italic; opacity: 0.9;">Hệ thống giám sát tập luyện Phục hồi chức năng thông minh cao cấp</p>
     </div>
@@ -11631,7 +11631,7 @@ def main():
     
     st.markdown(f"""
     <div class="main-header">
-        <h1 class="app-title" style="font-size: 5.2rem !important; color: {header_h1_color}; font-family: 'Outfit', sans-serif !important; font-weight: 900; margin-bottom: 0.4rem; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); letter-spacing: 0.05em !important; word-spacing: 0.15em !important;">GIÁM SÁT PHỤC HỒI CHỨC NĂNG BẰNG TRÍ TUỆ NHÂN TẠO 🏥</h1>
+        <h1 class="app-title" style="font-size: 48px !important; color: {header_h1_color}; font-family: 'Outfit', sans-serif !important; font-weight: 900; margin-bottom: 0.4rem; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); letter-spacing: -0.01em !important; word-spacing: normal !important;">GIÁM SÁT PHỤC HỒI CHỨC NĂNG BẰNG TRÍ TUỆ NHÂN TẠO 🏥</h1>
         <div style="width: 120px; height: 4px; background: linear-gradient(90deg, #00c6ff, #0072ff); margin: 0.4rem auto; border-radius: 2px;"></div>
         <p style="color: {header_p_color}; font-family: 'Outfit', sans-serif !important; font-style: italic; font-size: 1.25rem;">Hệ thống giám sát tập luyện Phục hồi chức năng thông minh cao cấp</p>
         <div class="research-badge" style="margin-top: 0.4rem;">
