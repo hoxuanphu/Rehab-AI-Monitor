@@ -2078,12 +2078,15 @@ st.markdown("""
         padding-bottom: 10rem !important; /* Thêm khoảng trống cuối trang để kéo xuống hết cỡ */
     }
     
+    .stMarkdown h1.app-title,
+    .stMarkdown .main-header h1,
     h1.app-title,
     .main-header h1 {
-        font-size: clamp(3.8rem, 11vw, 6.0rem) !important;
-        line-height: 1.15 !important;
+        font-size: clamp(3.2rem, 9vw, 5.8rem) !important;
+        line-height: 1.1 !important;
         font-weight: 900 !important;
         text-transform: uppercase !important;
+        letter-spacing: -0.02em !important;
     }
     .main-header p {
         font-size: clamp(1.0rem, 2.5vw, 1.25rem) !important;
