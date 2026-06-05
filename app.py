@@ -1983,7 +1983,7 @@ st.markdown("""
     .stMarkdown .main-header h1,
     h1.app-title,
     .main-header h1 {
-        font-size: clamp(2.4rem, 6.5vw, 4.2rem) !important;
+        font-size: clamp(3.0rem, 8vw, 5.0rem) !important;
         line-height: 1.25 !important;
         font-weight: 900 !important;
         text-transform: uppercase !important;
@@ -1997,8 +1997,13 @@ st.markdown("""
     }
 
     /* Ẩn icon liên kết tự động của Streamlit trên tiêu đề */
-    a.header-anchor {
+    a.header-anchor,
+    .header-anchor,
+    [data-testid="stHeaderActionElements"] {
         display: none !important;
+        visibility: hidden !important;
+        width: 0 !important;
+        height: 0 !important;
     }
 
 
@@ -10653,7 +10658,7 @@ def hien_thi_dang_nhap_dang_ky():
     
     st.markdown(f"""
     <div style="text-align: center; padding: 0.5rem 0 2rem 0;">
-        <h1 class="app-title" style="color: {header_color}; font-family: 'Outfit', sans-serif !important; font-weight: 900; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); margin-bottom: 0.5rem;">GIÁM SÁT PHỤC HỒI CHỨC NĂNG BẰNG TRÍ TUỆ NHÂN TẠO 🏥</h1>
+        <h1 class="app-title" style="font-size: clamp(3.0rem, 8vw, 5.0rem) !important; color: {header_color}; font-family: 'Outfit', sans-serif !important; font-weight: 900; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); margin-bottom: 0.5rem;">GIÁM SÁT PHỤC HỒI CHỨC NĂNG BẰNG TRÍ TUỆ NHÂN TẠO 🏥</h1>
         <div style="width: 120px; height: 4px; background: linear-gradient(90deg, #00c6ff, #0072ff); margin: 0.8rem auto; border-radius: 2px;"></div>
         <p style="color: {sub_color}; font-family: 'Outfit', sans-serif !important; font-size: 1.3rem; font-style: italic; opacity: 0.9;">Hệ thống giám sát tập luyện Phục hồi chức năng thông minh cao cấp</p>
     </div>
@@ -11612,7 +11617,7 @@ def main():
     
     st.markdown(f"""
     <div class="main-header" style="text-align: center; margin-bottom: 2rem; background: transparent !important; border: none !important; box-shadow: none !important; padding: 0 !important;">
-        <h1 class="app-title" style="color: {header_h1_color}; font-family: 'Outfit', sans-serif !important; font-weight: 900; margin-bottom: 0.5rem; text-shadow: 2px 2px 4px rgba(0,0,0,0.5);">GIÁM SÁT PHỤC HỒI CHỨC NĂNG BẰNG TRÍ TUỆ NHÂN TẠO 🏥</h1>
+        <h1 class="app-title" style="font-size: clamp(3.0rem, 8vw, 5.0rem) !important; color: {header_h1_color}; font-family: 'Outfit', sans-serif !important; font-weight: 900; margin-bottom: 0.5rem; text-shadow: 2px 2px 4px rgba(0,0,0,0.5);">GIÁM SÁT PHỤC HỒI CHỨC NĂNG BẰNG TRÍ TUỆ NHÂN TẠO 🏥</h1>
         <div style="width: 120px; height: 4px; background: linear-gradient(90deg, #00c6ff, #0072ff); margin: 0.8rem auto; border-radius: 2px;"></div>
         <p style="color: {header_p_color}; font-family: 'Outfit', sans-serif !important; font-style: italic; font-size: 1.25rem;">Hệ thống giám sát tập luyện Phục hồi chức năng thông minh cao cấp</p>
         <div class="research-badge" style="margin-top: 1rem;">
