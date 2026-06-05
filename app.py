@@ -2080,8 +2080,8 @@ st.markdown("""
     
     h1.app-title,
     .main-header h1 {
-        font-size: clamp(2.8rem, 8vw, 4.8rem) !important;
-        line-height: 1.2 !important;
+        font-size: clamp(3.8rem, 11vw, 6.0rem) !important;
+        line-height: 1.15 !important;
         font-weight: 900 !important;
         text-transform: uppercase !important;
     }
