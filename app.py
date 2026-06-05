@@ -1200,14 +1200,14 @@ a {{color:{title_color};text-decoration:none}}
 <div class="footer-col medium">
 <div class="school-logo-section" style="margin-bottom:12px;text-align:center">
 <div style="width:95px;height:95px;border-radius:50%;border:2.5px solid rgba(0,198,255,0.75);display:inline-flex;align-items:center;justify-content:center;background:rgba(0,198,255,0.06);animation:footer-logo-glow 3s ease-in-out infinite;margin-bottom:10px">
-<img src="https://benhandientu.moh.gov.vn/storage/uploads/2025/11/bvpntlogo-1763704605.jpg" style="width:75px;height:75px;border-radius:50%;object-fit:contain" alt="Logo BV PNT">
+<img src="https://bvdkphamngocthach.vn/storage/uploads/2025/11/bvpntlogo-1763704605.jpg" style="width:75px;height:75px;border-radius:50%;object-fit:contain" alt="Logo BV PNT">
 </div>
 <div style="font-weight:bold;font-size:1.05rem;margin-bottom:4px">🏥 BỆNH VIỆN ĐA KHOA<br>PHẠM NGỌC THẠCH</div>
 <div style="font-size:0.9rem;opacity:0.85;margin-bottom:6px">Khoa Vật lý trị liệu - PHCN</div>
 </div>
 <div style="font-size:0.9rem;opacity:0.8;text-align:center">
 <p>📍 1A Đức Thắng, Bắc Từ Liêm, HN</p>
-<p>🌐 <a href="https://benhandientu.moh.gov.vn" target="_blank">benhandientu.moh.gov.vn</a></p>
+<p>🌐 <a href="https://bvdkphamngocthach.vn" target="_blank">bvdkphamngocthach.vn</a></p>
 </div>
 </div>
 <div class="footer-col medium">
@@ -10734,7 +10734,7 @@ def hien_thi_dang_nhap_dang_ky():
                 <img src="{logo_src_login}" style="width:78px;height:78px;object-fit:contain;border-radius:50%;" alt="Logo HUPH">
             </div>
             <div style="width:100px;height:100px;border-radius:50%;border:2.5px solid rgba(0,198,255,0.75);display:flex;align-items:center;justify-content:center;background:rgba(0,198,255,0.06);animation:logo-glow-pulse 3s ease-in-out infinite;animation-delay:1.5s;">
-                <img src="https://benhandientu.moh.gov.vn/storage/uploads/2025/11/bvpntlogo-1763704605.jpg" style="width:78px;height:78px;object-fit:contain;border-radius:50%;" alt="Logo BV PNT">
+                <img src="https://bvdkphamngocthach.vn/storage/uploads/2025/11/bvpntlogo-1763704605.jpg" style="width:78px;height:78px;object-fit:contain;border-radius:50%;" alt="Logo BV PNT">
             </div>
         </div>
         <h1 class="app-title" style="color: {header_color}; font-family: 'Outfit', sans-serif !important; font-weight: 900; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); margin-bottom: 0.4rem; letter-spacing: -0.01em !important; word-spacing: normal !important; line-height: 1.15 !important;">GIÁM SÁT PHỤC HỒI CHỨC NĂNG BẰNG TRÍ TUỆ NHÂN TẠO 🏥</h1>
@@ -11708,7 +11708,7 @@ def main():
                 <img src="{logo_src_main}" style="width:78px;height:78px;object-fit:contain;border-radius:50%;" alt="Logo HUPH">
             </div>
             <div style="width:100px;height:100px;border-radius:50%;border:2.5px solid rgba(0,198,255,0.75);display:flex;align-items:center;justify-content:center;background:rgba(0,198,255,0.06);animation:logo-glow-pulse 3s ease-in-out infinite;animation-delay:1.5s;">
-                <img src="https://benhandientu.moh.gov.vn/storage/uploads/2025/11/bvpntlogo-1763704605.jpg" style="width:78px;height:78px;object-fit:contain;border-radius:50%;" alt="Logo BV PNT">
+                <img src="https://bvdkphamngocthach.vn/storage/uploads/2025/11/bvpntlogo-1763704605.jpg" style="width:78px;height:78px;object-fit:contain;border-radius:50%;" alt="Logo BV PNT">
             </div>
         </div>
         <h1 class="app-title" style="color: {header_h1_color}; font-family: 'Outfit', sans-serif !important; font-weight: 900; margin-bottom: 0.4rem; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); letter-spacing: -0.01em !important; word-spacing: normal !important; line-height: 1.15 !important;">GIÁM SÁT PHỤC HỒI CHỨC NĂNG BẰNG TRÍ TUỆ NHÂN TẠO 🏥</h1>
