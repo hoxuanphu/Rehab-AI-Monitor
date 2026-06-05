@@ -1980,9 +1980,13 @@ st.markdown("""
     }
 
     .stMarkdown h1.app-title,
+    .stMarkdown h1.app-title *,
     .stMarkdown .main-header h1,
+    .stMarkdown .main-header h1 *,
     h1.app-title,
-    .main-header h1 {
+    h1.app-title *,
+    .main-header h1,
+    .main-header h1 * {
         font-size: 84px !important; /* Cỡ chữ mặc định to lớn cho máy tính */
         line-height: 1.08 !important;
         font-weight: 850 !important; /* Độ dày cân đối */
@@ -7293,13 +7297,13 @@ st.markdown(f"""
 
     /* Thiết lập cỡ chữ phản hồi (Responsive) */
     @media (max-width: 768px) {{
-        .main-header h1, .app-title {{
+        .main-header h1, .main-header h1 *, .app-title, .app-title * {{
             font-size: 42px !important;
             line-height: 1.08 !important;
         }}
     }}
     @media (min-width: 769px) {{
-        .main-header h1, .app-title {{
+        .main-header h1, .main-header h1 *, .app-title, .app-title * {{
             font-size: 84px !important;
             line-height: 1.08 !important;
         }}
