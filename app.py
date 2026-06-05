@@ -1983,17 +1983,17 @@ st.markdown("""
     .stMarkdown .main-header h1,
     h1.app-title,
     .main-header h1 {
-        font-size: clamp(3.8rem, 11vw, 8.5rem) !important;
-        line-height: 1.35 !important;
+        font-size: clamp(2.4rem, 6.5vw, 4.2rem) !important;
+        line-height: 1.25 !important;
         font-weight: 900 !important;
         text-transform: uppercase !important;
-        letter-spacing: 0.06em !important;
-        word-spacing: 0.18em !important;
+        letter-spacing: 0.01em !important;
+        word-spacing: normal !important;
         white-space: normal !important;
         word-break: keep-all !important;
         display: block !important;
         text-align: center !important;
-        margin-bottom: 0.8rem !important;
+        margin-bottom: 0.3rem !important;
     }
 
     /* Ẩn icon liên kết tự động của Streamlit trên tiêu đề */
@@ -2099,18 +2099,35 @@ st.markdown("""
 
     /* ĐẨY GIAO DIỆN LÊN CAO TỐI ĐA */
     .block-container {
-        padding-top: 2rem !important;
+        padding-top: 1rem !important;
         padding-bottom: 10rem !important; /* Thêm khoảng trống cuối trang để kéo xuống hết cỡ */
     }
     
     /* ĐÃ LOẠI BỎ CSS OVERRIDE ĐỂ TRÁNH TRÙNG LẶP VÀ DÍU DÍU CHỮ */
+    .main-header {
+        padding: 0.8rem 1.5rem !important; /* Thu hẹp chiều cao card */
+        margin-top: -1.2rem !important;     /* Kéo card lên cao hơn */
+        margin-bottom: 1.2rem !important;   /* Giảm khoảng cách dưới card */
+        border-radius: 12px !important;     /* Bo tròn góc hẹp hơn, thanh lịch */
+        max-width: 950px !important;        /* Kéo hẹp chiều rộng card lại */
+        margin-left: auto !important;       /* Căn giữa */
+        margin-right: auto !important;      /* Căn giữa */
+    }
+
     .main-header p {
-        font-size: clamp(1.0rem, 2.5vw, 1.25rem) !important;
+        font-size: clamp(0.95rem, 2vw, 1.15rem) !important;
+        margin-top: 0.2rem !important;
+        margin-bottom: 0.2rem !important;
+    }
+    .research-badge {
+        margin-top: 0.4rem !important;
+        margin-bottom: 0.4rem !important;
     }
     .research-badge span {
-        font-size: clamp(0.7rem, 2vw, 0.9rem) !important;
+        font-size: clamp(0.75rem, 1.8vw, 0.85rem) !important;
         display: inline-block;
         max-width: 100%;
+        padding: 4px 12px !important;
     }
 
     .google-btn {
@@ -7253,12 +7270,16 @@ st.markdown(f"""
     /* HEADER */
     .main-header {{
         background: {header_bg};
-        padding: 2rem;
-        border-radius: 20px;
+        padding: 0.8rem 1.5rem;
+        border-radius: 12px;
         text-align: center;
-        margin-bottom: 2rem;
+        margin-top: -1.2rem;
+        margin-bottom: 1.2rem;
         border: 1px solid {card_border};
         box-shadow: 0 4px 15px rgba(0,0,0,{"0.05" if is_light else "0.3"});
+        max-width: 950px;
+        margin-left: auto;
+        margin-right: auto;
     }}
     .main-header h1 {{ color: {header_text} !important; margin: 0; }}
     .main-header p {{ color: {sub_text} !important; margin: 0.5rem 0 0 0; }}
