@@ -56,6 +56,20 @@ def get_final_h264_path(video_path):
     return base + "_f.mp4"
 
 
+def get_school_logo_base64():
+    """Lay logo truong (abc1.png) de nhung vao HTML duoi dang base64."""
+    import pathlib as _pl, base64 as _b64
+    script_dir = _pl.Path(__file__).resolve().parent
+    for p in [script_dir / "abc1.png", _pl.Path.cwd() / "abc1.png"]:
+        if p.exists():
+            try:
+                with open(p, "rb") as _f:
+                    return f"data:image/png;base64,{_b64.b64encode(_f.read()).decode()}"
+            except Exception:
+                pass
+    return "https://huph.edu.vn/uploads/logo/logo-huph.png"
+
+
 # --- OPTIMIZED CACHING FOR FASTER PAGE LOADS ---
 @st.cache_data(show_spinner=False)
 def _check_video_valid_cached(path, mtime, size):
@@ -10696,9 +10710,21 @@ def hien_thi_dang_nhap_dang_ky():
     is_light = st.session_state.get('theme') == 'light'
     header_color = "#ffffff" if not is_light else "#1a1a2e"
     sub_color = "#ffffff" if not is_light else "#333333"
+    logo_src_login = get_school_logo_base64()
     
     st.markdown(f"""
+    <style>
+    @keyframes logo-glow-pulse {{
+        0%, 100% {{ box-shadow: 0 0 18px rgba(0,198,255,0.45), 0 0 40px rgba(0,198,255,0.18); border-color: rgba(0,198,255,0.75); }}
+        50%       {{ box-shadow: 0 0 32px rgba(0,198,255,0.75), 0 0 65px rgba(0,198,255,0.30); border-color: rgba(0,230,255,0.95); }}
+    }}
+    </style>
     <div style="text-align: center; padding: 0.5rem 0 2rem 0;">
+        <div style="position: relative; width: 110px; height: 110px; margin: 0 auto 16px auto;">
+            <div style="width: 110px; height: 110px; border-radius: 50%; border: 2.5px solid rgba(0,198,255,0.75); display: flex; align-items: center; justify-content: center; background: rgba(0,198,255,0.06); animation: logo-glow-pulse 3s ease-in-out infinite;">
+                <img src="{logo_src_login}" style="width: 86px; height: 86px; object-fit: contain; border-radius: 50%;" alt="Logo Truong">
+            </div>
+        </div>
         <h1 class="app-title" style="color: {header_color}; font-family: 'Outfit', sans-serif !important; font-weight: 900; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); margin-bottom: 0.4rem; letter-spacing: -0.01em !important; word-spacing: normal !important; line-height: 1.15 !important;">GIÁM SÁT PHỤC HỒI CHỨC NĂNG BẰNG TRÍ TUỆ NHÂN TẠO 🏥</h1>
         <div style="width: 120px; height: 4px; background: linear-gradient(90deg, #00c6ff, #0072ff); margin: 0.4rem auto; border-radius: 2px;"></div>
         <p style="color: {sub_color}; font-family: 'Outfit', sans-serif !important; font-size: 1.3rem; font-style: italic; opacity: 0.9;">Hệ thống giám sát tập luyện Phục hồi chức năng thông minh cao cấp</p>
@@ -11655,9 +11681,21 @@ def main():
     header_p_color = "#ffffff" if not is_light else "#333333"
     badge_bg = "rgba(0, 198, 255, 0.1)" if not is_light else "rgba(0, 114, 255, 0.08)"
     badge_border = "#00c6ff" if not is_light else "#0072ff"
+    logo_src_main = get_school_logo_base64()
     
     st.markdown(f"""
+    <style>
+    @keyframes logo-glow-pulse {{
+        0%, 100% {{ box-shadow: 0 0 18px rgba(0,198,255,0.45), 0 0 40px rgba(0,198,255,0.18); border-color: rgba(0,198,255,0.75); }}
+        50%       {{ box-shadow: 0 0 32px rgba(0,198,255,0.75), 0 0 65px rgba(0,198,255,0.30); border-color: rgba(0,230,255,0.95); }}
+    }}
+    </style>
     <div class="main-header">
+        <div style="position: relative; width: 110px; height: 110px; margin: 0 auto 12px auto;">
+            <div style="width: 110px; height: 110px; border-radius: 50%; border: 2.5px solid rgba(0,198,255,0.75); display: flex; align-items: center; justify-content: center; background: rgba(0,198,255,0.06); animation: logo-glow-pulse 3s ease-in-out infinite;">
+                <img src="{logo_src_main}" style="width: 86px; height: 86px; object-fit: contain; border-radius: 50%;" alt="Logo Truong">
+            </div>
+        </div>
         <h1 class="app-title" style="color: {header_h1_color}; font-family: 'Outfit', sans-serif !important; font-weight: 900; margin-bottom: 0.4rem; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); letter-spacing: -0.01em !important; word-spacing: normal !important; line-height: 1.15 !important;">GIÁM SÁT PHỤC HỒI CHỨC NĂNG BẰNG TRÍ TUỆ NHÂN TẠO 🏥</h1>
         <div style="width: 120px; height: 4px; background: linear-gradient(90deg, #00c6ff, #0072ff); margin: 0.4rem auto; border-radius: 2px;"></div>
         <p style="color: {header_p_color}; font-family: 'Outfit', sans-serif !important; font-style: italic; font-size: 1.25rem;">Hệ thống giám sát tập luyện Phục hồi chức năng thông minh cao cấp</p>
