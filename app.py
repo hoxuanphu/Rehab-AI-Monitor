@@ -1911,16 +1911,16 @@ st.markdown("""
         line-height: 1.5 !important;
     }
     
-    .stMarkdown h1, h1 {
+    .stMarkdown h1 {
         font-size: 1.5rem !important;
     }
-    .stMarkdown h2, h2 {
+    .stMarkdown h2 {
         font-size: 1.25rem !important;
     }
-    .stMarkdown h3, h3 {
+    .stMarkdown h3 {
         font-size: 1.08rem !important;
     }
-    .stMarkdown h4, h4 {
+    .stMarkdown h4 {
         font-size: 0.95rem !important;
     }
     
@@ -2079,10 +2079,10 @@ st.markdown("""
     }
     
     .main-header h1 {
-        font-size: clamp(1.4rem, 4vw, 2.0rem) !important;
+        font-size: clamp(2.2rem, 6vw, 3.2rem) !important;
     }
     .main-header p {
-        font-size: clamp(0.8rem, 2vw, 0.95rem) !important;
+        font-size: clamp(1.0rem, 2.5vw, 1.25rem) !important;
     }
     .research-badge span {
         font-size: clamp(0.7rem, 2vw, 0.9rem) !important;
