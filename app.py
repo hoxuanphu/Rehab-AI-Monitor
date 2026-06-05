@@ -9328,30 +9328,58 @@ def hien_thi_lich_nhac_nho():
         with all_lich_tabs[3]:
             st.subheader("➕ Thêm lịch nhắc nhở mới")
             
-            # Tự động điền thông tin bệnh nhân từ video đang chọn
-            current_eval = st.session_state.get('current_eval_video')
+            # 1. Tổng hợp danh sách bệnh nhân từ cả users.json và video_list.json
+            current_users = load_users()
+            patients_from_db = [u for u, info in current_users.items() if info.get('role') == 'Bệnh nhân']
             
-            if current_eval:
-                selected_patient = current_eval['username']
-                # Đảm bảo users được load lại để tránh lỗi NameError
-                current_users = load_users()
-                patient_name = current_users.get(selected_patient, {}).get('full_name', selected_patient)
-                st.markdown(f"""
-                <div style="background: rgba(0, 198, 255, 0.1); padding: 15px; border-radius: 12px; border-left: 5px solid #00c6ff; margin-bottom: 20px;">
-                    <p style="margin:0; color:#888; font-size:0.8rem;">👤 BỆNH NHÂN ĐƯỢC CHỌN:</p>
-                    <h4 style="margin:5px 0; color:#00c6ff;">{patient_name}</h4>
-                    <p style="margin:0; font-size:0.85rem; color:#aaa;">Tài khoản: {selected_patient}</p>
-                </div>
-                """, unsafe_allow_html=True)
-                # Danh sách chỉ chứa bệnh nhân này (xóa hết gợi ý khác như yêu cầu)
-                patients = [selected_patient]
-            else:
-                st.warning("⚠️ Vui lòng chọn video bệnh nhân ở TRANG CHỦ trước khi thêm lịch nhắc nhở.")
-                # Nếu không chọn video, không cho phép thêm lịch
+            videos = load_data(VIDEOS_FILE)
+            patients_from_videos = [v['username'] for v in videos if v.get('username')]
+            
+            all_patient_usernames = list(set(patients_from_db + patients_from_videos))
+            
+            # 2. Xây dựng ánh xạ tên đầy đủ để tránh KeyError cho tài khoản Google
+            patient_names = {}
+            for u in all_patient_usernames:
+                if u in current_users:
+                    patient_names[u] = current_users[u].get('full_name', u)
+                else:
+                    for v in videos:
+                        if v.get('username') == u and v.get('full_name'):
+                            patient_names[u] = v['full_name']
+                            break
+                    if u not in patient_names:
+                        patient_names[u] = u
+            
+            all_patients = sorted(all_patient_usernames, key=lambda x: patient_names.get(x, x).lower())
+            
+            if not all_patients:
+                st.warning("⚠️ Hệ thống hiện chưa có bệnh nhân nào.")
                 return
 
-            selected_patient = st.selectbox("Xác nhận bệnh nhân:", patients, index=0, 
-                                          format_func=lambda x: f"🌟 {load_users()[x].get('full_name', x)}")
+            # 3. Tự động chọn bệnh nhân từ video đang được chọn ở TRANG CHỦ (nếu có)
+            current_eval = st.session_state.get('current_eval_video')
+            default_index = 0
+            if current_eval:
+                selected_patient_from_video = current_eval.get('username')
+                if selected_patient_from_video in all_patients:
+                    default_index = all_patients.index(selected_patient_from_video)
+                    patient_name = patient_names.get(selected_patient_from_video, selected_patient_from_video)
+                    st.markdown(f"""
+                    <div style="background: rgba(0, 198, 255, 0.1); padding: 15px; border-radius: 12px; border-left: 5px solid #00c6ff; margin-bottom: 20px;">
+                        <p style="margin:0; color:#888; font-size:0.8rem;">👤 BỆNH NHÂN TỪ VIDEO ĐANG CHỌN:</p>
+                        <h4 style="margin:5px 0; color:#00c6ff;">{patient_name}</h4>
+                        <p style="margin:0; font-size:0.85rem; color:#aaa;">Tài khoản: {selected_patient_from_video}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.info("💡 Bạn có thể chọn bất kỳ bệnh nhân nào bên dưới để thêm lịch nhắc nhở mới.")
+
+            selected_patient = st.selectbox(
+                "Xác nhận bệnh nhân:", 
+                all_patients, 
+                index=default_index, 
+                format_func=lambda x: f"🌟 {patient_names.get(x, x)} ({x})"
+            )
             
             loai = st.radio("Chọn loại:", ["Lịch hẹn khám", "Lịch tập luyện", "Lịch uống thuốc"], horizontal=True)
             
@@ -9373,13 +9401,13 @@ def hien_thi_lich_nhac_nho():
                             'datetime': f"{date} {time_input}",
                             'notes': notes,
                             'patient_username': selected_patient,
-                            'patient_name': load_users()[selected_patient].get('full_name', selected_patient),
+                            'patient_name': patient_names.get(selected_patient, selected_patient),
                             'doctor_username': username,
                             'doctor_name': user_info.get('full_name', username)
                         }
                         schedules.append(new_item)
                         save_data(REMINDERS_FILE, schedules)
-                        st.success(f"✅ Đã thêm lịch hẹn cho {load_users()[selected_patient].get('full_name', selected_patient)}!")
+                        st.success(f"✅ Đã thêm lịch hẹn cho {patient_names.get(selected_patient, selected_patient)}!")
                         st.rerun()
             
             elif loai == "Lịch tập luyện":
@@ -9396,13 +9424,13 @@ def hien_thi_lich_nhac_nho():
                             'frequency': frequency,
                             'notes': notes,
                             'patient_username': selected_patient,
-                            'patient_name': load_users()[selected_patient].get('full_name', selected_patient),
+                            'patient_name': patient_names.get(selected_patient, selected_patient),
                             'doctor_username': username,
                             'doctor_name': user_info.get('full_name', username)
                         }
                         schedules.append(new_item)
                         save_data(REMINDERS_FILE, schedules)
-                        st.success(f"✅ Đã thêm lịch tập cho {load_users()[selected_patient].get('full_name', selected_patient)}!")
+                        st.success(f"✅ Đã thêm lịch tập cho {patient_names.get(selected_patient, selected_patient)}!")
                         st.rerun()
             
             else:
@@ -9420,13 +9448,13 @@ def hien_thi_lich_nhac_nho():
                             'notes': notes,
                             'taken': False,
                             'patient_username': selected_patient,
-                            'patient_name': users[selected_patient].get('full_name', selected_patient),
+                            'patient_name': patient_names.get(selected_patient, selected_patient),
                             'doctor_username': username,
                             'doctor_name': user_info.get('full_name', username)
                         }
                         schedules.append(new_item)
                         save_data(REMINDERS_FILE, schedules)
-                        st.success(f"✅ Đã thêm lịch uống thuốc cho {users[selected_patient].get('full_name', selected_patient)}!")
+                        st.success(f"✅ Đã thêm lịch uống thuốc cho {patient_names.get(selected_patient, selected_patient)}!")
                         st.rerun()
 
 # ============================================
