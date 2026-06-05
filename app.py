@@ -1187,7 +1187,9 @@ a {{color:{title_color};text-decoration:none}}
 <div class="footer-container">
 <div class="footer-col">
 <div class="school-logo-section">
-<img src="{logo_src}" class="footer-logo-img" alt="HUPH Logo">
+<div style="width:95px;height:95px;border-radius:50%;border:2.5px solid rgba(0,198,255,0.75);display:inline-flex;align-items:center;justify-content:center;background:rgba(0,198,255,0.06);animation:footer-logo-glow 3s ease-in-out infinite;margin-bottom:10px">
+<img src="{logo_src}" style="width:75px;height:75px;border-radius:50%;object-fit:contain" alt="HUPH Logo">
+</div>
 <div class="school-name-text">TRƯỜNG ĐẠI HỌC<br>Y TẾ CÔNG CỘNG</div>
 </div>
 <div style="font-size:0.9rem;opacity:0.8;text-align:center">
@@ -1196,12 +1198,12 @@ a {{color:{title_color};text-decoration:none}}
 </div>
 </div>
 <div class="footer-col medium">
-<div class="footer-title">🏥 BỆNH VIỆN ĐA KHOA PHẠM NGỌC THẠCH</div>
 <div class="school-logo-section" style="margin-bottom:12px;text-align:center">
 <div style="width:95px;height:95px;border-radius:50%;border:2.5px solid rgba(0,198,255,0.75);display:inline-flex;align-items:center;justify-content:center;background:rgba(0,198,255,0.06);animation:footer-logo-glow 3s ease-in-out infinite;margin-bottom:10px">
 <img src="https://benhandientu.moh.gov.vn/storage/uploads/2025/11/bvpntlogo-1763704605.jpg" style="width:75px;height:75px;border-radius:50%;object-fit:contain" alt="Logo BV PNT">
 </div>
-<div style="font-weight:bold;font-size:1rem;margin-bottom:6px">Khoa Vật lý trị liệu - PHCN</div>
+<div style="font-weight:bold;font-size:1.05rem;margin-bottom:4px">🏥 BỆNH VIỆN ĐA KHOA<br>PHẠM NGỌC THẠCH</div>
+<div style="font-size:0.9rem;opacity:0.85;margin-bottom:6px">Khoa Vật lý trị liệu - PHCN</div>
 </div>
 <div style="font-size:0.9rem;opacity:0.8;text-align:center">
 <p>📍 1A Đức Thắng, Bắc Từ Liêm, HN</p>
