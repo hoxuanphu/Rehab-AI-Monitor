@@ -9393,7 +9393,11 @@ def hien_thi_lich_nhac_nho():
                 title = st.text_input("Tiêu đề", placeholder="VD: Khám lại khớp vai")
                 notes = st.text_area("Ghi chú")
                 if st.button("➕ Thêm lịch hẹn", key="add_appointment_btn", type="primary", width="stretch"):
-                    if title and selected_patient:
+                    if not title:
+                        st.error("⚠️ Vui lòng nhập tiêu đề lịch hẹn!")
+                    elif not selected_patient:
+                        st.error("⚠️ Vui lòng chọn bệnh nhân!")
+                    else:
                         new_item = {
                             'id': int(time.time() * 1000),
                             'type': 'appointment',
@@ -9408,6 +9412,8 @@ def hien_thi_lich_nhac_nho():
                         schedules.append(new_item)
                         save_data(REMINDERS_FILE, schedules)
                         st.success(f"✅ Đã thêm lịch hẹn cho {patient_names.get(selected_patient, selected_patient)}!")
+                        st.toast(f"✅ Đã thêm lịch hẹn thành công!", icon="🩺")
+                        time.sleep(1.5)
                         st.rerun()
             
             elif loai == "Lịch tập luyện":
@@ -9415,7 +9421,9 @@ def hien_thi_lich_nhac_nho():
                 frequency = st.selectbox("Tần suất", ["Một lần", "Hàng ngày", "Thứ 2-4-6", "Thứ 3-5-7"])
                 notes = st.text_area("Ghi chú")
                 if st.button("➕ Thêm lịch tập", key="add_exercise_btn", type="primary", width="stretch"):
-                    if selected_patient:
+                    if not selected_patient:
+                        st.error("⚠️ Vui lòng chọn bệnh nhân!")
+                    else:
                         new_item = {
                             'id': int(time.time() * 1000),
                             'type': 'exercise',
@@ -9431,6 +9439,8 @@ def hien_thi_lich_nhac_nho():
                         schedules.append(new_item)
                         save_data(REMINDERS_FILE, schedules)
                         st.success(f"✅ Đã thêm lịch tập cho {patient_names.get(selected_patient, selected_patient)}!")
+                        st.toast(f"✅ Đã thêm lịch tập thành công!", icon="🏋️")
+                        time.sleep(1.5)
                         st.rerun()
             
             else:
@@ -9438,7 +9448,11 @@ def hien_thi_lich_nhac_nho():
                 dosage = st.text_input("Liều lượng")
                 notes = st.text_area("Ghi chú")
                 if st.button("➕ Thêm lịch uống thuốc", key="add_medication_btn", type="primary", width="stretch"):
-                    if med_name and selected_patient:
+                    if not med_name:
+                        st.error("⚠️ Vui lòng nhập tên thuốc!")
+                    elif not selected_patient:
+                        st.error("⚠️ Vui lòng chọn bệnh nhân!")
+                    else:
                         new_item = {
                             'id': int(time.time() * 1000),
                             'type': 'medication',
@@ -9455,6 +9469,8 @@ def hien_thi_lich_nhac_nho():
                         schedules.append(new_item)
                         save_data(REMINDERS_FILE, schedules)
                         st.success(f"✅ Đã thêm lịch uống thuốc cho {patient_names.get(selected_patient, selected_patient)}!")
+                        st.toast(f"✅ Đã thêm lịch uống thuốc thành công!", icon="💊")
+                        time.sleep(1.5)
                         st.rerun()
 
 # ============================================
