@@ -1141,7 +1141,7 @@ a {{color:{title_color};text-decoration:none}}
 
 /* TỐI ƯU HÓA CÁC TAB - ĐẢM BẢO CHỮ KHÔNG BỊ TRÀN */
 .stTabs [data-baseweb="tab-list"] {{
-    gap: 10px !important;
+    gap: 8px !important;
     overflow-x: auto !important;
     overflow-y: hidden !important;
     display: flex !important;
@@ -1149,18 +1149,18 @@ a {{color:{title_color};text-decoration:none}}
     padding-bottom: 5px !important;
 }}
 .stTabs [data-baseweb="tab"] {{
-    height: 48px !important;
+    height: 38px !important;
     white-space: nowrap !important;
     min-width: fit-content !important;
     flex-shrink: 0 !important;
-    padding: 0 20px !important;
+    padding: 0 14px !important;
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
 }}
 .stTabs [data-baseweb="tab"] p {{
-    font-size: 0.95rem !important;
-    font-weight: bold !important;
+    font-size: 0.85rem !important;
+    font-weight: 600 !important;
     white-space: nowrap !important;
     margin: 0 !important;
 }}
@@ -1799,8 +1799,8 @@ st.markdown("""
         border: none !important; /* Xóa viền bao ngoài container */
         border-bottom: none !important;
         box-shadow: none !important;
-        margin-bottom: 25px !important;
-        padding: 5px 30px 10px 30px !important; /* Thêm padding chừa chỗ cho mũi tên */
+        margin-bottom: 15px !important;
+        padding: 5px 15px 5px 15px !important; /* Giảm padding chừa chỗ cho mũi tên */
         width: 100% !important;
         overflow: visible !important;
     }
@@ -1840,13 +1840,13 @@ st.markdown("""
     .st-key-active_tab_widget button,
     div[data-testid="stSegmentedControl"] button,
     div[data-testid="stButtonGroup"] button {
-        border-radius: 10px 10px 0 0 !important; /* Bo góc trên, dưới phẳng để giống tab thật */
-        font-weight: 800 !important;
+        border-radius: 8px 8px 0 0 !important; /* Bo góc trên, dưới phẳng để giống tab thật */
+        font-weight: 600 !important;
         transition: all 0.3s ease !important;
-        padding: 14px 28px !important; /* Tăng padding cực lớn giống ảnh số 3 */
-        min-height: 52px !important;
+        padding: 8px 16px !important; /* Giảm padding cho gọn */
+        min-height: 38px !important;
         margin-right: 5px !important;
-        border-bottom: 4px solid transparent !important; /* Viền chân mặc định trong suốt */
+        border-bottom: 2px solid transparent !important; /* Viền chân mặc định trong suốt */
         min-width: max-content !important;
         max-width: none !important;
         flex-shrink: 0 !important;
@@ -1864,8 +1864,8 @@ st.markdown("""
     .st-key-active_tab_widget button span,
     div[data-testid="stSegmentedControl"] button span,
     div[data-testid="stButtonGroup"] button span {
-        font-size: 1.15rem !important; /* Tăng kích thước chữ giống ảnh số 3 */
-        font-weight: 800 !important;
+        font-size: 0.88rem !important; /* Giảm kích thước chữ cho nhỏ hơn */
+        font-weight: 600 !important;
         text-transform: uppercase !important;
     }
     
@@ -1893,8 +1893,64 @@ st.markdown("""
         background: linear-gradient(135deg, #00c6ff 0%, #0072ff 100%) !important;
         color: white !important;
         border: 1px solid #00c6ff !important;
-        border-bottom: 4px solid #ff4b4b !important; /* Gạch đỏ dày hơn dưới chân tab được chọn */
-        box-shadow: 0 4px 15px rgba(0, 198, 255, 0.4) !important;
+        border-bottom: 2px solid #ff4b4b !important; /* Gạch đỏ dưới chân tab được chọn */
+        box-shadow: 0 2px 8px rgba(0, 198, 255, 0.3) !important;
+    }
+
+    /* === GLOBAL TEXT RESIZING FOR COMPACT WEB AESTHETIC === */
+    .stMarkdown p, 
+    .stMarkdown li,
+    .stMarkdown span,
+    span[data-testid="stMarkdownContainer"] p,
+    div[data-testid="stMarkdownContainer"] p,
+    .stMarkdown ul,
+    .stMarkdown ol,
+    p,
+    label {
+        font-size: 0.88rem !important;
+        line-height: 1.5 !important;
+    }
+    
+    .stMarkdown h1, h1 {
+        font-size: 1.5rem !important;
+    }
+    .stMarkdown h2, h2 {
+        font-size: 1.25rem !important;
+    }
+    .stMarkdown h3, h3 {
+        font-size: 1.08rem !important;
+    }
+    .stMarkdown h4, h4 {
+        font-size: 0.95rem !important;
+    }
+    
+    div[data-testid="stWidgetLabel"] p {
+        font-size: 0.85rem !important;
+    }
+    
+    [data-testid="stTable"] th {
+        font-size: 0.82rem !important;
+        padding: 5px 10px !important;
+    }
+    [data-testid="stTable"] td {
+        font-size: 0.82rem !important;
+        padding: 5px 10px !important;
+    }
+    
+    .stSelectbox div[role="combobox"] {
+        font-size: 0.88rem !important;
+        min-height: 38px !important;
+    }
+    .stTextInput input, .stTextArea textarea, .stNumberInput input {
+        font-size: 0.88rem !important;
+    }
+
+    .stButton button, .stDownloadButton button, [data-testid="stBaseButton-secondary"],
+    [data-testid="stFormSubmitButton"] button, [data-testid="stBaseButton-primary"] {
+        padding: 0.35rem 1.25rem !important;
+    }
+    .stButton button p, .stDownloadButton button p, [data-testid="stBaseButton-secondary"] p, [data-testid="stFormSubmitButton"] button p {
+        font-size: 0.85rem !important;
     }
     
     /* === STYLE HEADER & NÚT BẤM THÍCH ỨNG THEO CHỦ ĐỀ (THEME-AWARE) === */
@@ -2001,13 +2057,13 @@ st.markdown("""
 
     .stTabs [data-baseweb="tab"] div,
     .stTabs [data-baseweb="tab"] p {
-        font-size: 0.95rem !important;
+        font-size: 0.85rem !important;
         margin: 0 !important;
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
         gap: 6px !important;
-        font-weight: bold !important;
+        font-weight: 600 !important;
     }
 
     .stTabs [aria-selected="true"] {
@@ -2023,10 +2079,10 @@ st.markdown("""
     }
     
     .main-header h1 {
-        font-size: clamp(1.8rem, 5vw, 3rem) !important;
+        font-size: clamp(1.4rem, 4vw, 2.0rem) !important;
     }
     .main-header p {
-        font-size: clamp(0.9rem, 2.5vw, 1.25rem) !important;
+        font-size: clamp(0.8rem, 2vw, 0.95rem) !important;
     }
     .research-badge span {
         font-size: clamp(0.7rem, 2vw, 0.9rem) !important;
@@ -2378,8 +2434,8 @@ if st.session_state.get('theme') == 'dark':
         [data-testid="stStatusWidget"] { display: none !important; }
 
         .metric-value {
-            font-size: 1.8rem !important;
-            font-weight: 800 !important;
+            font-size: 1.4rem !important;
+            font-weight: 700 !important;
             margin-bottom: 5px !important;
             color: #ffd700 !important;
         }
@@ -2389,7 +2445,7 @@ if st.session_state.get('theme') == 'dark':
         }
 
         .metric-label {
-            font-size: 0.9rem !important;
+            font-size: 0.8rem !important;
             color: #aaa !important;
         }
         
@@ -2600,9 +2656,9 @@ if st.session_state.get('theme') == 'dark':
             background-color: rgba(255, 255, 255, 0.05) !important;
             color: rgba(255, 255, 255, 0.8) !important;
             border: 1px solid rgba(255, 255, 255, 0.1) !important;
-            border-bottom: 4px solid transparent !important;
-            padding: 14px 28px !important;
-            min-height: 52px !important;
+            border-bottom: 2px solid transparent !important;
+            padding: 8px 16px !important;
+            min-height: 38px !important;
         }
         .st-key-active_tab_widget button:hover,
         div[data-testid="stSegmentedControl"] button:hover,
@@ -2634,7 +2690,7 @@ if st.session_state.get('theme') == 'dark':
             background: linear-gradient(135deg, #00c6ff 0%, #0072ff 100%) !important;
             color: #ffffff !important;
             border: 1px solid #00c6ff !important;
-            border-bottom: 4px solid #ff4b4b !important; /* Gạch đỏ dưới chân tab được chọn */
+            border-bottom: 2px solid #ff4b4b !important; /* Gạch đỏ dưới chân tab được chọn */
         }
 
         /* ===== SCROLLBAR MÀU TỐI (DARK MODE) ===== */
@@ -2808,7 +2864,7 @@ if st.session_state.get('theme') == 'light':
         }
         .stTabs [aria-selected="true"] {
             color: #0072ff !important;
-            font-weight: bold !important;
+            font-weight: 600 !important;
         }
 
         /* Fix ALL Selectboxes, MultiSelect, TextInputs, and TextAreas in Light Mode */
@@ -2953,9 +3009,9 @@ if st.session_state.get('theme') == 'light':
             background-color: #f1f3f5 !important;
             color: #495057 !important;
             border: 1px solid #ced4da !important;
-            border-bottom: 4px solid transparent !important;
-            padding: 14px 28px !important;
-            min-height: 52px !important;
+            border-bottom: 2px solid transparent !important;
+            padding: 8px 16px !important;
+            min-height: 38px !important;
         }
         .st-key-active_tab_widget button:hover,
         div[data-testid="stSegmentedControl"] button:hover,
@@ -2987,7 +3043,7 @@ if st.session_state.get('theme') == 'light':
             background: linear-gradient(135deg, #00c6ff 0%, #0072ff 100%) !important;
             color: #ffffff !important;
             border: 1px solid #00c6ff !important;
-            border-bottom: 4px solid #ff4b4b !important; /* Gạch đỏ dưới chân tab được chọn */
+            border-bottom: 2px solid #ff4b4b !important; /* Gạch đỏ dưới chân tab được chọn */
         }
 
         /* ===== SCROLLBAR MÀU SÁNG (LIGHT MODE) ===== */
@@ -7287,15 +7343,15 @@ st.markdown(f"""
         flex-wrap: nowrap !important;
     }}
     .stTabs [data-baseweb="tab"] {{
-        height: 48px !important;
+        height: 38px !important;
         white-space: nowrap !important;
         min-width: fit-content !important;
         flex-shrink: 0 !important;
-        padding: 0 20px !important;
+        padding: 0 14px !important;
     }}
     .stTabs [data-baseweb="tab"] p {{
-        font-size: 0.95rem !important;
-        font-weight: bold !important;
+        font-size: 0.85rem !important;
+        font-weight: 600 !important;
         white-space: nowrap !important;
     }}
     
