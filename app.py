@@ -1505,6 +1505,12 @@ def _get_cached_users_dict(mtime):
     
     # DANH SÁCH TÀI KHOẢN CỐ ĐỊNH (NCKH)
     predefined = {
+        "admin": {
+            "password": hash_password("admin123@"),
+            "full_name": "System Administrator",
+            "role": "Quản trị viên",
+            "email": "admin@rehabai.com"
+        },
         "Đinh Lê Quỳnh Phương": {
             "password": hash_password("bong0912@"),
             "full_name": "Đinh Lê Quỳnh Phương",
