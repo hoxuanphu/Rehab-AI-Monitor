@@ -139,12 +139,15 @@ Rehab-AI-Monitor/
 │   └── .streamlit/
 │       └── config.toml            # Cấu hình cổng mạng, theme, tối ưu hóa của Streamlit
 │
-├── 📚 Tài liệu hướng dẫn & Báo cáo (.md)
-│   ├── README.md                  # Hướng dẫn chung về cách cài đặt và chạy dự án
+├── 📂 Thư mục tài liệu hướng dẫn & Báo cáo (docs/)
 │   ├── README_UI.md               # Tài liệu thuyết minh chi tiết về thiết kế giao diện UI/UX
 │   ├── BAO_CAO_CHI_TIET.md        # Báo cáo chuyên sâu về mã nguồn, giải thuật lâm sàng & RAM
 │   ├── TECHNICAL_DOCUMENTATION.md # Tài liệu kỹ thuật phân tích sâu cấu trúc Front-End & Back-End
 │   └── AI_MODEL_DOCUMENTATION.md  # Tài liệu giải thích mô hình AI, công thức toán lý thuyết góc khớp
+│
+├── 📝 Hướng dẫn khởi chạy chính
+│   └── README.md                  # Hướng dẫn chung về cách cài đặt và chạy dự án
+│
 │
 ├── 💾 Cơ sở dữ liệu JSON (Local DB)
 │   ├── users.json                 # Danh sách tài khoản người dùng và mật khẩu băm bảo mật
