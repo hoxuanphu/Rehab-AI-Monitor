@@ -11400,6 +11400,78 @@ def hien_thi_home_quan_tri_vien():
         fig_role.update_layout(margin=dict(l=0, r=0, t=20, b=0), height=350)
         st.plotly_chart(fig_role, use_container_width=True, theme=None)
 
+    st.markdown("---")
+    st.markdown("### 📊 Bảng thống kê chi tiết kết quả phân tích & đánh giá")
+    if v_list:
+        table_rows = []
+        # Tải dữ liệu và xây dựng bảng lookup tối ưu
+        ai_evals_dict = {}
+        doc_evals_dict = {}
+        for e in e_list:
+            key = (e.get('patient_username'), e.get('video_name'), e.get('exercise'))
+            if e.get('doctor_username') == "AI_Researcher":
+                ai_evals_dict[key] = e
+            else:
+                doc_evals_dict[key] = e
+
+        for v in v_list:
+            v_key = (v.get('username'), v.get('video_name'), v.get('exercise'))
+            ai_eval = ai_evals_dict.get(v_key)
+            doc_eval = doc_evals_dict.get(v_key)
+
+            # Thống kê frame hình
+            metrics = v.get('metrics', {}) if isinstance(v.get('metrics'), dict) else {}
+            if v.get('status') == "Đã phân tích" and metrics:
+                tong_frame = metrics.get('tong_frame_hop_le', metrics.get('tong_frame', 0))
+                if not tong_frame:
+                    tong_frame = metrics.get('tong_frame', 0)
+                frame_dung = metrics.get('frame_dung', 0)
+                frame_gan_dung = metrics.get('frame_gan_dung', 0)
+                frame_sai = max(0, tong_frame - frame_dung - frame_gan_dung)
+                
+                tong_str = str(tong_frame)
+                dung_str = str(frame_dung)
+                gan_str = str(frame_gan_dung)
+                sai_str = str(frame_sai)
+            else:
+                tong_str = "Chờ xử lý"
+                dung_str = "-"
+                gan_str = "-"
+                sai_str = "-"
+
+            # Đánh giá AI
+            if ai_eval:
+                ai_accuracy = ai_eval.get('ai_accuracy', 0)
+                ai_res = ai_eval.get('doctor_result', 'N/A')
+                ai_comment = f"{ai_accuracy:.1f}% ({ai_res})"
+            else:
+                ai_comment = "Chờ phân tích"
+
+            # Nhận xét Bác sĩ
+            if doc_eval:
+                doc_res = doc_eval.get('doctor_result', 'N/A')
+                doc_text = doc_eval.get('comments', '')
+                doc_comment = f"{doc_res}: {doc_text}"
+            else:
+                doc_comment = "Chờ bác sĩ đánh giá"
+
+            table_rows.append({
+                "Bệnh nhân": v.get('full_name', 'N/A'),
+                "Bài tập": v.get('exercise', 'N/A'),
+                "Thời gian": v.get('time', 'N/A'),
+                "Tổng Frames": tong_str,
+                "Frames Đúng": dung_str,
+                "Frames Gần Đúng": gan_str,
+                "Frames Sai": sai_str,
+                "Đánh giá AI": ai_comment,
+                "Nhận xét của Bác sĩ": doc_comment
+            })
+
+        df_stats = pd.DataFrame(table_rows)
+        st.dataframe(df_stats, use_container_width=True, height=400)
+    else:
+        st.info("Chưa có dữ liệu video để thống kê.")
+
     # Thống kê hoạt động theo thời gian (giả lập hoặc từ logs)
     st.markdown("### 🕒 Lưu lượng hoạt động gần đây")
     if v_list or e_list or s_list:
