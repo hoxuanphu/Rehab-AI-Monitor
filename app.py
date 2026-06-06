@@ -12211,8 +12211,6 @@ def main():
                     else:
                         st.info("ℹ️ Hiện chưa có thông tin khai báo triệu chứng mới từ bệnh nhân.")
                     
-                    st.markdown("---")
-                    
                     pass # Đã cắt bỏ chọn bài tập ở trang chủ cho Bác sĩ theo yêu cầu
 
                 # HIỂN THỊ THÔNG TIN BÀI TẬP (CHỈ HIỆN CHO BN - BS/NCV ĐÃ BIẾT NÊN CẮT BỎ ĐỂ TRÁNH RỐI)
