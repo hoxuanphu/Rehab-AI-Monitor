@@ -13,6 +13,7 @@ jobs:
         uses: actions/checkout@v3
         with:
           fetch-depth: 1
+          lfs: true
 
       - name: Push to Hugging Face
         env:
@@ -21,15 +22,18 @@ jobs:
           git config --global user.email "actions@github.com"
           git config --global user.name "GitHub Actions"
           
-          # Tạo một nhánh độc lập không có lịch sử cũ để loại bỏ file whl lớn khỏi lịch sử git
+          # Khoi tao va kich hoat Git LFS trong runner
+          git lfs install
+          
+          # Tao mot nhanh doc lap khong co lich su cu de loai bo file whl lon khoi lich su git
           git checkout --orphan temp-hf-branch
           
-          # Xóa file whl nếu nó còn xuất hiện trong git index
+          # Xoa file whl neu no con xuat hien trong git index
           git rm --cached mediapipe-0.10.14-cp310-cp310-win_amd64.whl || true
           
-          # Add toàn bộ code sạch (tự động bỏ qua các file trong .gitignore)
+          # Add toan bo code sach (tu dong bo qua cac file trong .gitignore)
           git add -A
           git commit -m "deploy clean version to huggingface spaces"
           
-          # Đẩy đè lên nhánh main của Hugging Face
+          # Day de len nhanh main cua Hugging Face (LFS client se tu dong lay thong tin xac thuc tu URL push)
           git push --force https://quynhphuong1209:$HF_TOKEN@huggingface.co/spaces/quynhphuong1209/Rehab-AI-Monitor-2026 temp-hf-branch:main
