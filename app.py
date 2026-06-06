@@ -3861,56 +3861,51 @@ def hien_thi_tab_lien_he():
         """, unsafe_allow_html=True)
 
     # Thêm mục Bản đồ & Địa chỉ Bệnh viện
-    st.markdown("""
-        <style>
-            .map-container {
-                transition: all 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
-            }
-            .map-container:hover {
-                transform: translateY(-4px);
-                box-shadow: 0 20px 40px rgba(0, 198, 255, 0.15) !important;
-                border-color: rgba(0, 198, 255, 0.6) !important;
-            }
-            .map-btn {
-                display: inline-block;
-                background: linear-gradient(135deg, #00c6ff 0%, #0072ff 100%);
-                color: white !important;
-                padding: 12px 24px;
-                border-radius: 12px;
-                text-decoration: none !important;
-                font-weight: bold;
-                transition: all 0.3s ease;
-                box-shadow: 0 4px 15px rgba(0, 198, 255, 0.3);
-            }
-            .map-btn:hover {
-                background: linear-gradient(135deg, #00d2ff 0%, #0080ff 100%);
-                box-shadow: 0 6px 20px rgba(0, 198, 255, 0.5);
-                transform: scale(1.02);
-            }
-        </style>
-        
-        <div class="map-container" style="margin-top: 35px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(0, 198, 255, 0.3); border-radius: 20px; padding: 30px; box-shadow: 0 15px 35px rgba(0,0,0,0.4); backdrop-filter: blur(10px);">
-            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; margin-bottom: 25px; border-bottom: 3px solid #00c6ff; padding-bottom: 15px;">
-                <h2 style="color: #00c6ff; margin: 0; display: flex; align-items: center; font-family: 'Outfit', sans-serif;">
-                    <span style="margin-right: 15px; font-size: 2rem;">📍</span> VỊ TRÍ BỆNH VIỆN ĐA KHOA PHẠM NGỌC THẠCH
-                </h2>
-                <a class="map-btn" href="https://www.google.com/maps/place/B%E1%BB%87nh+vi%E1%BB%87n+%C4%91a+khoa+Ph%E1%BA%A1m+Ng%E1%BB%8Dc+Th%E1%BA%A1ch/@21.0821035,105.7766556,17z/data=!3m1!4b1!4m6!3m5!1s0x313455002cadccfd:0xf42e13275632d6dc!8m2!3d21.0820985!4d105.7792305!16s%2Fg%2F11wbfdswkr?entry=ttu" target="_blank">
-                    🗺️ Xem trên Google Maps
-                </a>
-            </div>
-            
-            <div style="margin-bottom: 25px;">
-                <p style="color: #888; font-size: 0.95rem; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 1px;">Địa chỉ bệnh viện</p>
-                <p style="font-size: 1.25rem; color: #fff; font-weight: 500; font-family: 'Outfit', sans-serif; margin: 0;">
-                    Số 1A, Đường Đức Thắng, Phường Đông Ngạc, Quận Bắc Từ Liêm, Hà Nội
-                </p>
-            </div>
-            
-            <div style="width: 100%; border-radius: 15px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.1); box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
-                <iframe src="https://maps.google.com/maps?q=21.0820985,105.7792305&z=16&output=embed" width="100%" height="400" style="border:0; display: block;" allowfullscreen="" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+    st.markdown("""<style>
+.map-container {
+    transition: all 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
+}
+.map-container:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 20px 40px rgba(0, 198, 255, 0.15) !important;
+    border-color: rgba(0, 198, 255, 0.6) !important;
+}
+.map-btn {
+    display: inline-block;
+    background: linear-gradient(135deg, #00c6ff 0%, #0072ff 100%);
+    color: white !important;
+    padding: 12px 24px;
+    border-radius: 12px;
+    text-decoration: none !important;
+    font-weight: bold;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 15px rgba(0, 198, 255, 0.3);
+}
+.map-btn:hover {
+    background: linear-gradient(135deg, #00d2ff 0%, #0080ff 100%);
+    box-shadow: 0 6px 20px rgba(0, 198, 255, 0.5);
+    transform: scale(1.02);
+}
+</style>
+<div class="map-container" style="margin-top: 35px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(0, 198, 255, 0.3); border-radius: 20px; padding: 30px; box-shadow: 0 15px 35px rgba(0,0,0,0.4); backdrop-filter: blur(10px);">
+<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; margin-bottom: 25px; border-bottom: 3px solid #00c6ff; padding-bottom: 15px;">
+<h2 style="color: #00c6ff; margin: 0; display: flex; align-items: center; font-family: 'Outfit', sans-serif;">
+<span style="margin-right: 15px; font-size: 2rem;">📍</span> VỊ TRÍ BỆNH VIỆN ĐA KHOA PHẠM NGỌC THẠCH
+</h2>
+<a class="map-btn" href="https://www.google.com/maps/place/B%E1%BB%87nh+vi%E1%BB%87n+%C4%91a+khoa+Ph%E1%BA%A1m+Ng%E1%BB%8Dc+Th%E1%BA%A1ch/@21.0821035,105.7766556,17z/data=!3m1!4b1!4m6!3m5!1s0x313455002cadccfd:0xf42e13275632d6dc!8m2!3d21.0820985!4d105.7792305!16s%2Fg%2F11wbfdswkr?entry=ttu" target="_blank">
+🗺️ Xem trên Google Maps
+</a>
+</div>
+<div style="margin-bottom: 25px;">
+<p style="color: #888; font-size: 0.95rem; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 1px;">Địa chỉ bệnh viện</p>
+<p style="font-size: 1.25rem; color: #fff; font-weight: 500; font-family: 'Outfit', sans-serif; margin: 0;">
+Số 1A, Đường Đức Thắng, Phường Đông Ngạc, Quận Bắc Từ Liêm, Hà Nội
+</p>
+</div>
+<div style="width: 100%; border-radius: 15px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.1); box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
+<iframe src="https://maps.google.com/maps?q=21.0820985,105.7792305&z=16&output=embed" width="100%" height="400" style="border:0; display: block;" allowfullscreen="" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+</div>
+</div>""", unsafe_allow_html=True)
 
 def hien_thi_tab_danh_gia_va_nckh_bac_si():
     """Gộp tab Phiếu NCKH và Đánh giá PHCN cho Bác sĩ (Thêm kết quả từ NCV)"""
