@@ -36,23 +36,81 @@ Frontend của ứng dụng được xây dựng dựa trên các thành phần 
   * Thiết kế lại thanh Tab điều hướng dạng cuộn ngang (`overflow-x: auto`) mượt mà trên điện thoại.
   * Giảm cỡ chữ của toàn bộ Sidebar xuống `0.88rem` để tăng mật độ thông tin hiển thị trên màn hình nhỏ.
 
-### 2.2. Các Phân hệ Giao diện theo Vai trò (Role-based Dashboards)
-* **Giao diện Bệnh nhân:**
-  * Form khai báo thông tin hành chính (Họ tên, tuổi, giới tính, mã định danh).
-  * Khu vực khai báo triệu chứng lâm sàng và thang đo mức độ đau (VAS từ 0 đến 10).
-  * Trình phát video bài tập chuẩn mẫu đối chiếu và video YouTube hướng dẫn.
-  * Khu vực kéo-thả để tải video tập luyện cá nhân lên hệ thống.
-* **Giao diện Bác sĩ / Kỹ thuật viên PHCN:**
-  * Bảng theo dõi danh sách bệnh nhân và trạng thái video (Chờ đánh giá, Đã đánh giá, Chờ AI xử lý).
-  * Trình xem video bài tập của bệnh nhân song song với biểu đồ góc khớp sinh học do AI phân tích.
-  * Form nhập liệu nhận xét lâm sàng chuyên môn (Ground Truth) để lưu vào hồ sơ bệnh án.
-* **Giao diện Nghiên cứu viên (AI Researcher):**
-  * Bảng điều khiển cấu hình tham số AI (Ngưỡng tự tin, Tốc độ bỏ qua khung hình để tăng tốc xử lý, Độ phân giải video, Loại mô hình Pose).
-  * Bộ trích xuất dữ liệu thô và biểu đồ tọa độ 33 điểm xương khớp.
-* **Giao diện Quản trị viên (Admin Panel):**
-  * Bảng quản lý người dùng: Thống kê số lượng, chức năng tạo mới hoặc xóa tài khoản.
-  * Bảng hiển thị Nhật ký Hoạt động hệ thống (System Logs) kèm chức năng tải về dạng CSV.
-  * Phân khu dọn dẹp hệ thống (Xóa video tạm, reset cơ sở dữ liệu).
+### 2.2. Giao diện Đăng nhập & Xác thực chung (Common Login & Registration Page)
+Trang đăng nhập là điểm tiếp cận đầu tiên của toàn bộ người dùng và chuyên gia y khoa, được thiết kế để phân quyền truy cập ngay từ đầu:
+* **Hộp lựa chọn vai trò (Role Selector Dropdown):**
+  * Cho phép người dùng xác định rõ tư cách truy cập hệ thống trước khi đăng nhập, bao gồm: **Bệnh nhân**, **Bác sĩ / KTV PHCN**, **Nghiên cứu viên**, và **Quản trị viên**.
+  * Dựa trên vai trò được chọn, giao diện chính bên trong sẽ hiển thị đúng các phân hệ chức năng tương ứng.
+* **Các Tab chức năng đăng nhập:**
+  * **Tab 🔐 ĐĂNG NHẬP:** Nhập tên tài khoản (Username) và mật khẩu (Password). Có chức năng **Đặt lại mật khẩu** thông qua điền Email đăng ký dự phòng nếu nhập sai thông tin.
+  * **Tab 📋 ĐĂNG KÝ:** Dành riêng cho bệnh nhân tự tạo tài khoản mới trên hệ thống bằng cách khai báo Họ tên, Username, Email liên hệ và Mật khẩu cá nhân.
+  * **Tab 🚀 GOOGLE ID:** Đăng nhập một chạm dựa trên dịch vụ danh tính tích hợp của Google (Streamlit Cloud Identity), thích hợp khi chạy thử nghiệm trên nền tảng đám mây.
+* **Cấu hình giao diện nhanh (Quick Theme Toggle):**
+  * Nút gạt (Toggle switch) ngay đầu sidebar của trang đăng nhập để chuyển đổi nhanh giữa chế độ Sáng (Light Mode) và Tối (Dark Mode) trước khi đăng nhập.
+
+### 2.3. Chi tiết Phân hệ Giao diện theo Vai trò (Role-based Dashboards)
+
+#### A. Giao diện Bệnh nhân (Patient Portal)
+Giao diện được thiết kế trực quan, dễ hiểu giúp bệnh nhân tự thực hiện khai báo triệu chứng và bài tập mà không cần sự trợ giúp kỹ thuật phức tạp:
+* **Hồ sơ thông tin cá nhân & Triệu chứng:**
+  * **Form hành chính:** Ô nhập Họ tên, tuổi, giới tính và mã định danh duy nhất (VD: BN0001).
+  * **Khai báo triệu chứng:** Ô nhập mô tả cảm giác đau chi tiết (ví dụ: đau khớp vai khi giơ tay qua đầu).
+  * **Thang đo mức độ đau VAS (Visual Analog Scale):** Thanh trượt từ 0 (Không đau) đến 10 (Đau dữ dội nhất) kèm dòng chú thích tình trạng đau lâm sàng tương ứng với mốc chọn.
+  * **Nút gửi thông tin:** Nút "Gửi thông tin cho Bác sĩ/KTV và NCV" để đẩy trực tiếp dữ liệu khai báo vào cơ sở dữ liệu `patient_symptoms.json`.
+* **Khu vực lựa chọn bài tập & Hướng dẫn tập luyện:**
+  * **Hộp chọn bài tập:** Danh sách bài tập phục hồi chức năng khớp vai (Tập với gậy, tập Codman đung đưa tay,...).
+  * **Thông tin bài tập:** Card thông tin hiển thị Thời gian tập (giây/lần), Số lần lặp lại (lần/ngày), và Lợi ích y tế cụ thể của động tác.
+  * **Trình phát video mẫu đối chiếu:** Hộp video chuẩn mẫu phát trực tiếp trên web giúp bệnh nhân bắt chước động tác đúng biên độ vai.
+* **Khu vực tải video tập luyện cá nhân:**
+  * Bộ tải file kéo-thả (File Uploader) thiết kế pill-shape màu xanh nổi bật để bệnh nhân tải video quay lại quá trình tập lên.
+  * Hỗ trợ tự động chuẩn hóa định dạng và nén dung lượng video thông qua FFmpeg tích hợp.
+* **Trang Kết quả đánh giá:**
+  * Xem độ chính xác chuyển động do AI chấm điểm kèm theo phân tích chi tiết của 3 giai đoạn biên độ khớp vai.
+  * Đọc nhận xét lâm sàng, ghi chú và kế hoạch luyện tập (phác đồ) do Bác sĩ điều trị trực tiếp gửi xuống.
+* **Trang Lịch nhắc nhở (Schedules):**
+  * Xem ngày tái khám định kỳ và các mốc thời gian nhắc nhở tập luyện trong tuần.
+
+#### B. Giao diện Bác sĩ / Kỹ thuật viên (Clinician Portal)
+Hỗ trợ các chuyên gia y tế theo dõi tình trạng phục hồi của bệnh nhân và chẩn đoán từ xa:
+* **Thống kê nhanh trong Sidebar:**
+  * Hiển thị thông tin hồ sơ bác sĩ và cơ sở y tế đang công tác.
+  * Ô đếm số lượng video bệnh nhân đang chờ đánh giá chuyên môn và tổng số bệnh nhân đang quản lý.
+* **Giao diện quản lý & Phê duyệt video:**
+  * Bảng danh sách video bệnh nhân gửi lên kèm các thông tin về thời gian, trạng thái.
+  * Trình xem video kép: Bác sĩ bấm vào nút phát sẽ xem video tập luyện của bệnh nhân song song với việc kiểm tra biểu đồ đo góc khớp sinh học vẽ bởi AI.
+* **Bộ Đánh giá Lâm sàng chuyên môn (Ground Truth Entry):**
+  * Bác sĩ chọn đánh giá biên độ tập thực tế của bệnh nhân (Đạt/Không đạt/Cần tập lại).
+  * Nhập nhận xét chuyên môn và soạn phác đồ điều trị tiếp theo cho bệnh nhân.
+  * Nhập ghi chú nội bộ gửi riêng cho Nghiên cứu viên để tối ưu mô hình Pose.
+
+#### C. Giao diện Nghiên cứu viên (AI Researcher Portal)
+Bộ công cụ phân tích dữ liệu thị giác máy tính chuyên sâu cho kỹ sư AI:
+* **Cấu hình tham số mô hình Pose:**
+  * Thanh trượt điều chỉnh ngưỡng tự tin (Confidence threshold) của MediaPipe để tăng độ bám sát khớp xương.
+  * Dropdown cấu hình tốc độ bỏ qua frame (Skip frames: 0, 1, 2, 4) giúp tăng tốc độ phân tích video dài gấp 3-5 lần khi chạy trên CPU đám mây hạn chế.
+  * Lựa chọn chất lượng độ phân giải video đầu vào và phiên bản mô hình MediaPipe (Lite, Full, Heavy).
+* **Phân tích sâu & Trích xuất tọa độ:**
+  * Xem trạng thái hoạt động hệ thống trong sidebar (Số video chờ xử lý, Độ chính xác trung bình của AI, Tổng video).
+  * Xem chi tiết từng frame hình đã vẽ xương: Hiển thị dạng lưới ảnh của tất cả khung hình với chỉ số góc vai/khuỷu thực tế, độ lệch so với góc chuẩn, nhãn đánh giá (PASS/FAIL) theo sai số tùy chỉnh.
+  * Cho phép tải xuống bộ dữ liệu tọa độ 33 khớp xương dạng CSV/JSON của toàn bộ phiên tập để phục vụ huấn luyện mô hình học máy.
+
+#### D. Giao diện Quản trị viên (Admin Portal)
+Hệ thống quản trị tổng thể toàn bộ tài nguyên, tài khoản và dữ liệu của website:
+* **Bộ Metric Cards tổng quan:** Hiển thị 4 thẻ thông tin lớn về số lượng người dùng (BN và BS), tổng số video, tổng số bản ghi đánh giá và tổng số frames hình mà AI đã xử lý.
+* **Biểu đồ thống kê trực quan:**
+  * Biểu đồ cột thể hiện mức độ phổ biến của từng bài tập y tế (Bar chart).
+  * Biểu đồ tròn thể hiện cơ cấu vai trò người dùng trong hệ thống (Pie chart).
+* **Bảng thống kê chi tiết kết quả phân tích & đánh giá (Bảng quản trị cốt lõi):**
+  * Hiển thị bảng tổng hợp toàn bộ video trong hệ thống với các cột chi tiết: Họ tên BN, Username, Mã BN, Tuổi/Giới tính, Triệu chứng lâm sàng & mức độ đau VAS khai báo, Bài tập lựa chọn, Thời gian upload.
+  * Thống kê chi tiết số lượng khung hình của phiên tập (Tổng số frames, số frames đúng, số frames gần đúng, số frames sai).
+  * Hiển thị kết quả chấm điểm của AI và nội dung nhận xét lâm sàng thực tế của Bác sĩ điều trị.
+* **Xem và xuất lịch sử hệ thống (Logs):**
+  * Xem bảng nhật ký hoạt động hệ thống thời gian thực.
+  * Nút xuất toàn bộ hoạt động ra tệp tin CSV phục vụ kiểm toán và báo cáo.
+* **Phân khu dọn dẹp hệ thống (System Cleanup & Reset):**
+  * Nút xóa nhanh cơ sở dữ liệu đánh giá và triệu chứng.
+  * Nút xóa các file video tạm thời và thư mục ảnh rác để giải phóng dung lượng đĩa.
+  * Nút reset hệ thống toàn cục về trạng thái sạch ban đầu.
 
 ---
 
