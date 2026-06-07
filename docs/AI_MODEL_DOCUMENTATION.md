@@ -82,20 +82,28 @@ Tại mỗi frame hình y tế, hệ thống phân loại trạng thái như sau
 
 ## 4. CÁC CHỈ SỐ THỐNG KÊ KHOA HỌC (RESEARCH METRICS)
 
-Để phục vụ công tác Nghiên cứu khoa học (NCKH) của các Bác sĩ và Nghiên cứu viên, hệ thống tính toán các chỉ số thống kê toán học sâu:
+Để phục vụ công tác Nghiên cứu khoa học (NCKH) của các Bác sĩ và Nghiên cứu viên, hệ thống tự động tính toán 7 chỉ số thống kê cốt lõi và trực quan hóa đồng thời trên **Biểu đồ Radar (Radar Chart)** tại tab Phân tích của Nghiên cứu viên:
 
-### 4.1. Sai số tuyệt đối trung bình (MAE - Mean Absolute Error)
+### 4.1. Độ chính xác tổng thể (ACC - Accuracy)
+Tỷ lệ khung hình được phân loại đúng (gồm cả Đúng và Sai) so với tổng thể số khung hình đã xử lý của phiên tập:
+$$\text{Accuracy} = \frac{\text{Số khung hình phân loại đúng}}{\text{Tổng số khung hình}}$$
+
+### 4.2. Sai số tuyệt đối trung bình (MAE - Mean Absolute Error)
 Đo lường độ lệch góc trung bình của cả phiên tập so với mẫu chuẩn:
 $$\text{MAE} = \frac{1}{N} \sum_{i=1}^{N} |\theta_{\text{patient}, i} - \theta_{\text{reference}, i}|$$
 *Ý nghĩa:* MAE càng nhỏ thể hiện động tác của bệnh nhân càng bám sát quỹ đạo mẫu chuẩn.
 
-### 4.2. Hệ số tương quan nội lớp (ICC - Intraclass Correlation Coefficient)
-Đánh giá mức độ đồng thuận giải phẫu giữa quỹ đạo chuyển động của bệnh nhân và chuyên gia mẫu:
-$$\text{ICC} = \frac{\text{Var}(\text{Between-subjects})}{\text{Var}(\text{Between-subjects}) + \text{Var}(\text{Within-subjects})}$$
-*Ý nghĩa:* Chỉ số ICC tiến gần về $1.0$ ($> 0.75$) chứng minh bài tập có độ tin cậy và sự nhất quán động học cao, đạt tiêu chuẩn y khoa quốc tế.
+### 4.3. Căn bậc hai sai số trung bình bình phương (RMSE - Root Mean Square Error)
+Đo lường độ lệch trung bình bình phương giữa góc của bệnh nhân và mẫu tham chiếu, nhạy cảm hơn với các sai số lớn đột ngột:
+$$\text{RMSE} = \sqrt{\frac{1}{N} \sum_{i=1}^{N} (\theta_{\text{patient}, i} - \theta_{\text{reference}, i})^2}$$
 
-### 4.3. Các chỉ số Precision, Recall và F1-Score
-* **Precision (Độ chính xác):** Tỷ lệ số khung hình AI dự đoán bệnh nhân tập "Đúng" trên thực tế bác sĩ đánh giá đạt chuẩn.
+### 4.4. Hệ số tương quan nội lớp (ICC - Intraclass Correlation Coefficient)
+Đánh giá mức độ đồng thuận giải phẫu giữa quỹ đạo chuyển động của bệnh nhân và chuyên gia mẫu qua toàn bộ phiên tập:
+$$\text{ICC} = \frac{\text{Var}(\text{Between-subjects})}{\text{Var}(\text{Between-subjects}) + \text{Var}(\text{Within-subjects})}$$
+*Ý nghĩa:* Chỉ số ICC tiến gần về $1.0$ ($> 0.75$) chứng minh chuỗi chuyển động của bệnh nhân có độ tin cậy và sự nhất quán động học cao, đạt tiêu chuẩn y khoa quốc tế.
+
+### 4.5. Các chỉ số Precision, Recall và F1-Score
+* **Precision (Độ chính xác dự báo):** Tỷ lệ số khung hình AI dự đoán bệnh nhân tập "Đúng" trên thực tế bác sĩ đánh giá đạt chuẩn.
 * **Recall (Độ nhạy):** Tỷ lệ số khung hình tập đạt chuẩn thực tế được AI nhận diện thành công.
 * **F1-Score (Điểm F1):** Trung bình điều hòa giữa Precision và Recall để lượng hóa hiệu suất tổng thể của mô hình phân loại:
   $$F_1 = 2 \times \frac{\text{Precision} \times \text{Recall}}{\text{Precision} + \text{Recall}}$$
