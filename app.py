@@ -9935,7 +9935,7 @@ def hien_thi_tab_phieu_nckh():
                 "Viêm quanh khớp cấp (ICD-10: M75.3 / M75.5)",
                 "Viêm quanh khớp vai (P) (ICD-10: M75)"
             ])
-            lesion_side = st.radio("Vị trí vai tổn thương:", ["Vai trái (1)", "Vai phải (2)"], horizontal=True)
+            lesion_side = st.radio("Vị trí vai tổn thương:", ["Vai trái (1)", "Vai phải (2)", "Cả hai vai (3)"], horizontal=True)
             duration = st.radio("Thời gian mắc bệnh:", ["< 1 tháng (1)", "1 – 3 tháng (2)", ">= 3 tháng (3)"], horizontal=True)
 
         # II. THÔNG TIN PHỤC HỒI
