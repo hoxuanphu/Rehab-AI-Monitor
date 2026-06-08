@@ -9939,7 +9939,7 @@ def hien_thi_tab_phieu_nckh():
         st.markdown("### II. THÔNG TIN PHỤC HỒI")
         col3, col4 = st.columns(2)
         with col3:
-            training_side = st.radio("Bên tập luyện:", ["Vai trái", "Vai phải"], horizontal=True)
+            training_side = st.radio("Bên tập luyện:", ["Vai trái", "Vai phải", "Cả hai vai"], horizontal=True)
             pain_level = st.radio("Mức độ đau (VAS 0–10):", ["Nhẹ (0–3)", "Trung bình (4–6)", "Nặng (7–10)"], horizontal=True, index=d_pain_idx)
         with col4:
             disease_severity = st.radio("Mức độ bệnh:", ["Nhẹ", "Trung bình", "Nặng"], horizontal=True, index=d_severity_idx)
