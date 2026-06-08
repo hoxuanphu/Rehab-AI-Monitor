@@ -11663,6 +11663,10 @@ def delete_video_callback(video_name, username):
         st.session_state.delete_success = f"Đã xóa video: {v.get('video_name', 'Không rõ tên')}"
 
 
+def reset_vid_list_page():
+    st.session_state.vid_list_page = 0
+
+
 @st.fragment
 def hien_thi_danh_sach_video_fragment(user_role):
     video_list = load_data(VIDEOS_FILE)
@@ -11687,37 +11691,93 @@ def hien_thi_danh_sach_video_fragment(user_role):
             else:
                 doc_eval_lookup[key] = e  # ghi đè để giữ cái mới nhất (list đã theo thứ tự)
 
-        # --- Pagination: chỉ render 10 video/trang để tránh render quá nhiều expander ---
-        PAGE_SIZE = 10
-        total_videos = len(video_list)
-        total_pages = max(1, (total_videos + PAGE_SIZE - 1) // PAGE_SIZE)
+        # --- BỘ LỌC DANH SÁCH VIDEO ---
+        st.markdown("##### 🔍 BỘ LỌC DANH SÁCH")
         
-        if 'vid_list_page' not in st.session_state:
-            st.session_state.vid_list_page = 0
-        # Đảm bảo trang hiện tại không vượt quá tổng số trang
-        if st.session_state.vid_list_page >= total_pages:
-            st.session_state.vid_list_page = total_pages - 1
+        # Lấy danh sách bệnh nhân duy nhất có video
+        patient_options = {}
+        for v in video_list:
+            u = v.get('username')
+            fn = v.get('full_name') or u
+            if u:
+                patient_options[u] = f"👤 {fn} ({u})"
+        
+        sorted_patients = sorted(patient_options.items(), key=lambda item: item[1].lower())
+        patient_list_opts = ["-- Tất cả bệnh nhân --"] + [item[1] for item in sorted_patients]
+        patient_lookup = {item[1]: item[0] for item in sorted_patients}
 
-        # Thanh điều hướng trang
-        if total_pages > 1:
-            pg_c1, pg_c2, pg_c3 = st.columns([1, 3, 1])
-            with pg_c1:
-                if st.button("◀ Trang trước", disabled=(st.session_state.vid_list_page == 0), key="vid_pg_prev"):
-                    st.session_state.vid_list_page -= 1
-                    st.rerun()
-            with pg_c2:
-                st.markdown(
-                    f"<div style='text-align:center; padding:6px; color:#aaa;'>Trang {st.session_state.vid_list_page + 1} / {total_pages} "
-                    f"({total_videos} video)</div>",
-                    unsafe_allow_html=True
-                )
-            with pg_c3:
-                if st.button("Trang sau ▶", disabled=(st.session_state.vid_list_page >= total_pages - 1), key="vid_pg_next"):
-                    st.session_state.vid_list_page += 1
-                    st.rerun()
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            selected_patient_opt = st.selectbox(
+                "Lọc theo bệnh nhân:",
+                patient_list_opts,
+                key="filter_video_patient",
+                on_change=reset_vid_list_page,
+                label_visibility="collapsed"
+            )
+        with col_f2:
+            selected_status_opt = st.selectbox(
+                "Lọc theo trạng thái đánh giá:",
+                ["-- Tất cả trạng thái --", "Đã đánh giá", "Đang chờ bác sĩ đánh giá"],
+                key="filter_video_status",
+                on_change=reset_vid_list_page,
+                label_visibility="collapsed"
+            )
 
-        start_idx = st.session_state.vid_list_page * PAGE_SIZE
-        page_videos = list(enumerate(video_list))[start_idx: start_idx + PAGE_SIZE]
+        # Tiến hành lọc danh sách video
+        filtered_videos = []
+        for v in video_list:
+            # Lọc theo bệnh nhân
+            if selected_patient_opt != "-- Tất cả bệnh nhân --":
+                target_username = patient_lookup.get(selected_patient_opt)
+                if v.get('username') != target_username:
+                    continue
+            
+            # Lọc theo trạng thái đánh giá
+            if selected_status_opt != "-- Tất cả trạng thái --":
+                ev_key = (v.get('username'), v.get('video_name'), v.get('exercise'))
+                has_doc_eval = ev_key in doc_eval_lookup
+                if selected_status_opt == "Đã đánh giá" and not has_doc_eval:
+                    continue
+                if selected_status_opt == "Đang chờ bác sĩ đánh giá" and has_doc_eval:
+                    continue
+            
+            filtered_videos.append(v)
+
+        if not filtered_videos:
+            st.info("ℹ️ Không tìm thấy video nào khớp với điều kiện lọc.")
+        else:
+            # --- Pagination: chỉ render 10 video/trang để tránh render quá nhiều expander ---
+            PAGE_SIZE = 10
+            total_videos = len(filtered_videos)
+            total_pages = max(1, (total_videos + PAGE_SIZE - 1) // PAGE_SIZE)
+            
+            if 'vid_list_page' not in st.session_state:
+                st.session_state.vid_list_page = 0
+            # Đảm bảo trang hiện tại không vượt quá tổng số trang
+            if st.session_state.vid_list_page >= total_pages:
+                st.session_state.vid_list_page = total_pages - 1
+
+            # Thanh điều hướng trang
+            if total_pages > 1:
+                pg_c1, pg_c2, pg_c3 = st.columns([1, 3, 1])
+                with pg_c1:
+                    if st.button("◀ Trang trước", disabled=(st.session_state.vid_list_page == 0), key="vid_pg_prev"):
+                        st.session_state.vid_list_page -= 1
+                        st.rerun()
+                with pg_c2:
+                    st.markdown(
+                        f"<div style='text-align:center; padding:6px; color:#aaa;'>Trang {st.session_state.vid_list_page + 1} / {total_pages} "
+                        f"({total_videos} video)</div>",
+                        unsafe_allow_html=True
+                    )
+                with pg_c3:
+                    if st.button("Trang sau ▶", disabled=(st.session_state.vid_list_page >= total_pages - 1), key="vid_pg_next"):
+                        st.session_state.vid_list_page += 1
+                        st.rerun()
+
+            start_idx = st.session_state.vid_list_page * PAGE_SIZE
+            page_videos = list(enumerate(filtered_videos))[start_idx: start_idx + PAGE_SIZE]
 
         # ⚡ Pre-warm cache codec cho các video trong trang hiện tại (chạy background, không block UI)
         def _prewarm_video_cache(videos_on_page):
