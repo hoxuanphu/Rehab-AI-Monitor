@@ -12453,10 +12453,12 @@ def main():
     # Khởi tạo hoặc khôi phục active_tab
     if 'active_tab' not in st.session_state or st.session_state.active_tab not in tab_titles:
         st.session_state.active_tab = tab_titles[0]
+        st.session_state.active_tab_widget = tab_titles[0]
         
     if st.session_state.get('trigger_tab_switch'):
         if st.session_state.trigger_tab_switch in tab_titles:
             st.session_state.active_tab = st.session_state.trigger_tab_switch
+            st.session_state.active_tab_widget = st.session_state.trigger_tab_switch
         st.session_state.trigger_tab_switch = None
         st.rerun()
 
@@ -12474,6 +12476,7 @@ def main():
         st.session_state.active_tab = selected_tab
     else:
         selected_tab = st.session_state.active_tab
+        st.session_state.active_tab_widget = selected_tab
 
     import streamlit.components.v1 as components
     components.html("""
