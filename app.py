@@ -8958,7 +8958,8 @@ def hien_thi_form_danh_gia_bac_si():
 
             col_main_h, col_del_h = st.columns([12, 1])
             with col_main_h:
-                expander_label = f"🕒 {eval_time_formatted} | BN: {h.get('patient_username', 'N/A')} | BS: {doc_label}{mine_tag} | KQ: {h.get('doctor_result', '')}"
+                exercise_name = h.get('exercise', 'N/A')
+                expander_label = f"🕒 {eval_time_formatted} | BN: {h.get('patient_username', 'N/A')} | Động tác: {exercise_name} | BS: {doc_label}{mine_tag} | KQ: {h.get('doctor_result', '')}"
                 with st.expander(expander_label):
                     st.markdown(
                         f"**Kết quả:** {result_badge_doc(h.get('doctor_result', ''))} &nbsp;&nbsp;"
@@ -9439,7 +9440,9 @@ def hien_thi_noi_dung_ket_qua(selected_v, my_evals):
             st.markdown("---")
             st.markdown("### 📑 KẾT QUẢ ĐÁNH GIÁ KỸ THUẬT (NCKH)")
             for r in reversed(v_res):
-                with st.expander(f"📅 Phiếu ngày {r.get('timestamp', 'N/A')} - KQ: {r.get('general_result', 'N/A')}", expanded=False):
+                exercises_str = ", ".join(r.get('exercises', []))
+                exercises_display = f" - Động tác: {exercises_str}" if exercises_str else ""
+                with st.expander(f"📅 Phiếu ngày {r.get('timestamp', 'N/A')}{exercises_display} - KQ: {r.get('general_result', 'N/A')}", expanded=False):
                     rc1, rc2, rc3 = st.columns(3)
                     with rc1:
                         st.write(f"• Người PV: {r.get('interviewer')}")
@@ -10060,7 +10063,9 @@ def hien_thi_tab_phieu_nckh():
         for i, item in enumerate(reversed(display_list)):
             col_h_main, col_h_del = st.columns([12, 1])
             with col_h_main:
-                with st.expander(f"📅 Phiếu ngày {item.get('timestamp', 'N/A')} - BN: {item.get('subject_code', 'N/A')} - KQ: {item.get('general_result', 'N/A')}"):
+                exercises_str = ", ".join(item.get('exercises', []))
+                exercises_display = f" - Động tác: {exercises_str}" if exercises_str else ""
+                with st.expander(f"📅 Phiếu ngày {item.get('timestamp', 'N/A')} - BN: {item.get('subject_code', 'N/A')}{exercises_display} - KQ: {item.get('general_result', 'N/A')}"):
                     col_i1, col_i2, col_i3 = st.columns(3)
                     with col_i1:
                         st.markdown("**📌 Thông tin chung**")
