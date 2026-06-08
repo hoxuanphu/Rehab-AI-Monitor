@@ -8949,14 +8949,21 @@ def hien_thi_form_danh_gia_bac_si():
             doc_label = h.get('doctor_name') or h.get('doctor_username', 'N/A')
             mine_tag = " 👤" if is_mine else ""
 
+            eval_time = h.get('time', 'N/A')
+            try:
+                dt = datetime.strptime(eval_time, "%Y-%m-%d %H:%M:%S")
+                eval_time_formatted = dt.strftime("%H:%M - %d/%m/%Y")
+            except:
+                eval_time_formatted = eval_time
+
             col_main_h, col_del_h = st.columns([12, 1])
             with col_main_h:
-                expander_label = f"🕒 {h.get('time', 'N/A')} | BN: {h.get('patient_username', 'N/A')} | BS: {doc_label}{mine_tag} | KQ: {h.get('doctor_result', '')}"
+                expander_label = f"🕒 {eval_time_formatted} | BN: {h.get('patient_username', 'N/A')} | BS: {doc_label}{mine_tag} | KQ: {h.get('doctor_result', '')}"
                 with st.expander(expander_label):
                     st.markdown(
                         f"**Kết quả:** {result_badge_doc(h.get('doctor_result', ''))} &nbsp;&nbsp;"
                         f"**Bác sĩ/KTV:** `{doc_label}` &nbsp;&nbsp;"
-                        f"**Thời gian:** `{h.get('time', 'N/A')}`",
+                        f"**Thời gian:** `{eval_time_formatted}`",
                         unsafe_allow_html=True
                     )
                     col_h1, col_h2 = st.columns(2)
@@ -9184,7 +9191,14 @@ def hien_thi_noi_dung_ket_qua(selected_v, my_evals):
             title_color = "#00CED1" if is_ai else "#ffd700"
             icon = "🤖" if is_ai else "👨‍⚕️"
             
-            with st.expander(f"{icon} Đánh giá ngày {e.get('time', 'N/A')} - Bài tập: {e.get('exercise', 'N/A')}", expanded=True):
+            eval_time = e.get('time', 'N/A')
+            try:
+                dt = datetime.strptime(eval_time, "%Y-%m-%d %H:%M:%S")
+                eval_time_formatted = dt.strftime("%H:%M - %d/%m/%Y")
+            except:
+                eval_time_formatted = eval_time
+
+            with st.expander(f"{icon} Đánh giá ngày {eval_time_formatted} - Bài tập: {e.get('exercise', 'N/A')}", expanded=True):
                 is_light = st.session_state.theme == 'light'
                 eval_card_bg = "rgba(255, 255, 255, 1)" if is_light else "rgba(0,0,0,0.2)"
                 eval_card_border = "#eee" if is_light else f"{title_color}44"
@@ -11827,11 +11841,16 @@ def hien_thi_danh_sach_video_fragment(user_role):
                 doc_eval = doc_eval_lookup.get(ev_key)
 
                 display_status = v['status']
-                if user_role == "Bác sĩ / KTV PHCN":
-                    if doc_eval:
-                        display_status = "Đã đánh giá"
-                    else:
-                        display_status = "Đang chờ bác sĩ đánh giá"
+                if doc_eval:
+                    eval_time = doc_eval.get('time', 'N/A')
+                    try:
+                        dt = datetime.strptime(eval_time, "%Y-%m-%d %H:%M:%S")
+                        eval_time_formatted = dt.strftime("%H:%M - %d/%m/%Y")
+                    except:
+                        eval_time_formatted = eval_time
+                    display_status = f"Đã đánh giá ({eval_time_formatted})"
+                elif user_role == "Bác sĩ / KTV PHCN":
+                    display_status = "Đang chờ bác sĩ đánh giá"
 
                 with st.expander(f"🎬 {v['full_name']} - {v['exercise']} ({v['time']}) - {display_status}"):
                     # Tỷ lệ cột [1.3, 1.0] để nới rộng video hiển thị vừa vặn hơn
@@ -12003,8 +12022,14 @@ def hien_thi_danh_sach_video_fragment(user_role):
                             
                             # HIỂN THỊ ĐÁNH GIÁ CỦA BÁC SĨ (GROUND TRUTH) CHO NCV
                             if doc_eval:
+                                eval_time = doc_eval.get('time', 'N/A')
+                                try:
+                                    dt = datetime.strptime(eval_time, "%Y-%m-%d %H:%M:%S")
+                                    eval_time_formatted = dt.strftime("%H:%M - %d/%m/%Y")
+                                except:
+                                    eval_time_formatted = eval_time
                                 with st.expander("🩺 ĐÁNH GIÁ CHUYÊN MÔN (GROUND TRUTH)", expanded=True):
-                                    st.success(f"**Bác sĩ:** {doc_eval.get('doctor_name', 'Bác sĩ')}")
+                                    st.success(f"**Bác sĩ:** {doc_eval.get('doctor_name', 'Bác sĩ')} | 🕒 **Thời gian đánh giá:** {eval_time_formatted}")
                                     st.write(f"**Kết quả:** {doc_eval['doctor_result']}")
                                     if doc_eval.get('comments_ncv'):
                                         st.markdown(f"<div style='background: rgba(0,198,255,0.1); padding: 10px; border-radius: 5px; border-left: 3px solid #00c6ff;'><b>💬 Ghi chú cho NCV:</b> {doc_eval['comments_ncv']}</div>", unsafe_allow_html=True)
