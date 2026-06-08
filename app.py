@@ -9887,6 +9887,34 @@ def hien_thi_tab_phieu_nckh():
     user_role = st.session_state.user_info.get('role', 'Bệnh nhân')
     selected_video = st.session_state.get('current_eval_video')
     
+    # Lấy đánh giá lâm sàng hiện tại nếu có để điền sẵn vào phần IV
+    existing_eval = None
+    if selected_video:
+        evals_db = load_data(EVALUATIONS_FILE)
+        existing_eval = next((e for e in evals_db if 
+                             e.get('patient_username') == selected_video['username'] and 
+                             e.get('video_name') == selected_video.get('video_name') and
+                             e.get('doctor_username') != "AI_Researcher"), None)
+                             
+    # Giá trị mặc định cho Phần IV (Ground Truth)
+    options_result = ["Đúng", "Sai", "Gần đúng"]
+    default_res_idx = 0
+    if existing_eval and existing_eval.get('doctor_result') in options_result:
+        default_res_idx = options_result.index(existing_eval['doctor_result'])
+        
+    options_plan = ["Tiếp tục", "Chuyển bài", "Khám lại"]
+    default_plan_idx = 0
+    if existing_eval and existing_eval.get('plan') in options_plan:
+        default_plan_idx = options_plan.index(existing_eval['plan'])
+        
+    default_errors = []
+    if existing_eval and isinstance(existing_eval.get('errors'), list):
+        default_errors = existing_eval['errors']
+        
+    default_comment = ""
+    if existing_eval:
+        default_comment = existing_eval.get('comments', '')
+    
     # --- LOGIC TỰ ĐỘNG ĐIỀN THÔNG TIN TỪ KHAI BÁO CỦA BN ---
     symptoms_data = load_data(SYMPTOMS_FILE)
     
@@ -9974,11 +10002,11 @@ def hien_thi_tab_phieu_nckh():
         
         col5, col6 = st.columns(2)
         with col5:
-            general_result = st.radio("Kết quả:", ["Đúng", "Sai", "Gần đúng"], index=0, horizontal=True)
-            plan = st.radio("Chỉ định:", ["Tiếp tục", "Chuyển bài", "Khám lại"], index=0, horizontal=True)
+            general_result = st.radio("Kết quả:", ["Đúng", "Sai", "Gần đúng"], index=default_res_idx, horizontal=True)
+            plan = st.radio("Chỉ định:", ["Tiếp tục", "Chuyển bài", "Khám lại"], index=default_plan_idx, horizontal=True)
         with col6:
-            errors = st.multiselect("Lỗi sai:", ["Vị trí tay chưa đúng", "Biên độ chưa đạt", "Tốc độ quá nhanh/chậm", "Sai tư thế thân người"])
-        specialist_comment = st.text_area("Nhận xét chuyên môn của Bác sĩ/KTV PHCN:")
+            errors = st.multiselect("Lỗi sai:", ["Vị trí tay chưa đúng", "Biên độ chưa đạt", "Tốc độ quá nhanh/chậm", "Sai tư thế thân người"], default=default_errors)
+        specialist_comment = st.text_area("Nhận xét chuyên môn của Bác sĩ/KTV PHCN:", value=default_comment)
 
         # V. THÔNG TIN VIDEO
         st.markdown("### V. THÔNG TIN DỮ LIỆU VIDEO")
