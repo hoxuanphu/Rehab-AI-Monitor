@@ -387,6 +387,26 @@ def _loc_bo_trung_video_danh_sach(videos):
     return out
 
 
+def _lay_thoi_gian_upload_video(v):
+    """Thời gian BN upload — ưu tiên parse từ tên file gốc."""
+    t = _parse_upload_time_from_filename(v.get("video_path") or v.get("video_name"))
+    return t or v.get("time") or "N/A"
+
+
+def _lay_video_nghien_cuu_chinh_thuc(video_list, evals=None):
+    """Chỉ giữ 8 video gốc (4 BN × 2 bài tập) đã có nhận xét bác sĩ/KTV."""
+    evals = _dedup_evaluations(evals if evals is not None else load_data(EVALUATIONS_FILE))
+    doc_keys = _lay_khoa_video_da_danh_gia_bac_si(evals)
+    if not doc_keys:
+        return []
+    out = [
+        v for v in (video_list or [])
+        if not _la_ban_ghi_video_mo_co(v)
+        and (v.get("username"), v.get("video_name"), v.get("exercise")) in doc_keys
+    ]
+    return _loc_bo_trung_video_danh_sach(out)
+
+
 # --- OPTIMIZED CACHING FOR FASTER PAGE LOADS ---
 @st.cache_data(show_spinner=False)
 def _check_video_valid_cached(path, mtime, size):
@@ -14291,7 +14311,8 @@ def reset_vid_list_page():
 
 @st.fragment
 def hien_thi_danh_sach_video_fragment(user_role):
-    video_list = load_video_list_an_toan()
+    evals_db = _dedup_evaluations(load_data(EVALUATIONS_FILE))
+    video_list = _lay_video_nghien_cuu_chinh_thuc(load_video_list_an_toan(), evals_db)
     
     if st.session_state.get('delete_success'):
         st.toast(f"🗑️ {st.session_state.delete_success}", icon="✅")
@@ -14304,8 +14325,10 @@ def hien_thi_danh_sach_video_fragment(user_role):
                 tai_lai_video_list_tu_cloud()
             st.rerun(scope="app")
     else:
-        # Load database evaluations outside the loop for extreme speed optimization
-        evals_db = load_data(EVALUATIONS_FILE)
+        st.caption(
+            f"📋 Hiển thị **{len(video_list)} video nghiên cứu** "
+            "(4 bệnh nhân × 2 bài tập) đã có đánh giá bác sĩ/KTV."
+        )
 
         # --- Tối ưu: xây dựng lookup dict O(1) thay vì O(n) linear scan trong vòng lặp ---
         ai_eval_lookup = {}    # key: (patient_username, video_name, exercise)
@@ -14498,7 +14521,8 @@ def hien_thi_danh_sach_video_fragment(user_role):
                 elif user_role == "Bác sĩ / KTV PHCN":
                     display_status = "Đang chờ bác sĩ đánh giá"
 
-                with st.expander(f"🎬 {v['full_name']} - {v['exercise']} ({v['time']}) - {display_status}"):
+                upload_time = _lay_thoi_gian_upload_video(v)
+                with st.expander(f"🎬 {v['full_name']} - {v['exercise']} (📤 {upload_time}) - {display_status}"):
                     # Tỷ lệ cột [1.3, 1.0] để nới rộng video hiển thị vừa vặn hơn
                     col_v1, col_v2 = st.columns([1.3, 1.0])
                     with col_v1:
@@ -15797,14 +15821,9 @@ def main():
     # Tự động chọn video đầu tiên nếu chưa chọn để tăng tốc độ hiển thị kết quả lập tức cho Bác sĩ & NCV
     if user_role in ["Bác sĩ / KTV PHCN", "Nghiên cứu viên"]:
         if not st.session_state.get('current_eval_video'):
-            all_vids = load_data(VIDEOS_FILE)
+            all_vids = _lay_video_nghien_cuu_chinh_thuc(load_video_list_an_toan())
             if all_vids:
-                # Ưu tiên các video đã được phân tích AI
-                analyzed_vids = [v for v in all_vids if v.get('status') == "Đã phân tích"]
-                if analyzed_vids:
-                    st.session_state.current_eval_video = analyzed_vids[0]
-                else:
-                    st.session_state.current_eval_video = all_vids[0]
+                st.session_state.current_eval_video = all_vids[0]
 
     if user_role == "Quản trị viên":
         tab_titles = ["🏠 TRANG CHỦ", "🛠️ QUẢN TRỊ VIÊN", "📚 THÔNG TIN TỔNG HỢP", "👥 HỒ SƠ ĐỀ TÀI & ĐỘI NGŨ CHUYÊN GIA", "💬 PHẢN HỒI"]
