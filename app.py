@@ -304,18 +304,18 @@ def get_data_science_logo_base64():
     import pathlib as _pl, base64 as _b64, re as _re
     script_dir = _pl.Path(__file__).resolve().parent
     
-    # 1. Thu doc tu file anh JPG truc tiep
-    search_paths = [
-        script_dir / "assets" / "logo_data_science_huph.jpg",
-        script_dir / "logo_data_science_huph.jpg",
-        _pl.Path.cwd() / "assets" / "logo_data_science_huph.jpg",
-        _pl.Path.cwd() / "logo_data_science_huph.jpg"
-    ]
+    # 1. Thu doc tu file anh JPG/PNG truc tiep
+    search_paths = []
+    for base in (script_dir, _pl.Path.cwd(), _pl.Path("/app"), _pl.Path("/home/user/app")):
+        for name in ("logo_data_science_huph.jpg", "logo_data_science_huph.png", "logo_data_science_huph.JPG"):
+            search_paths.append(base / "assets" / name)
+            search_paths.append(base / name)
     for p in search_paths:
         if p.exists():
             try:
+                mime = "image/png" if p.suffix.lower() == ".png" else "image/jpeg"
                 with open(p, "rb") as _f:
-                    return f"data:image/jpeg;base64,{_b64.b64encode(_f.read()).decode()}"
+                    return f"data:{mime};base64,{_b64.b64encode(_f.read()).decode()}"
             except Exception:
                 pass
                 
@@ -330,7 +330,61 @@ def get_data_science_logo_base64():
             except Exception:
                 pass
                 
-    return ""
+    return get_school_logo_base64()
+
+
+def _dedup_evaluations(evals):
+    """Giữ bản đánh giá mới nhất theo (BN, video, bài tập, người đánh giá)."""
+    best = {}
+    for e in evals or []:
+        key = (
+            e.get("patient_username"),
+            e.get("video_name"),
+            e.get("exercise"),
+            e.get("doctor_username"),
+        )
+        t_new = _parse_vn_datetime(e.get("time")) or datetime.min
+        if key not in best:
+            best[key] = e
+            continue
+        t_old = _parse_vn_datetime(best[key].get("time")) or datetime.min
+        if t_new >= t_old:
+            best[key] = e
+    result = list(best.values())
+    result.sort(
+        key=lambda x: _parse_vn_datetime(x.get("time")) or datetime.min,
+        reverse=True,
+    )
+    return result
+
+
+def _lay_khoa_video_da_danh_gia_bac_si(evals, patient_username=None):
+    """Các video gốc đã có nhận xét bác sĩ/KTV (không tính AI)."""
+    keys = set()
+    for e in _dedup_evaluations(evals):
+        if e.get("doctor_username") == "AI_Researcher":
+            continue
+        pu = e.get("patient_username")
+        if patient_username and pu != patient_username:
+            continue
+        vn = e.get("video_name")
+        ex = e.get("exercise")
+        if pu and vn and ex:
+            keys.add((pu, vn, ex))
+    return keys
+
+
+def _loc_bo_trung_video_danh_sach(videos):
+    """Mỗi BN + video + bài tập chỉ giữ một bản ghi."""
+    seen = set()
+    out = []
+    for v in videos or []:
+        key = (v.get("username"), v.get("video_name"), v.get("exercise"))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(v)
+    return out
 
 
 # --- OPTIMIZED CACHING FOR FASTER PAGE LOADS ---
@@ -2081,7 +2135,7 @@ def lay_danh_gia_ai_benh_nhan(username, video_name=None, exercise=None):
         key=lambda e: _parse_vn_datetime(e.get("time")) or datetime.min,
         reverse=True,
     )
-    return ai
+    return _dedup_evaluations(ai)
 
 
 def khoi_phuc_lich_su_tu_danh_gia(history=None):
@@ -11428,7 +11482,7 @@ def hien_thi_form_danh_gia_bac_si():
 def hien_thi_ket_qua_cho_benh_nhan(target_username=None):
     st.markdown("## 📊 KẾT QUẢ ĐÁNH GIÁ TỔNG HỢP")
     
-    evals = load_data(EVALUATIONS_FILE)
+    evals = _dedup_evaluations(load_data(EVALUATIONS_FILE))
     user_role = st.session_state.user_info.get('role')
     
     if target_username:
@@ -11444,23 +11498,21 @@ def hien_thi_ket_qua_cho_benh_nhan(target_username=None):
     
     has_ai_eval = any(e.get('doctor_username') == "AI_Researcher" for e in my_evals)
     
-    # 1. TẢI DỮ LIỆU LỊCH SỬ VIDEO ĐÃ ĐƯỢC PHÂN TÍCH
+    # 1. CHỈ HIỂN THỊ VIDEO GỐC BN ĐÃ CÓ NHẬN XÉT BÁC SĨ/KTV (8 video nghiên cứu)
     my_history_vids = []
-    if has_ai_eval:
-        all_vids = load_data(VIDEOS_FILE)
-        all_evals = load_data(EVALUATIONS_FILE)
-        
-        if user_role == "Bệnh nhân":
-            p_username = username if username else st.session_state.user_info['username']
-            # Bệnh nhân thấy các video của mình đã có kết quả AI hoặc bác sĩ
-            sent_video_names = [e.get('video_name') for e in all_evals 
-                                if e.get('patient_username') == p_username]
-            my_history_vids = [v for v in reversed(all_vids) 
-                              if v.get('username') == p_username and v.get('video_name') in sent_video_names]
-        else:
-            # Bác sĩ và NCV thấy tất cả các video ĐÃ ĐƯỢC ĐÁNH GIÁ (bởi bất kỳ ai)
-            sent_video_names = [e.get('video_name') for e in all_evals]
-            my_history_vids = [v for v in reversed(all_vids) if v.get('video_name') in sent_video_names]
+    all_vids = load_data(VIDEOS_FILE)
+    if user_role == "Bệnh nhân":
+        p_username = username if username else st.session_state.user_info['username']
+        doc_keys = _lay_khoa_video_da_danh_gia_bac_si(evals, patient_username=p_username)
+    else:
+        doc_keys = _lay_khoa_video_da_danh_gia_bac_si(evals)
+
+    my_history_vids = [
+        v for v in reversed(all_vids)
+        if not _la_ban_ghi_video_mo_co(v)
+        and (v.get("username"), v.get("video_name"), v.get("exercise")) in doc_keys
+    ]
+    my_history_vids = _loc_bo_trung_video_danh_sach(my_history_vids)
 
     # 2. XÁC ĐỊNH TRẠNG THÁI "CHỜ KẾT QUẢ" (FRESH SESSION)
     is_fresh_session = st.session_state.get('fresh_session', False)
@@ -11607,8 +11659,12 @@ def hien_thi_noi_dung_ket_qua(selected_v, my_evals):
         return "❌ Cần tập thêm"
 
     if selected_v:
-        # CHỈ hiển thị nhận xét của video được chọn
-        v_evals = [e for e in reversed(my_evals) if e.get('video_name') == selected_v.get('video_name') and e.get('exercise') == selected_v.get('exercise')]
+        # CHỈ hiển thị nhận xét của video được chọn (bỏ trùng lặp AI/bác sĩ)
+        v_evals = _dedup_evaluations([
+            e for e in my_evals
+            if e.get('video_name') == selected_v.get('video_name')
+            and e.get('exercise') == selected_v.get('exercise')
+        ])
         if not v_evals:
             st.info("Không có nhận xét nào cho video này.")
         for e in v_evals:
@@ -14628,7 +14684,7 @@ def _render_main_tab_content(tab_titles, user_role):
         if st.session_state.get('trigger_tab_switch'):
             if st.session_state.trigger_tab_switch in tab_titles:
                 st.session_state.active_tab = st.session_state.trigger_tab_switch
-                st.session_state.active_tab_widget = st.session_state.trigger_tab_switch
+                st.session_state.pop("active_tab_widget", None)
             st.session_state.trigger_tab_switch = None
             chuyen_tab_bang_js(st.session_state.active_tab)
 
@@ -14646,7 +14702,6 @@ def _render_main_tab_content(tab_titles, user_role):
             st.session_state.active_tab = selected_tab
         else:
             selected_tab = st.session_state.active_tab
-            st.session_state.active_tab_widget = selected_tab
 
         import streamlit.components.v1 as components
         components.html("""
@@ -15786,7 +15841,7 @@ def main():
     # Khởi tạo hoặc khôi phục active_tab
     if 'active_tab' not in st.session_state or st.session_state.active_tab not in tab_titles:
         st.session_state.active_tab = tab_titles[0]
-        st.session_state.active_tab_widget = tab_titles[0]
+        st.session_state.pop("active_tab_widget", None)
         
     _render_main_tab_content(tab_titles, user_role)
 
