@@ -14,13 +14,22 @@ pinned: false
 
 **Hệ thống giám sát tập luyện Phục hồi chức năng từ xa dựa trên Trí tuệ nhân tạo (AI) và Thị giác máy tính - Giải pháp Clinical-Grade chuyên nghiệp.**
 
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://quynhphuong1209-rehab-ai-monitor-2026.hf.space/)
+[![Hugging Face Spaces](https://img.shields.io/badge/🤗%20Hugging%20Face-Spaces-blue?style=for-the-badge)](https://quynhphuong1209-rehab-ai-monitor-2026.hf.space/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## 📚 Giới thiệu đề tài
-Đây là sản phẩm thuộc **Đề tài Nghiên cứu Khoa học cấp Trường (2025-2026)** tại trường **Đại học Y tế Công cộng**, phối hợp cùng **Bệnh viện Đa khoa Phạm Ngọc Thạch**. 
+## 📚 Giới thiệu đề tài & Đặt vấn đề (Introduction & Rationale)
 
-Hệ thống giúp tự động hóa việc giám sát và đánh giá các bài tập phục hồi chức năng (PHCN) cho bệnh nhân viêm quanh khớp vai, đảm bảo bệnh nhân tập luyện đúng kỹ thuật ngay cả khi ở nhà thông qua phân tích AI thời gian thực.
+### Đặt vấn đề (Problem Statement)
+Trong những năm gần đây, cùng với sự gia tăng của các bệnh lý cơ xương khớp, chấn thương thể thao và đột quỵ, nhu cầu phục hồi chức năng (PHCN) trên toàn thế giới ngày càng tăng cao. Theo Tổ chức Y tế Thế giới (WHO), hiện có khoảng 2,4 tỷ người cần ít nhất một hình thức phục hồi chức năng, chiếm gần một phần ba dân số toàn cầu (1, 2). Tại Việt Nam, theo Hội Phục hồi chức năng Việt Nam (2023), có khoảng 7,06% dân số từ 2 tuổi trở lên là người khuyết tật, trong đó phần lớn cần được can thiệp PHCN để cải thiện chức năng và tái hòa nhập cộng đồng. Đồng thời, tỷ lệ người cao tuổi chiếm 11,9% dân số và đang tăng nhanh, kéo theo sự gia tăng các bệnh lý thoái hóa xương khớp, rối loạn vận động và bệnh lý thần kinh (3). Mặc dù nhu cầu PHCN lớn, song năng lực cung cấp dịch vụ này tại Việt Nam vẫn còn hạn chế. Theo thống kê của Bộ Y tế (2023), trung bình 10.000 người dân chỉ có 0,25 nhân viên phục hồi chức năng, thấp hơn đáng kể so với khuyến nghị của WHO là 0,5–1 người/10.000 dân (4). Ngoài ra, chỉ khoảng 40% người bệnh có khả năng tiếp cận đầy đủ dịch vụ PHCN do hạn chế về nhân lực, cơ sở vật chất và điều kiện địa lý (5). Thực tế này khiến nhiều bệnh nhân phải tự tập luyện tại nhà sau khi xuất viện mà thiếu sự giám sát chuyên môn, dẫn đến nguy cơ tập sai động tác, giảm hiệu quả điều trị và kéo dài thời gian hồi phục.
+
+Trước thực trạng đó, việc ứng dụng công nghệ Trí tuệ nhân tạo (Artificial Intelligence – AI) và Thị giác máy tính (Computer Vision – CV) vào giám sát tập luyện phục hồi chức năng từ xa được xem là xu hướng tất yếu. Trên thế giới, nhiều hệ thống AI hỗ trợ PHCN đã được thử nghiệm hoặc triển khai tại các quốc gia như Hoa Kỳ, Nhật Bản, Hàn Quốc với kết quả tích cực. Nghiên cứu của Ali Abedi và cộng sự (2024) cho thấy việc tích hợp AI vào chương trình phục hồi từ xa giúp nâng cao chất lượng đánh giá bài tập và cá nhân hóa phác đồ điều trị, góp phần cải thiện kết quả lâm sàng so với phương pháp truyền thống (6). Tại Việt Nam, một số đơn vị tiên phong như Trung tâm ASINA đã triển khai ứng dụng AI trong phục hồi cơ xương khớp, giúp bệnh nhân tập luyện từ xa một cách hiệu quả và tiện lợi (7). Bên cạnh đó, Bệnh viện C Đà Nẵng cũng đã tích hợp AI và công nghệ thực tế ảo (Virtual Reality – VR) vào quy trình điều trị, mang lại chất lượng sống tốt hơn cho hàng trăm bệnh nhân (8). Tuy nhiên, hiện nay chưa có nhiều hệ thống trong nước tích hợp đầy đủ khả năng nhận diện tư thế vận động theo thời gian thực, phản hồi trực quan, đồng thời lưu trữ và phân tích dữ liệu tập luyện phục vụ cho việc theo dõi tiến trình phục hồi của bác sĩ. Vì vậy, việc phát triển một nền tảng ứng dụng thông minh có khả năng giám sát, hỗ trợ và kết nối giữa bệnh nhân – bác sĩ – kỹ thuật viên là nhu cầu cấp thiết trong bối cảnh chăm sóc sức khỏe từ xa ngày càng được chú trọng. 
+
+Tại khoa Phục hồi chức năng Bệnh viện Đa khoa Phạm Ngọc Thạch, nhu cầu theo dõi và hỗ trợ người bệnh luyện tập ngày càng tăng, đặc biệt với các trường hợp luyện tập lâu dài tại nhà. Tuy nhiên, hiện nay việc giám sát chủ yếu thực hiện trực tiếp tại bệnh viện, khi về nhà người bệnh tự tập theo video hoặc tài liệu hướng dẫn mà không có sự kiểm soát chuyên môn. Điều này dẫn đến nguy cơ tập sai động tác, giảm hiệu quả điều trị và khó theo dõi tiến trình phục hồi. Tại bệnh viện hiện nay vẫn chưa có nghiên cứu hay hệ thống nào ứng dụng Trí tuệ nhân tạo (AI) và Thị giác máy tính (Computer Vision) để giám sát tập luyện từ xa khiến việc thu thập dữ liệu, đánh giá kết quả và cải tiến phác đồ điều trị còn hạn chế. Xuất phát từ thực tiễn trên, nhóm nghiên cứu chúng tôi quyết định thực hiện đề tài: **“Phát triển mô hình thử nghiệm giám sát tập luyện Phục hồi chức năng từ xa dựa trên Trí tuệ nhân tạo (AI) và Thị giác máy tính (Computer Vision) tại Bệnh viện Đa khoa Phạm Ngọc Thạch – Trường Đại học Y tế Công cộng (2025–2026)”**.
+
+### 🎯 Mục tiêu nghiên cứu (Research Objectives)
+*   **Mục tiêu 1:** Xây dựng mô hình nhận diện và đánh giá 2-3 động tác phục hồi chức năng cơ bản (ví dụ: giơ tay ngang vai, co gối, xoay cổ tay) bằng công nghệ thị giác máy tính (pose estimation).
+*   **Mục tiêu 2:** So sánh độ chính xác của mô hình với đánh giá thủ công (ví dụ: góc khớp, số lần lặp) trên một tập dữ liệu nhỏ (do nhóm tự quay hoặc dùng dữ liệu mở).
+
 
 ## ✨ Tính năng nổi bật (v3.2 Updated)
 - 💎 **Thẩm mỹ Lâm sàng:** Giao diện sử dụng font chữ 'Times New Roman' chuẩn mực, thiết kế card-based hiện đại với hiệu ứng Glassmorphism.
@@ -44,6 +53,86 @@ Hệ thống tự động thay đổi cấu trúc dựa trên vai trò người 
 - **Bác sĩ / KTV:** Quản lý bệnh nhân, Giao diện quản lý & Phê duyệt video (Trình xem video kép, JavaScript Auto-Tab), Bộ đánh giá lâm sàng chuyên môn (Ground Truth Entry), Quản lý phác đồ.
 - **Nghiên cứu viên:** Cấu hình tham số mô hình AI, Phân tích sâu & Trích xuất tọa độ (Xuất CSV/JSON), Phân tích đa chiều (ROM Trend, Boxplot, Radar Chart), Bảng đối sánh 3 giai đoạn PHCN, Đồng bộ Ground Truth từ Bác sĩ.
 - **Quản trị viên:** Bộ Metric Cards tổng quan, Biểu đồ thống kê trực quan (Cơ cấu vai trò, bài tập phổ biến), Bảng quản trị cốt lõi (hợp nhất mọi thông tin bệnh nhân, AI, bác sĩ), Nhật ký hoạt động toàn hệ thống (Admin Log - Xuất CSV), Dọn dẹp & Reset hệ thống.
+
+<!-- CLINICAL_FINDINGS_START -->
+
+## 📊 Kết quả Nghiên cứu & Đánh giá Lâm sàng (Clinical & Research Findings)
+
+> [!NOTE]
+> Báo cáo kết quả nghiên cứu khoa học và đánh giá lâm sàng được cập nhật tự động từ cơ sở dữ liệu Hugging Face Dataset.
+> *Thời gian cập nhật dữ liệu gần nhất: **09/06/2026 08:17***
+
+### 1. Số liệu Thống kê Nghiên cứu viên (NCV) Thu thập (n = 8 bệnh án)
+
+Hệ thống đã ghi nhận **8** hồ sơ bệnh án chi tiết từ các phiên tập luyện của bệnh nhân phục hồi chức năng:
+
+*   **Thông tin Nhân khẩu học & Lâm sàng:**
+    *   **Giới tính:** **Nữ (2)**: 8
+    *   **Độ tuổi trung bình:** **55.5 tuổi** (Dao động từ 39 đến 71 tuổi)
+    *   **Khu vực sinh sống:** **Nội thành (1)**: 8
+    *   **Bên vai tổn thương:** **Vai phải (2)**: 6, **Cả hai vai (3)**: 2
+*   **Tình trạng Bệnh lý:**
+    *   **Thời gian mắc bệnh:** **>= 3 tháng (3)**: 6, **1 – 3 tháng (2)**: 2
+    *   **Mức độ đau (VAS):** **Trung bình (4–6)**: 6, **Nặng (7–10)**: 2
+    *   **Mức độ nghiêm trọng:** **Trung bình**: 6, **Nặng**: 2
+*   **Phương thức ghi hình thu thập dữ liệu:**
+    *   **Thiết bị ghi hình:** **Điện thoại (1)**: 8
+
+### 2. Kết quả Đánh giá Phục hồi Chức năng (PHCN) của Bác sĩ (n = 8 lượt đánh giá)
+
+Đội ngũ Bác sĩ và Kỹ thuật viên (KTV) từ **Bệnh viện Đa khoa Phạm Ngọc Thạch** đã tiến hành đánh giá lâm sàng (Ground Truth) song song với hệ thống AI:
+
+| Chỉ số Đánh giá | Số lượng lượt đánh giá | Tỷ lệ phần trăm (%) |
+| :--- | :---: | :---: |
+| 🟢 **Tập luyện Đúng (Đạt yêu cầu)** | 0 | 0.0% |
+| 🟡 **Tập luyện Gần đúng (Cần sửa)** | 6 | 75.0% |
+| 🔴 **Tập luyện Sai (Không đạt)** | 2 | 25.0% |
+| **Tổng số lượt đánh giá** | **8** | **100%** |
+
+*   **Phác đồ đề xuất tiếp theo của Bác sĩ:**
+    *   **Tiếp tục**: 8
+
+### 3. Phân tích các Lỗi cử động phổ biến của Bệnh nhân
+
+Dựa trên dữ liệu dán nhãn của Bác sĩ, các lỗi kỹ thuật tập luyện bệnh nhân thường mắc phải bao gồm:
+
+| Thứ tự | Loại lỗi kỹ thuật | Số lần ghi nhận | Tỷ lệ gặp (%) |
+| :---: | :--- | :---: | :---: |
+| 1 | ❌ **Sai tư thế thân người** | 5 | 62.5% |
+| 2 | ❌ **Vị trí tay chưa đúng** | 2 | 25.0% |
+| 3 | ❌ **Biên độ chưa đạt** | 1 | 12.5% |
+
+### 4. Nhận xét Lâm sàng Chi tiết từ Bác sĩ (Các ca đánh giá gần đây nhất)
+
+> [!TIP]
+> Dưới đây là các ý kiến chuyên môn lâm sàng trực tiếp từ Bác sĩ điều trị đối với từng ca tập luyện:
+
+*   **Ca số 1 - Bệnh nhân: Cao Thị Thường**
+    *   *Bài tập:* Bài tập với gậy (Pulley Exercise) | *Bác sĩ đánh giá:* **Sai** (2026-06-08 12:00:25)
+    *   *Nhận xét chuyên môn:* `"cử động gập khớp vai, cánh tay cần duỗi thẳng, cử động duỗi khớp vai cánh tay cần để xoay trong. cử động xoay trong xoay ngoài cánh tay để áp sát thân mình"`
+*   **Ca số 2 - Bệnh nhân: Cao Thị Thường**
+    *   *Bài tập:* Bài tập con lắc Codman | *Bác sĩ đánh giá:* **Gần đúng** (2026-06-08 11:56:37)
+    *   *Nhận xét chuyên môn:* `"cử động dang áp khớp vai, hai chân đứng rộng ngang vai, không đứng chân trước chân sau"`
+*   **Ca số 3 - Bệnh nhân: Vũ Thị Hòa**
+    *   *Bài tập:* Bài tập với gậy (Pulley Exercise) | *Bác sĩ đánh giá:* **Gần đúng** (2026-06-08 11:27:33)
+    *   *Nhận xét chuyên môn:* `"cử động gập vai cánh tay cần duỗi thẳng hơn, cử động dang áp khớp vai thì không xoay thân mình, cử động xoay trong xoay ngoài cánh tay cần áp sát thân mình hơn"`
+*   **Ca số 4 - Bệnh nhân: Vũ Thị Hòa**
+    *   *Bài tập:* Bài tập con lắc Codman | *Bác sĩ đánh giá:* **Sai** (2026-06-08 11:21:06)
+    *   *Nhận xét chuyên môn:* `"thân người cần gập cho song song với sàn nhà. tay còn lại bám vào ghế hoặc vật cố định để tạo điêm tựa cho BN và giữ tư thế ổn định cho BN. cử động dang áp thì hai chân dang rộng bằng vai"`
+*   **Ca số 5 - Bệnh nhân: Nguyễn Thị Nga**
+    *   *Bài tập:* Bài tập với gậy (Pulley Exercise) | *Bác sĩ đánh giá:* **Gần đúng** (2026-06-08 11:17:15)
+    *   *Nhận xét chuyên môn:* `"cử động gập vai thì cánh tay thẳng, động tác dang áp khớp vai khi dang chỉ dang đến 90 độ, không xoay thân mình, cử động xoay trong xoay ngoài thì cánh tay cần áp sát thân mình"`
+*   **Ca số 6 - Bệnh nhân: Nguyễn Thị Nga**
+    *   *Bài tập:* Bài tập con lắc Codman | *Bác sĩ đánh giá:* **Gần đúng** (2026-06-08 09:29:21)
+    *   *Nhận xét chuyên môn:* `"gập thân người song song với mặt sàn, tay còn lại bám vào ghế hoặc vật cố định để tạo điểm tựa cho bệnh nhân, giúp BN giữ tư thế tốt hơn. Cử động dang áp vai thì hai chân nên dang rộng vai mà không phải chân trước chân sau"`
+*   **Ca số 7 - Bệnh nhân: Hoàng Hạnh Nguyên**
+    *   *Bài tập:* Bài tập với gậy (Pulley Exercise) | *Bác sĩ đánh giá:* **Gần đúng** (2026-06-08 09:23:21)
+    *   *Nhận xét chuyên môn:* `"cử động xoay trong, xoay ngoài cánh tay cần áp sát vào thân mình"`
+*   **Ca số 8 - Bệnh nhân: Hoàng Hạnh Nguyên**
+    *   *Bài tập:* Bài tập con lắc Codman | *Bác sĩ đánh giá:* **Gần đúng** (2026-06-08 09:16:59)
+    *   *Nhận xét chuyên môn:* `"cần gập thân người song song với mặt sàn, tay còn lại thì nên bám vào ghế hoặc vật cố định phía trước để đảm bảo đúng tư thế và tạo điểm tựa cho NB"`
+
+<!-- CLINICAL_FINDINGS_END -->
 
 ## 🏗️ Kiến trúc hệ thống (Architecture Overview)
 
