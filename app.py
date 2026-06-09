@@ -5544,6 +5544,11 @@ import traceback
 _db_lock = threading.Lock()
 _running_threads = {}
 
+# Giới hạn số video phân tích chạy SONG SONG để tránh quá tải CPU/RAM (đặc biệt trên HF Space free).
+# Các job vượt giới hạn sẽ xếp hàng đợi và tự chạy khi tới lượt.
+MAX_CONCURRENT_ANALYSIS = 2
+_analysis_semaphore = threading.BoundedSemaphore(MAX_CONCURRENT_ANALYSIS)
+
 def doc_lock_save_data(file_path, handle_fn):
     """
     Hàm tiện ích giúp đọc, xử lý và ghi lại file JSON một cách thread-safe sử dụng _db_lock
@@ -6410,6 +6415,21 @@ def bat_dau_phan_tich_background(
         nonlocal video_path
         progress_video_path = video_path
         start_t = time.time()
+
+        # HÀNG ĐỢI: chỉ cho tối đa MAX_CONCURRENT_ANALYSIS video chạy cùng lúc.
+        # Job vượt giới hạn sẽ chờ ở đây và hiển thị trạng thái "đang chờ trong hàng đợi".
+        sem_acquired = False
+        wait_started = time.time()
+        while not sem_acquired:
+            sem_acquired = _analysis_semaphore.acquire(timeout=2.0)
+            if not sem_acquired:
+                waited = time.time() - wait_started
+                write_progress(
+                    progress_video_path, "processing", username=username, video_name=video_name,
+                    progress=0.01, elapsed=time.time() - start_t, start_time=start_t,
+                    status_msg=f"⏳ Đang chờ trong hàng đợi (tối đa {MAX_CONCURRENT_ANALYSIS} video chạy song song)... {waited:.0f}s"
+                )
+
         write_progress(progress_video_path, "processing", username=username, video_name=video_name, progress=0.02, elapsed=0.0, start_time=start_t, status_msg="🚀 Đang khởi tạo luồng phân tích...")
         
         try:
@@ -6761,6 +6781,13 @@ def bat_dau_phan_tich_background(
             print(f"[BG Process] Lỗi trong background thread: {e}\n{tb}")
             elap = time.time() - start_t
             write_progress(progress_video_path, "error", username=username, video_name=video_name, progress=1.0, elapsed=elap, start_time=start_t, error_msg=str(e))
+        finally:
+            # Nhả slot hàng đợi để job tiếp theo được chạy
+            if sem_acquired:
+                try:
+                    _analysis_semaphore.release()
+                except Exception as rel_err:
+                    print(f"[BG Process] Loi nha semaphore: {rel_err}")
             
     t = threading.Thread(target=thread_target, daemon=True)
     _running_threads[video_path] = t
