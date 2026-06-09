@@ -5853,8 +5853,9 @@ def liet_ke_jobs_dang_chay():
     jobs = []
     if not os.path.exists(PROCESSED_DIR):
         return jobs
+    seen_paths = set()
     try:
-        for fn in os.listdir(PROCESSED_DIR):
+        for fn in sorted(os.listdir(PROCESSED_DIR)):
             if fn.startswith("progress_") and fn.endswith(".json"):
                 try:
                     with open(os.path.join(PROCESSED_DIR, fn), 'r', encoding='utf-8') as f:
@@ -5862,6 +5863,11 @@ def liet_ke_jobs_dang_chay():
                 except Exception:
                     continue
                 if data and data.get("status") == "processing":
+                    # Loại trùng theo video_path để tránh hiển thị/khóa key bị lặp
+                    vp_key = data.get("video_path") or fn
+                    if vp_key in seen_paths:
+                        continue
+                    seen_paths.add(vp_key)
                     jobs.append(data)
     except Exception as scan_err:
         print(f"[Jobs] Loi quet progress: {scan_err}")
@@ -5874,7 +5880,7 @@ def hien_thi_jobs_dang_chay_fragment(key_suffix=""):
     if not jobs:
         return
     st.markdown("#### 🔄 Video đang trích xuất khung xương (chạy nền — mở link ở thiết bị nào cũng theo dõi được)")
-    for job in jobs:
+    for job_idx, job in enumerate(jobs):
         vp = job.get("video_path", "")
         vname = job.get("video_name", "Video")
         prog = job.get("progress", 0.0)
@@ -5895,7 +5901,7 @@ def hien_thi_jobs_dang_chay_fragment(key_suffix=""):
             is_current = st.session_state.get("current_eval_video", {}).get("video_path") == vp
             if is_current:
                 st.caption("👁️ Đang xem")
-            elif st.button("👁️ Theo dõi", key=f"track_job_{hashlib.md5((vp + key_suffix).encode()).hexdigest()}", use_container_width=True):
+            elif st.button("👁️ Theo dõi", key=f"track_job_{key_suffix}_{job_idx}_{hashlib.md5((vp or str(job_idx)).encode()).hexdigest()[:8]}", use_container_width=True):
                 vid = None
                 try:
                     all_vids = load_data(VIDEOS_FILE)
