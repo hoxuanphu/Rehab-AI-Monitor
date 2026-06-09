@@ -5935,13 +5935,13 @@ import traceback
 _db_lock = threading.Lock()
 _running_threads = {}
 
-# Số video phân tích chạy SONG SONG. HF Space mặc định 2 (tránh OOM với video Gậy dài).
-# Ghi đè: biến môi trường MAX_CONCURRENT_ANALYSIS=4
-_hf_default_concurrent = "2" if (os.environ.get("HF_SPACE_ID") or os.environ.get("SPACE_ID") or os.path.exists("/data")) else "4"
+# Số video phân tích chạy SONG SONG. HF Space mặc định 1 (Gậy + Heavy: chạy từng video).
+# Ghi đè: biến môi trường MAX_CONCURRENT_ANALYSIS=2
+_hf_default_concurrent = "1" if (os.environ.get("HF_SPACE_ID") or os.environ.get("SPACE_ID") or os.path.exists("/data")) else "4"
 try:
     MAX_CONCURRENT_ANALYSIS = max(1, min(8, int(os.environ.get("MAX_CONCURRENT_ANALYSIS", _hf_default_concurrent))))
 except (TypeError, ValueError):
-    MAX_CONCURRENT_ANALYSIS = 2 if _hf_default_concurrent == "2" else 4
+    MAX_CONCURRENT_ANALYSIS = 1 if _hf_default_concurrent == "1" else 4
 JOB_ORPHAN_SECONDS = 90  # Không có heartbeat trong 90s → coi job bị gián đoạn, tự khởi động lại
 _analysis_semaphore = threading.BoundedSemaphore(MAX_CONCURRENT_ANALYSIS)
 
@@ -6279,8 +6279,8 @@ def hien_thi_jobs_dang_chay_fragment(key_suffix=""):
         st.markdown(f"#### 🔄 Đang phân tích **{len(jobs)}** video (chạy nền — tối đa {MAX_CONCURRENT_ANALYSIS} song song)")
         st.caption(
             f"Tiến trình lưu trên đĩa + **checkpoint**: push Git/HF hoặc crash → tự chạy lại sau ~{JOB_ORPHAN_SECONDS}s, "
-            f"**tiếp tục từ Bước 2** nếu Bước 1 đã xong (không mất % đã chạy). "
-            f"Tối đa **{MAX_CONCURRENT_ANALYSIS}** video song song."
+            f"**tiếp tục từ Bước 2** nếu Bước 1 đã xong. "
+            f"Bài **Gậy** dùng **MediaPipe Heavy** — chạy **{MAX_CONCURRENT_ANALYSIS}** video/lúc (video tiếp theo xếp hàng)."
         )
     if done_jobs:
         st.success(f"✅ **{len(done_jobs)}** video đã phân tích xong — bấm **Xem kết quả** để mở (Codman / Gậy / ...).")
@@ -6869,13 +6869,18 @@ def lay_so_khung_video(video_path):
         return 0, 15.0
 
 
-def tinh_tham_so_toc_do_phan_tich(video_path, exercise_name, model_type, skip_step, resize_width):
-    """Tự động giảm tải cho video dài — đặc biệt bài Gậy (~10k+ frame)."""
-    frames, fps = lay_so_khung_video(video_path)
+def la_bai_tap_gay(exercise_name):
     ex = str(exercise_name or "").lower()
-    is_gay = any(k in ex for k in ["gậy", "gay", "pulley", "stick"])
+    return any(k in ex for k in ["gậy", "gay", "pulley", "stick"])
+
+
+def tinh_tham_so_toc_do_phan_tich(video_path, exercise_name, model_type, skip_step, resize_width):
+    """Tự động giảm tải cho video dài — KHÔNG đổi bài Gậy (giữ MediaPipe Heavy theo cấu hình NCV)."""
+    if la_bai_tap_gay(exercise_name):
+        return model_type, skip_step, resize_width
+    frames, fps = lay_so_khung_video(video_path)
     duration = (frames / fps) if fps > 0 else 0.0
-    fast = (is_gay and frames > 2500) or frames > 6000 or duration > 240
+    fast = frames > 6000 or duration > 240
     if not fast:
         return model_type, skip_step, resize_width
     mt = str(model_type or "")
