@@ -100,6 +100,113 @@ def get_final_h264_path(video_path):
     return base + "_f.mp4"
 
 
+def sync_transcode_to_h264(src_path, dst_path=None, audio_path=None, timeout=1800):
+    """Chuyển video sang H.264 MP4 (faststart). Ghi file tạm rồi đổi tên atomic để tránh file hỏng."""
+    if not src_path or not os.path.exists(src_path):
+        return None
+    if dst_path is None:
+        dst_path = get_final_h264_path(src_path)
+    if os.path.exists(dst_path):
+        try:
+            mtime, size = os.path.getmtime(dst_path), os.path.getsize(dst_path)
+            if _check_video_valid_cached(dst_path, mtime, size):
+                v_codec, _ = get_video_codec(dst_path)
+                if v_codec == 'h264':
+                    return dst_path
+        except Exception:
+            pass
+    tmp_dst = dst_path.replace('_f.mp4', '_ftmp.mp4')
+    if tmp_dst == dst_path:
+        tmp_dst = dst_path + '.ftmp.mp4'
+    for f_clean in (dst_path, tmp_dst):
+        if os.path.exists(f_clean):
+            try:
+                os.remove(f_clean)
+            except Exception:
+                pass
+    cmd = ['ffmpeg', '-y', '-i', src_path]
+    if audio_path and os.path.exists(audio_path):
+        cmd.extend(['-i', audio_path, '-c:a', 'aac', '-map', '0:v:0', '-map', '1:a:0', '-shortest'])
+    else:
+        cmd.extend(['-map', '0:v:0', '-an'])
+    cmd.extend([
+        '-c:v', 'libx264',
+        '-pix_fmt', 'yuv420p',
+        '-preset', 'ultrafast',
+        '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
+        '-crf', '28',
+        '-movflags', '+faststart',
+        '-threads', '0',
+        '-f', 'mp4',
+        tmp_dst,
+    ])
+    try:
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout)
+        if result.returncode != 0:
+            print(f"[Transcode] FFmpeg fail ({result.returncode}): {result.stderr[-800:]}")
+            if os.path.exists(tmp_dst):
+                try:
+                    os.remove(tmp_dst)
+                except Exception:
+                    pass
+            return None
+        if not os.path.exists(tmp_dst) or os.path.getsize(tmp_dst) < 5 * 1024:
+            return None
+        mtime_f, size_f = os.path.getmtime(tmp_dst), os.path.getsize(tmp_dst)
+        if not _check_video_valid_cached(tmp_dst, mtime_f, size_f):
+            try:
+                os.remove(tmp_dst)
+            except Exception:
+                pass
+            return None
+        os.replace(tmp_dst, dst_path)
+        return dst_path
+    except Exception as transcode_err:
+        print(f"[Transcode] Error: {transcode_err}")
+        if os.path.exists(tmp_dst):
+            try:
+                os.remove(tmp_dst)
+            except Exception:
+                pass
+        return None
+
+
+def resolve_playback_video_path(video_path, sync_transcode=False):
+    """Trả về đường dẫn video phát/tải được (ưu tiên H.264 _f.mp4 hợp lệ)."""
+    if not video_path:
+        return video_path
+    final_h264 = get_final_h264_path(video_path)
+    if os.path.exists(final_h264):
+        try:
+            mtime, size = os.path.getmtime(final_h264), os.path.getsize(final_h264)
+            if _check_video_valid_cached(final_h264, mtime, size):
+                return final_h264
+        except Exception:
+            pass
+    raw_path = video_path.replace('_f.mp4', '.mp4') if video_path.endswith('_f.mp4') else video_path
+    if sync_transcode:
+        src = raw_path if os.path.exists(raw_path) else video_path
+        if not os.path.exists(src):
+            try:
+                ensure_local_file(src)
+            except Exception:
+                pass
+        if os.path.exists(src):
+            out = sync_transcode_to_h264(src, final_h264)
+            if out:
+                return out
+    if os.path.exists(video_path) and video_path.lower().endswith('.mp4'):
+        try:
+            v_codec, _ = get_video_codec(video_path)
+            if v_codec == 'h264':
+                mtime, size = os.path.getmtime(video_path), os.path.getsize(video_path)
+                if _check_video_valid_cached(video_path, mtime, size):
+                    return video_path
+        except Exception:
+            pass
+    return video_path
+
+
 def get_school_logo_base64():
     """Lay logo truong (abc1.png) de nhung vao HTML duoi dang base64."""
     import pathlib as _pl, base64 as _b64
@@ -5333,6 +5440,12 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
 
             if writer is None:
                 curr_h, curr_w = xu_ly.shape[:2]
+                curr_w -= curr_w % 2
+                curr_h -= curr_h % 2
+                if curr_w < 2 or curr_h < 2:
+                    curr_w, curr_h = max(2, curr_w), max(2, curr_h)
+                if curr_w != xu_ly.shape[1] or curr_h != xu_ly.shape[0]:
+                    xu_ly = xu_ly[:curr_h, :curr_w]
                 writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*'mp4v'), fps_export, (curr_w, curr_h))
 
             writer.write(xu_ly)
@@ -5472,47 +5585,28 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
         except: pass
 
     final_video_path = out_path
-    final_h264 = out_path.replace('.mp4', '_f.mp4')
-    try:
-        cmd = [
-            'ffmpeg', '-y', '-i', out_path
-        ]
-        
-        if audio_mixed and os.path.exists(mixed_audio_path):
-            cmd.extend(['-i', mixed_audio_path])
-            cmd.extend(['-c:a', 'aac', '-map', '0:v:0', '-map', '1:a:0', '-shortest'])
-        
-        cmd.extend([
-            '-vcodec', 'libx264', 
-            '-pix_fmt', 'yuv420p', 
-            '-preset', 'ultrafast',  # Dùng preset ultrafast để đóng gói cực nhanh cho video dài
-            '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',  # Bảo toàn độ phân giải HD đã chọn
-            '-crf', '28',           # Giảm chất lượng 1 chút nhưng giảm cực lớn dung lượng file (40-50%)
-            '-maxrate', '800k',     # Giới hạn bitrate 800Kbps cực kỳ tối ưu cho mạng
-            '-bufsize', '1600k',
-            '-movflags', '+faststart',
-            '-threads', '0',
-            final_h264
-        ])
-        
-        # Chạy FFmpeg non-blocking để cập nhật tiến trình
-        if callback:
-            try: callback(0.96)
-            except: pass
-            
-        process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        start_transcode_time = time.time()
-        while process.poll() is None:
-            time.sleep(1.0)
+    final_h264 = get_final_h264_path(out_path)
+    if callback:
+        try:
+            callback(0.96)
+        except Exception:
+            pass
+    audio_aux = mixed_audio_path if (audio_mixed and os.path.exists(mixed_audio_path)) else None
+    start_transcode_time = time.time()
+    h264_out = sync_transcode_to_h264(out_path, final_h264, audio_path=audio_aux)
+    if h264_out:
+        final_video_path = h264_out
+    else:
+        warn_h264 = "Khong chuyen duoc video sang H.264; file tai ve co the khong mo duoc tren Windows."
+        print(f"[Integrity] {warn_h264}")
+        all_warnings.append(warn_h264)
+    if callback:
+        try:
             elapsed_t = time.time() - start_transcode_time
-            # Nhích nhẹ tiến độ từ 96% đến 99% để người dùng biết hệ thống không treo
             mock_prog = 0.96 + min(elapsed_t / 30.0, 1.0) * 0.03
-            if callback:
-                try: callback(mock_prog)
-                except: pass
-        if os.path.exists(final_h264) and os.path.getsize(final_h264) >= 5 * 1024:
-            final_video_path = final_h264
-    except: pass
+            callback(mock_prog)
+        except Exception:
+            pass
     
     gc.collect()
     valid_count = sum(1 for row in du_lieu_goc if row['goc_vai'] is not None)
@@ -11058,6 +11152,7 @@ def cut_video_segments(input_path, n1, n2, total_frames, fps_export=15):
     import os
     
     input_path = get_local_frame_path(input_path)
+    input_path = resolve_playback_video_path(input_path) or input_path
     
     # Sử dụng hậu tố _gX_f.mp4 để tránh bị cache tệp phân đoạn cũ bị lỗi codec/lag
     g1_path = input_path.replace('.mp4', '_g1_f.mp4')
@@ -11177,10 +11272,11 @@ def hien_thi_frames_day_du(key_suffix=""):
     acc_g2 = metrics_g2.get('do_chinh_xac', 0.0) if isinstance(metrics_g2, dict) else 0.0
     acc_g3 = metrics_g3.get('do_chinh_xac', 0.0) if isinstance(metrics_g3, dict) else 0.0
     processed_video_path = get_local_frame_path(st.session_state.get('processed_video_path'))
+    playback_video_path = resolve_playback_video_path(processed_video_path) if processed_video_path else None
     # Không tự tải video lớn tại lúc mở tab; chỉ tải khi người dùng bấm nút ở khung video.
     # Bỏ giải nén toàn bộ ZIP để tránh lag và đĩa đầy trên Cloud.
     frames_zip = get_local_frame_path(st.session_state.get('frames_zip'))
-    has_video = bool(processed_video_path and os.path.exists(processed_video_path))
+    has_video = bool(playback_video_path and os.path.exists(playback_video_path))
 
     # 0. HIỂN THỊ VIDEO ĐÃ PHÂN TÍCH
     st.markdown("### 🎬 VIDEO ĐÃ PHÂN TÍCH")
@@ -11229,11 +11325,23 @@ def hien_thi_frames_day_du(key_suffix=""):
                 g1_v_path, g2_v_path, g3_v_path = cut_video_segments(processed_video_path, n1, n2, total_frames, fps_export)
             
             if sel_giai_doan == "📋 Video Tất cả":
-                render_video(processed_video_path)
+                render_video(playback_video_path or processed_video_path)
                 d_col1, d_col2 = st.columns(2)
                 with d_col1:
-                    with open(processed_video_path, "rb") as f:
-                        st.download_button("📥 Tải video Tất cả", f, "processed_video_full.mp4", "video/mp4", width="stretch", key=f"dl_v_all_{key_suffix}")
+                    dl_ready_path = st.session_state.get(f"dl_h264_ready_{key_suffix}") or playback_video_path
+                    if dl_ready_path and dl_ready_path.endswith('_f.mp4') and os.path.exists(dl_ready_path):
+                        dl_name = os.path.splitext(filename)[0] + "_phan_tich.mp4" if filename else "processed_video_full.mp4"
+                        with open(dl_ready_path, "rb") as f:
+                            st.download_button("📥 Tải video Tất cả (H.264)", f, dl_name, "video/mp4", width="stretch", key=f"dl_v_all_{key_suffix}")
+                    else:
+                        if st.button("📥 Chuẩn bị video H.264 để tải", width="stretch", key=f"btn_prep_dl_all_{key_suffix}"):
+                            with st.spinner("Đang chuyển sang H.264 (mở được trên Windows/điện thoại)..."):
+                                ready = resolve_playback_video_path(processed_video_path, sync_transcode=True)
+                                if ready and os.path.exists(ready):
+                                    st.session_state[f"dl_h264_ready_{key_suffix}"] = ready
+                                    st.rerun()
+                                else:
+                                    st.error("Không chuyển được video. Thử phân tích lại hoặc liên hệ hỗ trợ.")
                 with d_col2:
                     frames_zip = st.session_state.get('frames_zip')
                     if frames_zip and os.path.exists(frames_zip):

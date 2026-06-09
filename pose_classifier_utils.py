@@ -735,9 +735,9 @@ def draw_ml_badge(frame_output, ml_info: Mapping[str, Any] | None, scale_factor:
         return frame_output
     import cv2
 
-    display = format_ml_display(ml_info)
-    label = display.get("overlay_text") or _ml_label_ascii(ml_info)
-    text = f"ML: {label}"
+    label = _ml_label_ascii(ml_info)
+    confidence = _resolve_ml_confidence(ml_info)
+    text = f"ML: {label} {confidence:.0f}%" if confidence is not None else f"ML: {label}"
     color = _badge_color_for_ml(ml_info.get("ml_label_text"))
 
     h, w = frame_output.shape[:2]
