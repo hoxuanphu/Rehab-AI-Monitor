@@ -74,6 +74,18 @@ from reference_utils import (
     phase_frame_label,
     resolve_reference_file,
 )
+from checkpoint_utils import (
+    CHECKPOINT_INTERVAL_PASS2,
+    assemble_video_from_jpgs,
+    build_config_hash,
+    checkpoint_ui_progress,
+    clear_checkpoint,
+    deserialize_pass1_item,
+    get_checkpoint_path,
+    load_checkpoint,
+    save_checkpoint,
+    serialize_pass1_item,
+)
 
 
 def get_clean_rel_path(path):
@@ -1954,6 +1966,26 @@ def thuc_hien_khoi_tao_he_thong_mot_lan():
             print(f"[AutoTranscode] Loi toan cuc: {e}")
 
     threading.Thread(target=_auto_transcode_all_hevc, daemon=True).start()
+
+    def _resume_and_watch_analysis_jobs():
+        """Sau deploy HF: tiếp tục các video đang load dở; theo dõi job bị crash/OOM."""
+        time.sleep(20)
+        try:
+            n = khoi_phuc_job_phan_tich_sau_deploy(cold_start=True)
+            if n:
+                print(f"[Resume] Da khoi dong lai {n} job phan tich sau khoi dong Space")
+        except Exception as resume_err:
+            print(f"[Resume] Loi khoi phuc job: {resume_err}")
+        while True:
+            time.sleep(120)
+            try:
+                n2 = khoi_phuc_job_phan_tich_sau_deploy(cold_start=False)
+                if n2:
+                    print(f"[Resume] Khoi dong lai {n2} job phan tich bi gian doan")
+            except Exception as poll_err:
+                print(f"[Resume] Loi poll job: {poll_err}")
+
+    threading.Thread(target=_resume_and_watch_analysis_jobs, daemon=True).start()
     return True
 
 thuc_hien_khoi_tao_he_thong_mot_lan()
@@ -5082,7 +5114,7 @@ def dong_bo_va_chuan_hoa_exercise(username, video_name, video_path, original_exe
         
     return correct_ex_name
 
-def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaPipe Heavy", min_confidence=0.5, exercise_name="codman", skip_step=None, resize_width=None, force_train_classifier=False):
+def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaPipe Heavy", min_confidence=0.5, exercise_name="codman", skip_step=None, resize_width=None, force_train_classifier=False, checkpoint_video_path=None):
     import gc
     import json
     import os
@@ -5147,37 +5179,7 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
     
     w_cap = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h_cap = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    
-    timestamp = int(time.time())
-    out_path = os.path.join(PROCESSED_DIR, f'processed_{timestamp}.mp4')
-    thu_muc_frame = os.path.join(PROCESSED_DIR, f'processed_{timestamp}_frames')
-    
-    # Tạo thư mục tạm cục bộ để lưu trữ các khung hình (cực nhanh trên SSD/RAM)
-    import tempfile
-    local_temp_dir = tempfile.mkdtemp(prefix=f"frames_processed_{timestamp}_")
-    
-    from concurrent.futures import ThreadPoolExecutor
-    img_writer_executor = ThreadPoolExecutor(max_workers=4)
-    frame_write_futures = []
-    
-    model = get_pose_model(model_type=model_type, min_confidence=min_confidence)
-    du_lieu_goc = []
-    danh_sach_frame_paths = []
-    danh_sach_frame_data = []
-    all_warnings = []
-    
-    frame_count = 0
-    processed_count = 0
-    last_progress = 0
-    writer = None
-    
-    audio_events = []
-    last_state = None
-    last_audio_time = -10.0
-    last_pose_landmarks = None
-    last_known_center = None
-    has_multiple_people_warning = False
-    
+
     # Lấy giá trị skip và resolution từ tham số hoặc session_state
     if skip_step is None:
         try: skip_step = st.session_state.get('ncv_skip_frames', SKIP_FRAMES)
@@ -5186,157 +5188,272 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
         try: resize_width = st.session_state.get('ncv_resize_width', RESIZE_WIDTH)
         except: resize_width = RESIZE_WIDTH
 
+    ckpt_path = get_checkpoint_path(checkpoint_video_path or duong_dan_video, PROCESSED_DIR)
+    cfg_hash = build_config_hash(
+        checkpoint_video_path or duong_dan_video, model_type, min_confidence,
+        exercise_name, skip_step, resize_width
+    )
+    ckpt = load_checkpoint(ckpt_path)
+    ckpt_valid = (
+        ckpt
+        and ckpt.get("config_hash") == cfg_hash
+        and ckpt.get("analysis_input_path") == duong_dan_video
+        and ckpt.get("phase") in ("pass1_done", "pass2")
+        and ckpt.get("pass1_data")
+    )
+    if ckpt and not ckpt_valid:
+        print(f"[Checkpoint] Bo qua checkpoint cu (cau hinh/video khac): {ckpt_path}")
+        clear_checkpoint(ckpt_path)
+        ckpt = None
+
+    resume_pass1 = False
+    pass2_resume_from = 0
+    use_jpg_assembly = False
+
+    if ckpt_valid:
+        timestamp = ckpt.get("timestamp") or int(time.time())
+        out_path = ckpt.get("out_path") or os.path.join(PROCESSED_DIR, f"processed_{timestamp}.mp4")
+        thu_muc_frame = ckpt.get("thu_muc_frame") or os.path.join(PROCESSED_DIR, f"processed_{timestamp}_frames")
+        import tempfile
+        local_temp_dir = ckpt.get("local_temp_dir") or ""
+        if not local_temp_dir or not os.path.isdir(local_temp_dir):
+            local_temp_dir = tempfile.mkdtemp(prefix=f"frames_processed_{timestamp}_")
+        os.makedirs(thu_muc_frame, exist_ok=True)
+        raw_pass1_data = [deserialize_pass1_item(x) for x in ckpt.get("pass1_data", [])]
+        active_side = ckpt.get("active_side", "RIGHT")
+        segment_bounds = ckpt.get("segment_bounds")
+        resume_pass1 = True
+        if ckpt.get("phase") == "pass2":
+            pass2_resume_from = int(ckpt.get("pass2_processed_count") or 0)
+            use_jpg_assembly = True
+        print(f"[Checkpoint] Resume phase={ckpt.get('phase')} pass2_from={pass2_resume_from} frames={len(raw_pass1_data)}")
+        if callback:
+            try:
+                ui_p, _ = checkpoint_ui_progress(ckpt)
+                callback(0.5 if ckpt.get("phase") == "pass1_done" else (0.5 + min(pass2_resume_from / max(len(raw_pass1_data), 1), 1.0) * 0.40))
+            except Exception:
+                pass
+    else:
+        timestamp = int(time.time())
+        out_path = os.path.join(PROCESSED_DIR, f'processed_{timestamp}.mp4')
+        thu_muc_frame = os.path.join(PROCESSED_DIR, f'processed_{timestamp}_frames')
+        import tempfile
+        local_temp_dir = tempfile.mkdtemp(prefix=f"frames_processed_{timestamp}_")
+        raw_pass1_data = []
+        active_side = "RIGHT"
+        segment_bounds = None
+
+    from concurrent.futures import ThreadPoolExecutor
+    img_writer_executor = ThreadPoolExecutor(max_workers=4)
+    frame_write_futures = []
+
+    model = None if resume_pass1 else get_pose_model(model_type=model_type, min_confidence=min_confidence)
+    du_lieu_goc = list(ckpt.get("du_lieu_goc", [])) if (ckpt_valid and ckpt.get("phase") == "pass2") else []
+    danh_sach_frame_paths = list(ckpt.get("danh_sach_frame_paths", [])) if (ckpt_valid and ckpt.get("phase") == "pass2") else []
+    danh_sach_frame_data = list(ckpt.get("danh_sach_frame_data", [])) if (ckpt_valid and ckpt.get("phase") == "pass2") else []
+    all_warnings = list(ckpt.get("all_warnings", [])) if ckpt_valid else []
+    
+    frame_count = 0
+    processed_count = 0
+    last_progress = 0
+    writer = None
+    
+    audio_events = list(ckpt.get("audio_events", [])) if (ckpt_valid and ckpt.get("phase") == "pass2") else []
+    last_state = ckpt.get("last_state") if (ckpt_valid and ckpt.get("phase") == "pass2") else None
+    last_audio_time = float(ckpt.get("last_audio_time", -10.0)) if (ckpt_valid and ckpt.get("phase") == "pass2") else -10.0
+    last_pose_landmarks = None
+    last_known_center = None
+    has_multiple_people_warning = False
+
+    def _persist_checkpoint(phase, pass2_done=0):
+        if not ckpt_path:
+            return
+        save_checkpoint(ckpt_path, {
+            "config_hash": cfg_hash,
+            "video_path": checkpoint_video_path or duong_dan_video,
+            "analysis_input_path": duong_dan_video,
+            "phase": phase,
+            "timestamp": timestamp,
+            "out_path": out_path,
+            "thu_muc_frame": thu_muc_frame,
+            "local_temp_dir": local_temp_dir,
+            "ref_name": ref_name,
+            "active_side": active_side,
+            "segment_bounds": segment_bounds,
+            "fps": fps,
+            "fps_export": fps_export,
+            "tong_frame": tong_frame,
+            "skip_step": skip_step,
+            "resize_width": resize_width,
+            "model_type": model_type,
+            "exercise_name": exercise_name,
+            "pass1_data": [serialize_pass1_item(x) for x in raw_pass1_data],
+            "pass2_processed_count": pass2_done,
+            "du_lieu_goc": du_lieu_goc,
+            "danh_sach_frame_paths": danh_sach_frame_paths,
+            "danh_sach_frame_data": danh_sach_frame_data,
+            "audio_events": audio_events,
+            "last_state": last_state,
+            "last_audio_time": last_audio_time,
+            "all_warnings": all_warnings,
+        })
+
     # Tự động phát hiện bên tay tập chủ đạo (LEFT hoặc RIGHT) để tránh nhảy bên gây lỗi trích xuất
-    # Riêng bài tập Codman, cố định tay tập chủ đạo là tay phải (RIGHT) theo yêu cầu chuyên môn
-    active_side = "RIGHT"
     left_deviations = []
     right_deviations = []
     detect_count_limit = 60
 
-    # PASS 1: Trích xuất landmarks và tọa độ (Không vẽ, không ghi file để tối ưu bộ nhớ)
-    raw_pass1_data = []
-    try:
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret or (MAX_FRAMES and processed_count >= MAX_FRAMES): break
+    # PASS 1: Trích xuất landmarks và tọa độ (bỏ qua nếu đã có checkpoint)
+    if not resume_pass1:
+        try:
+            while cap.isOpened():
+                ret, frame = cap.read()
+                if not ret or (MAX_FRAMES and processed_count >= MAX_FRAMES): break
             
-            frame_count += 1
-            if skip_step > 0 and frame_count % (skip_step + 1) != 1:
-                continue
+                frame_count += 1
+                if skip_step > 0 and frame_count % (skip_step + 1) != 1:
+                    continue
                 
-            processed_count += 1
+                processed_count += 1
             
-            h_orig, w_orig = frame.shape[:2]
-            if w_orig != resize_width:
-                scale = resize_width / w_orig
-                new_h = int(h_orig * scale)
-                if new_h % 2 != 0: new_h -= 1
-                frame = cv2.resize(frame, (resize_width, new_h), interpolation=cv2.INTER_LINEAR)
+                h_orig, w_orig = frame.shape[:2]
+                if w_orig != resize_width:
+                    scale = resize_width / w_orig
+                    new_h = int(h_orig * scale)
+                    if new_h % 2 != 0: new_h -= 1
+                    frame = cv2.resize(frame, (resize_width, new_h), interpolation=cv2.INTER_LINEAR)
             
-            h, w = frame.shape[:2]
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            ket_qua = model.process(rgb)
+                h, w = frame.shape[:2]
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                ket_qua = model.process(rgb)
             
-            current_landmarks = None
-            detected_this_frame = False
-            filtered_stranger_this_frame = False
-            if ket_qua and ket_qua.pose_landmarks:
-                # Trích xuất trọng tâm thân người (Torso center) để theo dõi và lọc người lạ
-                lm = ket_qua.pose_landmarks.landmark
-                # Dùng trung bình cộng các điểm vai (11, 12) và hông (23, 24) làm trọng tâm đại diện
-                torso_idx = [11, 12, 23, 24]
-                torso_x = [lm[i].x for i in torso_idx]
-                torso_y = [lm[i].y for i in torso_idx]
-                current_center = (sum(torso_x) / 4.0, sum(torso_y) / 4.0)
+                current_landmarks = None
+                detected_this_frame = False
+                filtered_stranger_this_frame = False
+                if ket_qua and ket_qua.pose_landmarks:
+                    # Trích xuất trọng tâm thân người (Torso center) để theo dõi và lọc người lạ
+                    lm = ket_qua.pose_landmarks.landmark
+                    # Dùng trung bình cộng các điểm vai (11, 12) và hông (23, 24) làm trọng tâm đại diện
+                    torso_idx = [11, 12, 23, 24]
+                    torso_x = [lm[i].x for i in torso_idx]
+                    torso_y = [lm[i].y for i in torso_idx]
+                    current_center = (sum(torso_x) / 4.0, sum(torso_y) / 4.0)
                 
-                if last_known_center is None:
-                    # Lần đầu tiên phát hiện -> Khóa vị trí bệnh nhân
-                    last_known_center = current_center
-                    current_landmarks = ket_qua.pose_landmarks
-                    last_pose_landmarks = current_landmarks
-                    detected_this_frame = True
-                else:
-                    # Tính khoảng cách dịch chuyển trọng tâm
-                    dist = math.sqrt((current_center[0] - last_known_center[0])**2 + (current_center[1] - last_known_center[1])**2)
-                    # Nếu khoảng cách nhảy quá lớn (> 0.18 trong hệ tọa độ chuẩn hóa),
-                    # chứng tỏ có người khác xuất hiện ở vị trí khác và bị nhận dạng thay thế bệnh nhân
-                    if dist <= 0.18:
+                    if last_known_center is None:
+                        # Lần đầu tiên phát hiện -> Khóa vị trí bệnh nhân
                         last_known_center = current_center
                         current_landmarks = ket_qua.pose_landmarks
                         last_pose_landmarks = current_landmarks
                         detected_this_frame = True
                     else:
-                        filtered_stranger_this_frame = True
-            elif last_pose_landmarks is None:
-                # Không có gì cả - thực sự không nhận dạng được người nào
-                detected_this_frame = False
-                filtered_stranger_this_frame = False
-            elif last_pose_landmarks:
-                current_landmarks = last_pose_landmarks
-                detected_this_frame = False
-                filtered_stranger_this_frame = False
+                        # Tính khoảng cách dịch chuyển trọng tâm
+                        dist = math.sqrt((current_center[0] - last_known_center[0])**2 + (current_center[1] - last_known_center[1])**2)
+                        # Nếu khoảng cách nhảy quá lớn (> 0.18 trong hệ tọa độ chuẩn hóa),
+                        # chứng tỏ có người khác xuất hiện ở vị trí khác và bị nhận dạng thay thế bệnh nhân
+                        if dist <= 0.18:
+                            last_known_center = current_center
+                            current_landmarks = ket_qua.pose_landmarks
+                            last_pose_landmarks = current_landmarks
+                            detected_this_frame = True
+                        else:
+                            filtered_stranger_this_frame = True
+                elif last_pose_landmarks is None:
+                    # Không có gì cả - thực sự không nhận dạng được người nào
+                    detected_this_frame = False
+                    filtered_stranger_this_frame = False
+                elif last_pose_landmarks:
+                    current_landmarks = last_pose_landmarks
+                    detected_this_frame = False
+                    filtered_stranger_this_frame = False
                 
-            goc_v_left, goc_k_left = None, None
-            goc_v_right, goc_k_right = None, None
+                goc_v_left, goc_k_left = None, None
+                goc_v_right, goc_k_right = None, None
             
-            if current_landmarks:
-                lm = current_landmarks.landmark
-                def get_coords_det(idx):
-                    return (int(lm[idx].x * w), int(lm[idx].y * h))
+                if current_landmarks:
+                    lm = current_landmarks.landmark
+                    def get_coords_det(idx):
+                        return (int(lm[idx].x * w), int(lm[idx].y * h))
                 
-                goc_v_left = tinh_goc(get_coords_det(23), get_coords_det(11), get_coords_det(13))
-                goc_k_left = tinh_goc(get_coords_det(11), get_coords_det(13), get_coords_det(15))
-                goc_v_right = tinh_goc(get_coords_det(24), get_coords_det(12), get_coords_det(14))
-                goc_k_right = tinh_goc(get_coords_det(12), get_coords_det(14), get_coords_det(16))
+                    goc_v_left = tinh_goc(get_coords_det(23), get_coords_det(11), get_coords_det(13))
+                    goc_k_left = tinh_goc(get_coords_det(11), get_coords_det(13), get_coords_det(15))
+                    goc_v_right = tinh_goc(get_coords_det(24), get_coords_det(12), get_coords_det(14))
+                    goc_k_right = tinh_goc(get_coords_det(12), get_coords_det(14), get_coords_det(16))
                 
-                # Tích lũy độ lệch để tự động phát hiện bên tay tập
-                if len(left_deviations) < detect_count_limit:
-                    left_deviations.append(abs(goc_v_left - 10))
-                    right_deviations.append(abs(goc_v_right - 10))
+                    # Tích lũy độ lệch để tự động phát hiện bên tay tập
+                    if len(left_deviations) < detect_count_limit:
+                        left_deviations.append(abs(goc_v_left - 10))
+                        right_deviations.append(abs(goc_v_right - 10))
                     
-            raw_pass1_data.append({
-                'frame_idx': frame_count,
-                'processed_count': processed_count,
-                'landmarks': current_landmarks,
-                'detected': detected_this_frame,           # True = AI thực sự nhận dạng bệnh nhân frame này
-                'filtered_stranger': filtered_stranger_this_frame,  # True = có người lạ bị lọc bỏ
-                'goc_vai_left': goc_v_left,
-                'goc_khuyu_left': goc_k_left,
-                'goc_vai_right': goc_v_right,
-                'goc_khuyu_right': goc_k_right,
-                'goc_vai': None,
-                'goc_khuyu': None
-            })
+                raw_pass1_data.append({
+                    'frame_idx': frame_count,
+                    'processed_count': processed_count,
+                    'landmarks': current_landmarks,
+                    'detected': detected_this_frame,           # True = AI thực sự nhận dạng bệnh nhân frame này
+                    'filtered_stranger': filtered_stranger_this_frame,  # True = có người lạ bị lọc bỏ
+                    'goc_vai_left': goc_v_left,
+                    'goc_khuyu_left': goc_k_left,
+                    'goc_vai_right': goc_v_right,
+                    'goc_khuyu_right': goc_k_right,
+                    'goc_vai': None,
+                    'goc_khuyu': None
+                })
             
-            if callback and tong_frame > 0:
-                if frame_count > tong_frame:
-                    tong_frame = frame_count + 100
-                prog = min(frame_count / tong_frame, 1.0) * 0.5
-                callback(prog)
-                if frame_count % 100 == 1 or frame_count == tong_frame:
-                    print(f"[AI Process] Pass 1: Frame {frame_count}/{tong_frame} (Tiến độ: {prog*100:.1f}%)")
+                if callback and tong_frame > 0:
+                    if frame_count > tong_frame:
+                        tong_frame = frame_count + 100
+                    prog = min(frame_count / tong_frame, 1.0) * 0.5
+                    callback(prog)
+                    if frame_count % 100 == 1 or frame_count == tong_frame:
+                        print(f"[AI Process] Pass 1: Frame {frame_count}/{tong_frame} (Tiến độ: {prog*100:.1f}%)")
                 
-            if processed_count % 50 == 0:
-                gc.collect()
+                if processed_count % 50 == 0:
+                    gc.collect()
                 
-    except Exception as e:
-        print("Lỗi trong Pass 1:", e)
+        except Exception as e:
+            print("Lỗi trong Pass 1:", e)
 
-    # Xác định bên tay tập chủ đạo dựa trên dữ liệu tích lũy
-    if ref_name == "codman":
-        active_side = "RIGHT"
-        st.toast("🦾 Bài tập Codman: Cố định bên tập chủ đạo là TAY PHẢI (RIGHT)", icon="🦾")
-    else:
-        active_side = "RIGHT"
-        if left_deviations and right_deviations:
-            mean_left = float(np.mean(left_deviations))
-            mean_right = float(np.mean(right_deviations))
-            std_left = float(np.std(left_deviations))
-            std_right = float(np.std(right_deviations))
-            
-            score_left = mean_left + std_left * 2
-            score_right = mean_right + std_right * 2
-            
-            if score_left > score_right:
-                active_side = "LEFT"
-            else:
-                active_side = "RIGHT"
-        st.toast(f"🤖 AI phát hiện bên tập chủ đạo: {'TAY TRÁI (LEFT)' if active_side == 'LEFT' else 'TAY PHẢI (RIGHT)'}", icon="🦾")
-
-    # Cập nhật góc vai và góc khủy cho khớp với bên tập chủ đạo đã phát hiện
-    for item in raw_pass1_data:
-        if active_side == "LEFT":
-            item['goc_vai'] = item['goc_vai_left']
-            item['goc_khuyu'] = item['goc_khuyu_left']
+        # Xác định bên tay tập chủ đạo dựa trên dữ liệu tích lũy
+        if ref_name == "codman":
+            active_side = "RIGHT"
+            st.toast("🦾 Bài tập Codman: Cố định bên tập chủ đạo là TAY PHẢI (RIGHT)", icon="🦾")
         else:
-            item['goc_vai'] = item['goc_vai_right']
-            item['goc_khuyu'] = item['goc_khuyu_right']
-        
-    # Tính toán phân đoạn 3 giai đoạn dựa trên kết quả Pass 1
-    segment_bounds = segment_frames(raw_pass1_data)
+            active_side = "RIGHT"
+            if left_deviations and right_deviations:
+                mean_left = float(np.mean(left_deviations))
+                mean_right = float(np.mean(right_deviations))
+                std_left = float(np.std(left_deviations))
+                std_right = float(np.std(right_deviations))
+                
+                score_left = mean_left + std_left * 2
+                score_right = mean_right + std_right * 2
+                
+                if score_left > score_right:
+                    active_side = "LEFT"
+                else:
+                    active_side = "RIGHT"
+            st.toast(f"🤖 AI phát hiện bên tập chủ đạo: {'TAY TRÁI (LEFT)' if active_side == 'LEFT' else 'TAY PHẢI (RIGHT)'}", icon="🦾")
+
+        for item in raw_pass1_data:
+            if active_side == "LEFT":
+                item['goc_vai'] = item['goc_vai_left']
+                item['goc_khuyu'] = item['goc_khuyu_left']
+            else:
+                item['goc_vai'] = item['goc_vai_right']
+                item['goc_khuyu'] = item['goc_khuyu_right']
+
+        segment_bounds = segment_frames(raw_pass1_data)
+        _persist_checkpoint("pass1_done", 0)
+        print(f"[Checkpoint] Da luu Pass 1 ({len(raw_pass1_data)} frame) -> {ckpt_path}")
+    else:
+        if not segment_bounds:
+            segment_bounds = segment_frames(raw_pass1_data)
+
     st.session_state.segment_bounds = segment_bounds
     st.session_state.last_processed_video_for_bounds = out_path
     n0, n1, n2, n3 = segment_bounds
+
+    if resume_pass1:
+        force_train_classifier = False
 
     ml_predict_row = None
     if create_pose_classifier_predictor and ensure_classifier_ready:
@@ -5409,6 +5526,10 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
             
             frame_count += 1
             if skip_step > 0 and frame_count % (skip_step + 1) != 1:
+                continue
+
+            if processed_count < pass2_resume_from:
+                processed_count += 1
                 continue
                 
             p1_data = raw_pass1_data[processed_count]
@@ -5534,17 +5655,17 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
                 except Exception as rule_draw_err:
                     print(f"[Rule Classifier] Khong the ve nhan REF frame {frame_count}: {rule_draw_err}")
 
-            if writer is None:
-                curr_h, curr_w = xu_ly.shape[:2]
-                curr_w -= curr_w % 2
-                curr_h -= curr_h % 2
-                if curr_w < 2 or curr_h < 2:
-                    curr_w, curr_h = max(2, curr_w), max(2, curr_h)
-                if curr_w != xu_ly.shape[1] or curr_h != xu_ly.shape[0]:
-                    xu_ly = xu_ly[:curr_h, :curr_w]
-                writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*'mp4v'), fps_export, (curr_w, curr_h))
-
-            writer.write(xu_ly)
+            if not use_jpg_assembly:
+                if writer is None:
+                    curr_h, curr_w = xu_ly.shape[:2]
+                    curr_w -= curr_w % 2
+                    curr_h -= curr_h % 2
+                    if curr_w < 2 or curr_h < 2:
+                        curr_w, curr_h = max(2, curr_w), max(2, curr_h)
+                    if curr_w != xu_ly.shape[1] or curr_h != xu_ly.shape[0]:
+                        xu_ly = xu_ly[:curr_h, :curr_w]
+                    writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*'mp4v'), fps_export, (curr_w, curr_h))
+                writer.write(xu_ly)
 
             # Save extracted frames after all overlays have been drawn.
             try:
@@ -5563,6 +5684,9 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
                 callback(prog)
                 if processed_count % 100 == 1 or processed_count == p_len:
                     print(f"[AI Process] Pass 2: Frame {processed_count}/{p_len} (Tiến độ: {prog*100:.1f}%)")
+
+            if processed_count % CHECKPOINT_INTERVAL_PASS2 == 0 or processed_count == len(raw_pass1_data):
+                _persist_checkpoint("pass2", processed_count)
                 
             if processed_count % 50 == 0:
                 gc.collect()
@@ -5592,6 +5716,20 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
                             pass
             img_writer_executor.shutdown(wait=False)
         gc.collect()
+
+    if use_jpg_assembly:
+        if writer:
+            try:
+                writer.release()
+            except Exception:
+                pass
+            writer = None
+        if not os.path.exists(out_path) or os.path.getsize(out_path) < 5 * 1024:
+            print(f"[Checkpoint] Ghep video tu {len(du_lieu_goc)} anh JPG...")
+            if not assemble_video_from_jpgs(local_temp_dir, out_path, fps_export):
+                warn_asm = "Khong ghep duoc video tu checkpoint JPG; can chay lai Pass 2."
+                print(f"[Checkpoint] {warn_asm}")
+                all_warnings.append(warn_asm)
 
     # SAU KHI XỬ LÝ XONG, TIẾN HÀNH TRỘN ÂM THANH NẾU CÓ THAY ĐỔI
     audio_mixed = False
@@ -5781,6 +5919,9 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
             shutil.rmtree(local_temp_dir, ignore_errors=True)
         except Exception as cleanup_err:
             print(f"Lỗi dọn dẹp thư mục tạm frames: {cleanup_err}")
+
+    clear_checkpoint(ckpt_path)
+    print(f"[Checkpoint] Hoan tat — da xoa checkpoint: {ckpt_path}")
             
     return final_video_path, ref_name, None, du_lieu_goc, frame_count, valid_count, thu_muc_frame, zip_path, danh_sach_frame_paths, {}, json_path, all_warnings
 
@@ -5794,12 +5935,14 @@ import traceback
 _db_lock = threading.Lock()
 _running_threads = {}
 
-# Số video phân tích chạy SONG SONG (mặc định 4). Job thừa xếp hàng đợi tự chạy khi có slot.
-# Có thể giảm trên HF Space yếu: đặt biến môi trường MAX_CONCURRENT_ANALYSIS=2
+# Số video phân tích chạy SONG SONG. HF Space mặc định 2 (tránh OOM với video Gậy dài).
+# Ghi đè: biến môi trường MAX_CONCURRENT_ANALYSIS=4
+_hf_default_concurrent = "2" if (os.environ.get("HF_SPACE_ID") or os.environ.get("SPACE_ID") or os.path.exists("/data")) else "4"
 try:
-    MAX_CONCURRENT_ANALYSIS = max(1, min(8, int(os.environ.get("MAX_CONCURRENT_ANALYSIS", "4"))))
+    MAX_CONCURRENT_ANALYSIS = max(1, min(8, int(os.environ.get("MAX_CONCURRENT_ANALYSIS", _hf_default_concurrent))))
 except (TypeError, ValueError):
-    MAX_CONCURRENT_ANALYSIS = 4
+    MAX_CONCURRENT_ANALYSIS = 2 if _hf_default_concurrent == "2" else 4
+JOB_ORPHAN_SECONDS = 90  # Không có heartbeat trong 90s → coi job bị gián đoạn, tự khởi động lại
 _analysis_semaphore = threading.BoundedSemaphore(MAX_CONCURRENT_ANALYSIS)
 
 def doc_lock_save_data(file_path, handle_fn):
@@ -5859,11 +6002,13 @@ def read_progress(video_path):
             pass
     return data
 
-def write_progress(video_path, status, username="", video_name="", progress=0.0, elapsed=0.0, start_time=None, error_msg="", result=None, status_msg=""):
+def write_progress(video_path, status, username="", video_name="", progress=0.0, elapsed=0.0, start_time=None, error_msg="", result=None, status_msg="", job_meta=None):
     """Ghi thông tin tiến trình xuống đĩa"""
     p_file = get_progress_file(video_path)
     if not p_file:
         return
+    existing = _load_progress_file(video_path) or {}
+    merged_meta = {**(existing.get("job_meta") or {}), **(job_meta or {})}
     data = {
         "video_path": video_path,
         "username": username,
@@ -5871,12 +6016,14 @@ def write_progress(video_path, status, username="", video_name="", progress=0.0,
         "status": status,
         "progress": progress,
         "elapsed": elapsed,
-        "start_time": start_time or time.time(),
+        "start_time": start_time if start_time is not None else (existing.get("start_time") or time.time()),
         "heartbeat": time.time(),
         "error_msg": error_msg,
         "result": result,
         "status_msg": status_msg
     }
+    if merged_meta:
+        data["job_meta"] = merged_meta
     try:
         with open(p_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False)
@@ -6130,7 +6277,11 @@ def hien_thi_jobs_dang_chay_fragment(key_suffix=""):
         return
     if jobs:
         st.markdown(f"#### 🔄 Đang phân tích **{len(jobs)}** video (chạy nền — tối đa {MAX_CONCURRENT_ANALYSIS} song song)")
-        st.caption("Tiến trình lưu trên đĩa: chuyển tab / F5 vẫn theo dõi được. Khi đạt 100% bấm **Xem kết quả**.")
+        st.caption(
+            f"Tiến trình lưu trên đĩa + **checkpoint**: push Git/HF hoặc crash → tự chạy lại sau ~{JOB_ORPHAN_SECONDS}s, "
+            f"**tiếp tục từ Bước 2** nếu Bước 1 đã xong (không mất % đã chạy). "
+            f"Tối đa **{MAX_CONCURRENT_ANALYSIS}** video song song."
+        )
     if done_jobs:
         st.success(f"✅ **{len(done_jobs)}** video đã phân tích xong — bấm **Xem kết quả** để mở (Codman / Gậy / ...).")
         for done_idx, job in enumerate(done_jobs):
@@ -6693,6 +6844,155 @@ def download_file_with_progress(file_path, write_progress_fn, start_t, username,
         print(f"[Download Progress] Lỗi khi tải file {file_path}: {e}")
         return False
 
+@st.cache_data(show_spinner=False)
+def get_video_frame_count_cached(path, mtime, size):
+    """Số khung hình + FPS (cache theo mtime/size)."""
+    try:
+        import cv2
+        cap = cv2.VideoCapture(path)
+        frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
+        fps = float(cap.get(cv2.CAP_PROP_FPS)) or 15.0
+        cap.release()
+        return frames, fps
+    except Exception:
+        return 0, 15.0
+
+
+def lay_so_khung_video(video_path):
+    if not video_path or not os.path.exists(video_path):
+        return 0, 15.0
+    try:
+        mtime = os.path.getmtime(video_path)
+        size = os.path.getsize(video_path)
+        return get_video_frame_count_cached(video_path, mtime, size)
+    except Exception:
+        return 0, 15.0
+
+
+def tinh_tham_so_toc_do_phan_tich(video_path, exercise_name, model_type, skip_step, resize_width):
+    """Tự động giảm tải cho video dài — đặc biệt bài Gậy (~10k+ frame)."""
+    frames, fps = lay_so_khung_video(video_path)
+    ex = str(exercise_name or "").lower()
+    is_gay = any(k in ex for k in ["gậy", "gay", "pulley", "stick"])
+    duration = (frames / fps) if fps > 0 else 0.0
+    fast = (is_gay and frames > 2500) or frames > 6000 or duration > 240
+    if not fast:
+        return model_type, skip_step, resize_width
+    mt = str(model_type or "")
+    if "Heavy" in mt or "Full" in mt:
+        mt = "MediaPipe Lite"
+    try:
+        ss = max(int(skip_step or 0), 2)
+    except (TypeError, ValueError):
+        ss = 2
+    try:
+        rw = min(int(resize_width or 720), 480)
+    except (TypeError, ValueError):
+        rw = 480
+    return mt, ss, rw
+
+
+def tim_video_trong_db(video_path):
+    if not video_path:
+        return {}
+    try:
+        for v in load_data(VIDEOS_FILE):
+            if v.get("video_path") == video_path:
+                return v
+    except Exception:
+        pass
+    return {}
+
+
+def job_phan_tich_bi_gian_doan(video_path):
+    """Thread đã chết hoặc heartbeat quá cũ — cần khởi động lại."""
+    if not video_path:
+        return False
+    if video_path in _running_threads and _running_threads[video_path].is_alive():
+        return False
+    prog = _load_progress_file(video_path)
+    if not prog or prog.get("status") != "processing":
+        return False
+    hb = float(prog.get("heartbeat") or prog.get("start_time") or 0)
+    return (time.time() - hb) >= JOB_ORPHAN_SECONDS
+
+
+def khoi_phuc_job_phan_tich_sau_deploy(cold_start=False):
+    """Khởi động lại job processing mất thread (sau deploy HF / crash / OOM)."""
+    resumed = 0
+    for job in liet_ke_jobs_dang_chay():
+        vp = job.get("video_path")
+        if not vp:
+            continue
+        if vp in _running_threads and _running_threads[vp].is_alive():
+            continue
+        if not cold_start and not job_phan_tich_bi_gian_doan(vp):
+            continue
+        try:
+            ensure_local_file(vp)
+        except Exception:
+            pass
+        if not os.path.exists(vp) or os.path.getsize(vp) < 1024:
+            continue
+        meta = job.get("job_meta") or {}
+        db_v = tim_video_trong_db(vp)
+        exercise = meta.get("exercise_name") or db_v.get("exercise") or "codman"
+        model_type = meta.get("model_type") or "MediaPipe Heavy"
+        confidence = meta.get("confidence", 0.5)
+        skip_step = meta.get("skip_step")
+        resize_width = meta.get("resize_width")
+        giai_doan = meta.get("giai_doan") or PHASE_UI_LABELS.get("g2", "Giai đoạn 2")
+        force_train = bool(meta.get("force_train_classifier", False))
+        ckpt_resume = load_checkpoint(get_checkpoint_path(vp, PROCESSED_DIR))
+        if ckpt_resume and ckpt_resume.get("pass1_data"):
+            model_type = ckpt_resume.get("model_type") or model_type
+            skip_step = ckpt_resume.get("skip_step") if ckpt_resume.get("skip_step") is not None else skip_step
+            resize_width = ckpt_resume.get("resize_width") or resize_width
+            force_train = False
+            ui_prog, ui_msg = checkpoint_ui_progress(ckpt_resume)
+        else:
+            model_type, skip_step, resize_width = tinh_tham_so_toc_do_phan_tich(
+                vp, exercise, model_type, skip_step, resize_width
+            )
+            ui_prog = max(float(job.get("progress") or 0), 0.01)
+            ui_msg = "🔄 Tiếp tục phân tích sau khi Space khởi động lại / job bị gián đoạn..."
+        print(f"[Resume] Khoi dong lai phan tich: {job.get('video_name')} ({os.path.basename(vp)})")
+        write_progress(
+            vp, "processing",
+            username=job.get("username") or db_v.get("username"),
+            video_name=job.get("video_name") or db_v.get("video_name"),
+            progress=ui_prog,
+            elapsed=float(job.get("elapsed") or 0),
+            start_time=job.get("start_time"),
+            status_msg=ui_msg,
+            job_meta={
+                "full_name": meta.get("full_name") or db_v.get("full_name"),
+                "exercise_name": exercise,
+                "giai_doan": giai_doan,
+                "model_type": model_type,
+                "confidence": confidence,
+                "skip_step": skip_step,
+                "resize_width": resize_width,
+                "force_train_classifier": force_train,
+            },
+        )
+        bat_dau_phan_tich_background(
+            video_path=vp,
+            username=job.get("username") or db_v.get("username"),
+            full_name=meta.get("full_name") or db_v.get("full_name"),
+            video_name=job.get("video_name") or db_v.get("video_name"),
+            exercise_name=exercise,
+            giai_doan=giai_doan,
+            model_type=model_type,
+            confidence=confidence,
+            skip_step=skip_step,
+            resize_width=resize_width,
+            force_train_classifier=force_train,
+        )
+        resumed += 1
+    return resumed
+
+
 def skip_step_theo_model(model_type, manual_skip=None):
     """
     Quy ước bỏ frame theo loại MediaPipe:
@@ -6710,13 +7010,17 @@ def skip_step_theo_model(model_type, manual_skip=None):
     return 0
 
 def video_dang_phan_tich(video_path):
-    """Video này đang có job phân tích chạy (thread hoặc file progress)."""
+    """Video này đang có job phân tích thật sự chạy (thread sống hoặc heartbeat còn tươi)."""
     if not video_path:
         return False
+    if video_path in _running_threads and _running_threads[video_path].is_alive():
+        return True
     prog = read_progress(video_path)
     if prog and prog.get("status") == "processing":
-        return True
-    return video_path in _running_threads and _running_threads[video_path].is_alive()
+        hb = float(prog.get("heartbeat") or prog.get("start_time") or 0)
+        if hb and (time.time() - hb) < JOB_ORPHAN_SECONDS:
+            return True
+    return False
 
 
 def video_can_khoi_dong_phan_tich(v, only_pending=True):
@@ -6796,17 +7100,57 @@ def bat_dau_phan_tich_background(
     force_train_classifier=False
 ):
     """Khởi chạy tiến trình phân tích video dưới background thread"""
-    # model_type quyết định việc bỏ frame: Heavy/Full = đủ frame, Lite = bỏ frame cho nhanh
+    ckpt_path = get_checkpoint_path(video_path, PROCESSED_DIR)
+    ckpt_existing = load_checkpoint(ckpt_path)
+    has_ckpt = bool(ckpt_existing and ckpt_existing.get("pass1_data") and ckpt_existing.get("phase") in ("pass1_done", "pass2"))
+
+    if has_ckpt:
+        model_type = ckpt_existing.get("model_type") or model_type
+        skip_step = ckpt_existing.get("skip_step") if ckpt_existing.get("skip_step") is not None else skip_step
+        resize_width = ckpt_existing.get("resize_width") or resize_width
+        force_train_classifier = False
+    else:
+        model_type, skip_step, resize_width = tinh_tham_so_toc_do_phan_tich(
+            video_path, exercise_name, model_type, skip_step, resize_width
+        )
     skip_step = skip_step_theo_model(model_type, skip_step)
-    p_file = get_progress_file(video_path)
+
+    if has_ckpt:
+        cfg_now = build_config_hash(video_path, model_type, confidence, exercise_name, skip_step, resize_width)
+        if ckpt_existing.get("config_hash") != cfg_now:
+            print(f"[Checkpoint] Hash khong khop — xoa checkpoint cu va chay lai tu dau")
+            clear_checkpoint(ckpt_path)
+            has_ckpt = False
     
     # Tránh chạy trùng lặp
     if video_path in _running_threads and _running_threads[video_path].is_alive():
         print(f"[BG Process] Thread cho video {video_path} đang chạy.")
         return
         
-    # Ghi tiến trình ban đầu đồng bộ để tránh race condition
-    write_progress(video_path, "processing", username=username, video_name=video_name, progress=0.01, elapsed=0.0, start_time=time.time(), status_msg="🚀 Đang chuẩn bị phân tích...")
+    job_meta = {
+        "full_name": full_name,
+        "exercise_name": exercise_name,
+        "giai_doan": giai_doan,
+        "model_type": model_type,
+        "confidence": confidence,
+        "skip_step": skip_step,
+        "resize_width": resize_width,
+        "force_train_classifier": force_train_classifier,
+    }
+    if has_ckpt:
+        ui_prog, ui_msg = checkpoint_ui_progress(ckpt_existing)
+        write_progress(
+            video_path, "processing", username=username, video_name=video_name,
+            progress=ui_prog, elapsed=float(ckpt_existing.get("elapsed") or 0),
+            start_time=ckpt_existing.get("start_time") or time.time(),
+            status_msg=ui_msg, job_meta=job_meta
+        )
+    else:
+        write_progress(
+            video_path, "processing", username=username, video_name=video_name,
+            progress=0.01, elapsed=0.0, start_time=time.time(),
+            status_msg="🚀 Đang chuẩn bị phân tích...", job_meta=job_meta
+        )
         
     def thread_target():
         nonlocal video_path
@@ -7005,7 +7349,8 @@ def bat_dau_phan_tich_background(
                 model_type=model_type, min_confidence=confidence,
                 exercise_name=exercise_name,
                 skip_step=skip_step, resize_width=resize_width,
-                force_train_classifier=force_train_classifier
+                force_train_classifier=force_train_classifier,
+                checkpoint_video_path=progress_video_path,
             )
             
             elap = time.time() - start_t
