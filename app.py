@@ -1856,11 +1856,12 @@ HF_JSON_CONFIG_FILES = [
 ]
 
 
-def dong_bo_json_cau_hinh_tu_hf():
+def dong_bo_json_cau_hinh_tu_hf(force_files=None):
     """Tải đồng bộ JSON cấu hình từ HF Dataset (video_list.json có thể < 5KB)."""
+    force_set = set(force_files or [])
     for f_name in HF_JSON_CONFIG_FILES:
         dst = os.path.join(DATA_DIR, f_name)
-        if os.path.exists(dst) and os.path.getsize(dst) > 2:
+        if f_name not in force_set and os.path.exists(dst) and os.path.getsize(dst) > 2:
             continue
         got = _hf_download_dataset_file(f_name, quiet=True, min_size=2)
         if got:
@@ -1943,30 +1944,9 @@ def khoi_phuc_video_list_tu_tep():
                     pdata = json.load(pf)
             except Exception:
                 continue
-            if pdata.get("status") != "success":
-                continue
-            res = pdata.get("result") or {}
-            uname = pdata.get("username") or ""
-            vname = pdata.get("video_name") or ""
-            meta = pdata.get("job_meta") or {}
-            ex = meta.get("exercise_name") or res.get("exercise", {}).get("ten") or _exercise_tu_ten_file(vname)
-            fn = meta.get("full_name") or (users.get(uname, {}).get("full_name") if isinstance(users, dict) else uname)
-            stats = res.get("stats") or {}
-            _add({
-                "username": uname,
-                "full_name": fn or uname,
-                "video_name": vname,
-                "exercise": ex if isinstance(ex, str) else str(ex),
-                "accuracy": stats.get("do_chinh_xac") or stats.get("ty_le_tong_the") or 0,
-                "time": get_vn_now().strftime("%H:%M - %d/%m/%Y"),
-                "video_path": pdata.get("video_path") or _tim_upload_theo_video_name(uname, vname),
-                "processed_path": res.get("processed_video_path"),
-                "metrics": stats,
-                "df_path": res.get("df_path"),
-                "all_frames_data_path": res.get("all_frames_data_path"),
-                "frames_zip": res.get("frames_zip"),
-                "status": "Đã phân tích",
-            })
+            rec = _video_entry_from_progress(pdata)
+            if rec:
+                _add(rec)
 
         for csv_f in glob.glob(os.path.join(PROCESSED_DIR, "processed_*_f_data.csv")):
             m = re.search(r"processed_(\d+)_f_data\.csv$", os.path.basename(csv_f))
@@ -2032,6 +2012,133 @@ def khoi_phuc_video_list_tu_tep():
             })
 
     return out
+
+
+def _ensure_videos_file_exists():
+    """Đảm bảo video_list.json tồn tại — fallback từ repo root hoặc database/."""
+    if os.path.exists(VIDEOS_FILE) and os.path.getsize(VIDEOS_FILE) > 2:
+        return
+    for alt in ("video_list.json", os.path.join("database", "video_list.json")):
+        if os.path.exists(alt) and os.path.getsize(alt) > 2:
+            try:
+                shutil.copy2(alt, VIDEOS_FILE)
+                print(f"[VideoList] Copy tu {alt} -> {VIDEOS_FILE}")
+                return
+            except Exception:
+                pass
+
+
+def _video_entry_from_progress(pdata):
+    """Chuyển progress_*.json (success) thành bản ghi video_list."""
+    if pdata.get("status") != "success":
+        return None
+    res = pdata.get("result") or {}
+    uname = pdata.get("username") or ""
+    vname = pdata.get("video_name") or ""
+    if not vname:
+        return None
+    users = load_users()
+    meta = pdata.get("job_meta") or {}
+    ex = meta.get("exercise_name") or res.get("exercise", {}).get("ten") or _exercise_tu_ten_file(vname)
+    fn = meta.get("full_name") or (users.get(uname, {}).get("full_name") if isinstance(users, dict) else uname)
+    stats = res.get("stats") or {}
+    job_time = meta.get("started_at") or pdata.get("updated_at")
+    time_str = get_vn_now().strftime("%H:%M - %d/%m/%Y")
+    if job_time:
+        try:
+            if isinstance(job_time, (int, float)):
+                time_str = datetime.fromtimestamp(job_time).strftime("%H:%M - %d/%m/%Y")
+            elif isinstance(job_time, str) and job_time.strip():
+                time_str = job_time
+        except Exception:
+            pass
+    return {
+        "username": uname,
+        "full_name": fn or uname,
+        "video_name": vname,
+        "exercise": ex if isinstance(ex, str) else str(ex),
+        "accuracy": stats.get("do_chinh_xac") or stats.get("ty_le_tong_the") or 0,
+        "time": time_str,
+        "video_path": pdata.get("video_path") or _tim_upload_theo_video_name(uname, vname),
+        "processed_path": res.get("processed_video_path"),
+        "metrics": stats,
+        "df_path": res.get("df_path"),
+        "all_frames_data_path": res.get("all_frames_data_path"),
+        "frames_zip": res.get("frames_zip"),
+        "status": "Đã phân tích",
+    }
+
+
+def _merge_video_lists_union(base_list, extra_list):
+    """Gộp hai danh sách video — giữ bản ghi đầy đủ hơn theo (username, video_name, exercise)."""
+    by_key = {}
+    for x in base_list or []:
+        key = (x.get("username"), x.get("video_name"), x.get("exercise"))
+        if x.get("video_name"):
+            by_key[key] = x
+    for rec in extra_list or []:
+        key = (rec.get("username"), rec.get("video_name"), rec.get("exercise"))
+        if not rec.get("video_name"):
+            continue
+        if key not in by_key:
+            by_key[key] = rec
+            continue
+        existing = by_key[key]
+        for fld in ("video_path", "processed_path", "df_path", "all_frames_data_path", "metrics", "frames_zip", "time"):
+            if not existing.get(fld) and rec.get(fld):
+                existing[fld] = rec[fld]
+        if rec.get("accuracy") and float(rec.get("accuracy") or 0) > float(existing.get("accuracy") or 0):
+            existing["accuracy"] = rec["accuracy"]
+        if rec.get("status") == "Đã phân tích":
+            existing["status"] = "Đã phân tích"
+    return list(by_key.values())
+
+
+def _merge_missing_from_progress(video_list):
+    """Bổ sung video đã phân tích xong (progress success) nhưng chưa có trong video_list."""
+    import glob
+    if not os.path.isdir(PROCESSED_DIR):
+        return video_list
+    seen = {(x.get("username"), x.get("video_name"), x.get("exercise")) for x in (video_list or [])}
+    extras = []
+    for prog_fn in glob.glob(os.path.join(PROCESSED_DIR, "progress_*.json")):
+        try:
+            with open(prog_fn, "r", encoding="utf-8") as pf:
+                pdata = json.load(pf)
+        except Exception:
+            continue
+        rec = _video_entry_from_progress(pdata)
+        if not rec:
+            continue
+        key = (rec.get("username"), rec.get("video_name"), rec.get("exercise"))
+        if key in seen:
+            continue
+        seen.add(key)
+        extras.append(rec)
+    if not extras:
+        return video_list
+    merged = _merge_video_lists_union(video_list, extras)
+    print(f"[VideoList] Bo sung {len(extras)} video tu progress_*.json")
+    return merged
+
+
+def tai_lai_video_list_tu_cloud():
+    """Tải lại video_list + evaluations từ HF và khôi phục từ progress/CSV/upload."""
+    _ensure_videos_file_exists()
+    dong_bo_json_cau_hinh_tu_hf(force_files=frozenset({"video_list.json", "doctor_evaluations.json"}))
+    try:
+        _load_data_cached.clear()
+    except Exception:
+        pass
+    lst = _merge_video_list_with_evals(load_data(VIDEOS_FILE))
+    recovered = khoi_phuc_video_list_tu_tep()
+    if recovered:
+        lst = _merge_video_lists_union(lst, _merge_video_list_with_evals(recovered))
+    lst = _merge_missing_from_progress(lst)
+    if lst:
+        save_data(VIDEOS_FILE, lst)
+        print(f"[VideoList] Tai lai tu Cloud: {len(lst)} video")
+    return lst or []
 
 
 def _merge_video_list_with_evals(video_list):
@@ -2100,21 +2207,18 @@ def _resolve_video_display_path(raw_path, processed_path):
 
 
 def load_video_list_an_toan():
-    """Nạp video_list.json — đồng bộ HF + khôi phục + gộp đánh giá bác sĩ/NCV."""
-    dong_bo_json_cau_hinh_tu_hf()
-    try:
-        _load_data_cached.clear()
-    except Exception:
-        pass
+    """Nạp video_list.json — cache theo mtime, gộp eval/progress; không tải HF mỗi lần render."""
     lst = _merge_video_list_with_evals(load_data(VIDEOS_FILE))
     if lst:
-        current = load_data(VIDEOS_FILE)
-        if len(lst) > len(current or []):
-            save_data(VIDEOS_FILE, lst)
+        merged = _merge_missing_from_progress(lst)
+        if len(merged) > len(lst):
+            save_data(VIDEOS_FILE, merged)
+            return merged
         return lst
     recovered = khoi_phuc_video_list_tu_tep()
     if recovered:
         recovered = _merge_video_list_with_evals(recovered)
+        recovered = _merge_missing_from_progress(recovered)
         save_data(VIDEOS_FILE, recovered)
         print(f"[VideoList] Da khoi phuc {len(recovered)} video vao video_list.json")
     return recovered or []
@@ -2258,8 +2362,13 @@ def don_dep_file_tam():
 def thuc_hien_khoi_tao_he_thong_mot_lan():
     """Chạy đồng bộ và dọn dẹp hệ thống duy nhất MỘT LẦN khi server khởi động toàn cục"""
     import threading
+    _ensure_videos_file_exists()
     dong_bo_json_cau_hinh_tu_hf()
-    load_video_list_an_toan()
+    lst = load_video_list_an_toan()
+    if lst:
+        merged = _merge_missing_from_progress(lst)
+        if len(merged) > len(lst):
+            save_data(VIDEOS_FILE, merged)
     threading.Thread(target=khoi_tao_dong_bo_hf, daemon=True).start()
     don_dep_file_tam()
 
@@ -13621,14 +13730,8 @@ def hien_thi_danh_sach_video_fragment(user_role):
     if not video_list:
         st.info("📭 Hiện chưa có video nào được gửi đến.")
         if st.button("🔄 Tải lại danh sách từ Cloud / khôi phục", key="btn_reload_video_list", use_container_width=True):
-            try:
-                _load_data_cached.clear()
-            except Exception:
-                pass
-            dong_bo_json_cau_hinh_tu_hf()
-            recovered = khoi_phuc_video_list_tu_tep()
-            if recovered:
-                save_data(VIDEOS_FILE, recovered)
+            with st.spinner("Đang tải danh sách từ Cloud..."):
+                tai_lai_video_list_tu_cloud()
             st.rerun(scope="app")
     else:
         # Load database evaluations outside the loop for extreme speed optimization
