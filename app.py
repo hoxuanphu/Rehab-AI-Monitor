@@ -5693,12 +5693,17 @@ def finalize_and_refresh_analysis(video_path):
     return False
 
 def poll_background_analysis_complete():
-    """Kiểm tra phân tích nền hoàn tất — cho phép chuyển tab trong lúc chờ."""
+    """
+    Nạp NHẸ kết quả phân tích nền nếu đã xong (KHÔNG rerun).
+    Gọi ở đầu main() để khi tải trang, kết quả mới hiện ngay trong cùng lần render.
+    Không gọi st.rerun ở đây để tránh vòng lặp rerun gây vỡ giao diện (vd: kẹt màn đăng nhập).
+    """
     v = st.session_state.get("current_eval_video")
     if not v:
         return
     video_path = v.get("video_path")
-    finalize_and_refresh_analysis(video_path)
+    if video_path:
+        finalize_background_analysis_if_ready(video_path)
 
 def hien_thi_tien_trinh_background(video_path):
     """Hiển thị giao diện tiến trình chạy nền"""
@@ -5858,7 +5863,7 @@ def finalize_and_refresh_analysis(video_path):
     st.toast("✅ Phân tích hoàn tất! Đang hiển thị kết quả...", icon="🎉")
     st.rerun()
 
-@st.fragment(run_every=3)
+@st.fragment(run_every=2)
 def hien_thi_tien_trinh_background_small(video_path):
     """Hiển thị tiến trình chạy nền nhỏ gọn bên trong cột phải (không reload toàn trang)"""
     prog = read_progress(video_path)
@@ -5946,7 +5951,7 @@ def hien_thi_tien_trinh_background_small(video_path):
                 pass
             st.rerun()
 
-@st.fragment(run_every=3)
+@st.fragment(run_every=2)
 def hien_thi_tien_trinh_background_home_fragment(video_path):
     """Hiển thị giao diện tiến trình chạy nền ở màn hình trang chủ (không reload toàn trang)"""
     prog = read_progress(video_path)
@@ -6039,7 +6044,7 @@ def hien_thi_tien_trinh_background_home_fragment(video_path):
                 pass
             st.rerun()
 
-@st.fragment(run_every=3)
+@st.fragment(run_every=2)
 def hien_thi_khu_vuc_phan_tich_chuyen_sau_fragment(v, key_suffix):
     video_path = v['video_path']
     prog_data = read_progress(video_path)
@@ -8098,15 +8103,12 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
     """Hiển thị tab phân tích với thiết kế chuyên nghiệp và nhận định lâm sàng"""
     user_role = st.session_state.user_info.get('role')
     
-    # Kiểm tra tiến trình background trước tiên nếu đang chọn một video
-    if st.session_state.get('current_eval_video'):
+    # Kiểm tra tiến trình background trước tiên nếu đang chọn một video.
+    # Chỉ nạp khi KHÔNG ở chế độ chạy lại (tránh ghi đè trạng thái cấu hình phân tích mới).
+    if st.session_state.get('current_eval_video') and not st.session_state.get('reanalyze_triggered', False):
         v_path = st.session_state.current_eval_video.get('video_path')
         if v_path:
-            prog = read_progress(v_path)
-            if prog and prog.get("status") == "success":
-                check_and_populate_background_result(v_path)
-            elif not st.session_state.get('reanalyze_triggered', False):
-                check_and_populate_background_result(v_path)
+            finalize_background_analysis_if_ready(v_path)
 
     # Nếu không có dữ liệu truyền vào -> Kiểm tra tải tự động (Dành cho NCV)
     if stats_ext is None and df_ext is None:
@@ -8164,10 +8166,8 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
                             """, unsafe_allow_html=True)
                             st.markdown("<br>", unsafe_allow_html=True)
                             if st.button("🚀 CHẠY PHÂN TÍCH & TRÍCH XUẤT MỚI", key=f"btn_choose_new_{key_suffix}", type="primary", use_container_width=True):
-                                if khoi_dong_phan_tich_lai_video(v, auto_start=True):
-                                    st.toast("🚀 Đã bắt đầu phân tích mới (33 điểm + REF + ML)!", icon="⚡")
-                                else:
-                                    st.warning("⚠️ Không tìm thấy file video gốc. Vui lòng tải video từ Cloud trước.")
+                                khoi_dong_phan_tich_lai_video(v, auto_start=False)
+                                st.toast("🛠️ Đã mở giao diện cấu hình — nhấn nút phân tích để bắt đầu!", icon="🛠️")
                                 st.rerun()
                         return
                         
@@ -8331,10 +8331,8 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
                             pass
                     st.toast("✅ Đã khôi phục kết quả phân tích cũ thành công!", icon="📊")
                 else:
-                    if khoi_dong_phan_tich_lai_video(v_re, auto_start=True):
-                        st.toast("🚀 Đã bắt đầu phân tích lại (33 điểm + REF + ML)!", icon="⚡")
-                    else:
-                        st.warning("⚠️ Không tìm thấy file video gốc trên máy chủ.")
+                    khoi_dong_phan_tich_lai_video(v_re, auto_start=False)
+                    st.toast("🛠️ Đã mở giao diện cấu hình — nhấn nút phân tích để bắt đầu!", icon="🛠️")
                 st.rerun()
         return
 
@@ -12704,8 +12702,6 @@ def hien_thi_danh_sach_video_fragment(user_role):
 # ============================================
 @st.fragment
 def _render_main_tab_content(tab_titles, user_role):
-        poll_background_analysis_complete()
-
         if st.session_state.get('trigger_tab_switch'):
             if st.session_state.trigger_tab_switch in tab_titles:
                 st.session_state.active_tab = st.session_state.trigger_tab_switch
@@ -13445,6 +13441,9 @@ def main():
         # Nếu chưa đăng nhập, hiển thị trang đăng nhập toàn màn hình và dừng lại
         hien_thi_dang_nhap_dang_ky()
         return
+
+    # Nạp nhẹ kết quả phân tích nền đã hoàn tất (không rerun) -> hiện ngay khi tải trang
+    poll_background_analysis_complete()
 
     # Callback xử lý đổi theme nhanh
     def update_theme_callback():
