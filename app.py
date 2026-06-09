@@ -5677,18 +5677,28 @@ def finalize_background_analysis_if_ready(video_path):
         return True
     return False
 
+def finalize_and_refresh_analysis(video_path):
+    """
+    Nạp kết quả phân tích nền (nếu đã xong) và refresh TOÀN TRANG.
+    Dùng scope="app" để khi gọi từ trong @st.fragment vẫn rerun cả trang,
+    tránh lỗi kết quả không hiển thị (fragment rerun chỉ làm mới vùng nhỏ).
+    """
+    if video_path and finalize_background_analysis_if_ready(video_path):
+        st.toast(
+            "✅ Phân tích AI hoàn tất! Kết quả đã hiển thị — bạn có thể chuyển tab khác.",
+            icon="🎉",
+        )
+        st.rerun(scope="app")
+        return True
+    return False
+
 def poll_background_analysis_complete():
     """Kiểm tra phân tích nền hoàn tất — cho phép chuyển tab trong lúc chờ."""
     v = st.session_state.get("current_eval_video")
     if not v:
         return
     video_path = v.get("video_path")
-    if video_path and finalize_background_analysis_if_ready(video_path):
-        st.toast(
-            "✅ Phân tích AI hoàn tất! Xem kết quả tại tab Phân tích hoặc chuyển tab khác.",
-            icon="🎉",
-        )
-        st.rerun()
+    finalize_and_refresh_analysis(video_path)
 
 def hien_thi_tien_trinh_background(video_path):
     """Hiển thị giao diện tiến trình chạy nền"""
@@ -5783,9 +5793,7 @@ def hien_thi_tien_trinh_background_small(video_path):
         </div>
         """, unsafe_allow_html=True)
     elif status == "success":
-        if finalize_background_analysis_if_ready(video_path):
-            st.toast("✅ Phân tích hoàn tất! Bạn có thể chuyển tab khác.", icon="🎉")
-            st.rerun()
+        finalize_and_refresh_analysis(video_path)
     elif status == "error":
         err_msg = prog.get("error_msg", "Lỗi không xác định")
         st.error(f"❌ Phân tích thất bại: {err_msg}")
@@ -5846,9 +5854,7 @@ def hien_thi_tien_trinh_background_home_fragment(video_path):
         </div>
         """, unsafe_allow_html=True)
     elif status == "success":
-        if finalize_background_analysis_if_ready(video_path):
-            st.toast("✅ Phân tích hoàn tất! Bạn có thể chuyển tab khác.", icon="🎉")
-            st.rerun()
+        finalize_and_refresh_analysis(video_path)
     elif status == "error":
         err_msg = prog.get("error_msg", "Lỗi không xác định")
         st.error(f"❌ Phân tích thất bại: {err_msg}")
@@ -5884,18 +5890,17 @@ def hien_thi_khu_vuc_phan_tich_chuyen_sau_fragment(v, key_suffix):
             is_error = True
             err_msg = prog_data.get("error_msg", "Lỗi không xác định")
         elif status == "success":
-            if finalize_background_analysis_if_ready(video_path):
-                st.toast("✅ Phân tích hoàn tất! Bạn có thể chuyển tab khác.", icon="🎉")
-                st.rerun()
+            finalize_and_refresh_analysis(video_path)
             
     st.info("💡 Bạn có thể thực hiện phân tích ngay bây giờ để xem kết quả khung xương và chỉ số lâm sàng.")
 
     st.markdown("""
     **Luồng phân tích tích hợp (4 bước):**
-    1. **Input video bệnh nhân** — MediaPipe Heavy trích xuất **33 landmarks**
-    2. **Đối chiếu YouTube mẫu** — Codman: góc vai/khuỷu **tay phải**, 3 giai đoạn (45°/30°/15°); Gậy: **cả hai bên** → nhãn REF: PASS / NEARLY / FAIL
-    3. **Huấn luyện / nạp ML Classifier** — Random Forest trên tọa độ khớp (tự train nếu chưa có model)
-    4. **Đầu ra** — Video + ảnh frame có khung xương, nhãn **REF** (góc) và **ML** (model đã train)
+    1. **Input video bệnh nhân** — MediaPipe Pose trích xuất **33 landmarks**. Chọn ở sidebar:
+       **Heavy** (đủ frame + video + chỉ số nghiên cứu đầy đủ), **Full** (đủ frame + video, chỉ số cơ bản), **Lite** (tự bỏ frame cho nhanh).
+    2. **Đối chiếu YouTube mẫu (RULE)** — Codman: góc vai/khuỷu **tay phải**, 3 giai đoạn (45°/30°/15°); Gậy: **cả hai bên** → nhãn REF: PASS / NEARLY / FAIL
+    3. **Huấn luyện / nạp ML Classifier** — Random Forest trên tọa độ khớp + góc (tự train nếu chưa có model)
+    4. **Đầu ra** — Video + tất cả ảnh frame có khung xương, nhãn **REF** (theo góc) và **ML** (model đã train) + CSV 33 điểm
     """)
     
     if is_error:
@@ -5990,6 +5995,22 @@ def download_file_with_progress(file_path, write_progress_fn, start_t, username,
         print(f"[Download Progress] Lỗi khi tải file {file_path}: {e}")
         return False
 
+def skip_step_theo_model(model_type, manual_skip=None):
+    """
+    Quy ước bỏ frame theo loại MediaPipe:
+    - Heavy: lấy MỌI frame (skip=0) — đầy đủ + chính xác nhất.
+    - Full : lấy MỌI frame (skip=0) — đầy đủ frames + video.
+    - Lite : tự bỏ frame (skip>=2) để xử lý nhanh; vẫn theo độ phân giải đã chọn.
+    """
+    mt = str(model_type or "")
+    if "Lite" in mt:
+        try:
+            ms = int(manual_skip) if manual_skip is not None else 0
+        except (TypeError, ValueError):
+            ms = 0
+        return max(ms, 2)
+    return 0
+
 def bat_dau_phan_tich_background(
     video_path,
     username,
@@ -6004,6 +6025,8 @@ def bat_dau_phan_tich_background(
     resize_width=None
 ):
     """Khởi chạy tiến trình phân tích video dưới background thread"""
+    # model_type quyết định việc bỏ frame: Heavy/Full = đủ frame, Lite = bỏ frame cho nhanh
+    skip_step = skip_step_theo_model(model_type, skip_step)
     p_file = get_progress_file(video_path)
     
     # Tránh chạy trùng lặp
@@ -8525,10 +8548,12 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
 
     # 2. HỆ THỐNG TAB NỘI BỘ (SẮP XẾP LẠI KHOA HỌC)
     tab_list = ["🏠 TỔNG QUAN", "📈 BIỂU ĐỒ KHỚP"]
+    # Heavy + Full: có biểu đồ Biên độ ROM. Lite: bỏ qua cho gọn nhẹ.
     if "Lite" not in model_type:
         tab_list += ["📦 BIÊN ĐỘ ROM"]
     tab_list += ["🩺 NHẬN ĐỊNH LÂM SÀNG"]
-    if "Lite" not in model_type:
+    # Chỉ số nghiên cứu chuyên sâu: chỉ dành riêng cho bản Heavy.
+    if "Heavy" in model_type:
         tab_list += ["🔬 CHỈ SỐ NGHIÊN CỨU"]
     tab_list += ["📁 XUẤT BÁO CÁO"]
     
@@ -13356,7 +13381,7 @@ def main():
                          index=1, # Mặc định là Bỏ qua 1 frame để tăng tốc xử lý gấp đôi trên CPU
                          format_func=lambda x: "Mặc định (Mọi frame)" if x==0 else f"Nhanh (Bỏ qua {x} frame)",
                          key="ncv_skip_frames",
-                         help="Bỏ qua một số khung hình để tăng tốc độ xử lý video dài.")
+                         help="Bỏ qua một số khung hình để tăng tốc xử lý video dài. Lưu ý: Heavy/Full luôn lấy MỌI frame; chỉ Lite mới áp dụng bỏ frame.")
             st.selectbox("Độ phân giải video (Video Quality)",
                          options=[480, 720, 1080],
                          index=0, # Mặc định là 480p (Tốc độ tối ưu) giúp xử lý nhanh gấp đôi
@@ -13400,7 +13425,11 @@ def main():
                          options=["MediaPipe Heavy", "MediaPipe Full", "MediaPipe Lite"], 
                          index=0, # Mặc định là Heavy để đảm bảo trích xuất chính xác 33 điểm nhất
                          key="ncv_model_type",
-                         help="Mô hình Heavy có độ chính xác cao nhất (Complexity 2), chuyên dụng cho nghiên cứu lâm sàng.")
+                         help=(
+                             "Heavy (Complexity 2): chính xác nhất, lấy MỌI frame + video + đầy đủ chỉ số nghiên cứu. "
+                             "Full (Complexity 1): lấy MỌI frame + video, chỉ số cơ bản. "
+                             "Lite (Complexity 0): tự bỏ bớt frame để xử lý nhanh, dashboard gọn nhẹ."
+                         ))
 
             st.markdown("### 🤖 POSE CLASSIFIER")
             st.caption("Sau khi upload video: trích xuất 33 điểm → đối chiếu YouTube (REF) → train/nạp ML → frame có nhãn REF + ML.")
