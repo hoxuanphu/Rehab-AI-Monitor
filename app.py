@@ -5807,6 +5807,75 @@ def poll_background_analysis_complete():
     if video_path:
         finalize_background_analysis_if_ready(video_path)
 
+def liet_ke_jobs_dang_chay():
+    """Đọc tất cả file progress trên đĩa để lấy danh sách video đang trích xuất.
+    Nhờ tiến trình ghi ra đĩa dùng chung nên mở link ở thiết bị/nền tảng nào cũng thấy."""
+    jobs = []
+    if not os.path.exists(PROCESSED_DIR):
+        return jobs
+    try:
+        for fn in os.listdir(PROCESSED_DIR):
+            if fn.startswith("progress_") and fn.endswith(".json"):
+                try:
+                    with open(os.path.join(PROCESSED_DIR, fn), 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                except Exception:
+                    continue
+                if data and data.get("status") == "processing":
+                    jobs.append(data)
+    except Exception as scan_err:
+        print(f"[Jobs] Loi quet progress: {scan_err}")
+    return jobs
+
+@st.fragment(run_every=2)
+def hien_thi_jobs_dang_chay_fragment(key_suffix=""):
+    """Panel theo dõi các video đang trích xuất khung xương — dùng chung cho mọi thiết bị/phiên."""
+    jobs = liet_ke_jobs_dang_chay()
+    if not jobs:
+        return
+    st.markdown("#### 🔄 Video đang trích xuất khung xương (chạy nền — mở link ở thiết bị nào cũng theo dõi được)")
+    for job in jobs:
+        vp = job.get("video_path", "")
+        vname = job.get("video_name", "Video")
+        prog = job.get("progress", 0.0)
+        try:
+            prog = min(max(float(prog), 0.0), 1.0)
+        except (TypeError, ValueError):
+            prog = 0.0
+        msg = job.get("status_msg", "")
+        elapsed = job.get("elapsed", 0.0)
+        c1, c2 = st.columns([3.2, 1])
+        with c1:
+            try:
+                st.progress(prog, text=f"🎬 {vname} — {prog*100:.0f}% · ⏱️ {elapsed:.0f}s · {msg}")
+            except TypeError:
+                st.progress(prog)
+                st.caption(f"🎬 {vname} — {prog*100:.0f}% · {msg}")
+        with c2:
+            is_current = st.session_state.get("current_eval_video", {}).get("video_path") == vp
+            if is_current:
+                st.caption("👁️ Đang xem")
+            elif st.button("👁️ Theo dõi", key=f"track_job_{hashlib.md5((vp + key_suffix).encode()).hexdigest()}", use_container_width=True):
+                vid = None
+                try:
+                    all_vids = load_data(VIDEOS_FILE)
+                    vid = next((x for x in all_vids if x.get('video_path') == vp), None)
+                except Exception:
+                    vid = None
+                if not vid:
+                    vid = {
+                        "video_path": vp,
+                        "username": job.get("username"),
+                        "video_name": vname,
+                        "full_name": job.get("full_name", "Bệnh nhân"),
+                        "exercise": "codman",
+                    }
+                st.session_state.current_eval_video = vid
+                st.session_state.reanalyze_triggered = True
+                st.session_state.view_old_analysis = False
+                st.rerun(scope="app")
+    st.markdown("---")
+
 def hien_thi_tien_trinh_background(video_path):
     """Hiển thị giao diện tiến trình chạy nền"""
     prog = read_progress(video_path)
@@ -8204,7 +8273,11 @@ st.markdown(f"""
 def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_ext=None):
     """Hiển thị tab phân tích với thiết kế chuyên nghiệp và nhận định lâm sàng"""
     user_role = st.session_state.user_info.get('role')
-    
+
+    # Panel theo dõi các video đang trích xuất (dùng chung mọi thiết bị) — chỉ cho NCV
+    if user_role == "Nghiên cứu viên":
+        hien_thi_jobs_dang_chay_fragment(key_suffix=key_suffix)
+
     # Kiểm tra tiến trình background trước tiên nếu đang chọn một video.
     # Chỉ nạp khi KHÔNG ở chế độ chạy lại (tránh ghi đè trạng thái cấu hình phân tích mới).
     if st.session_state.get('current_eval_video') and not st.session_state.get('reanalyze_triggered', False):
