@@ -4817,7 +4817,7 @@ def dong_bo_va_chuan_hoa_exercise(username, video_name, video_path, original_exe
         
     return correct_ex_name
 
-def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaPipe Heavy", min_confidence=0.5, exercise_name="codman", skip_step=None, resize_width=None):
+def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaPipe Heavy", min_confidence=0.5, exercise_name="codman", skip_step=None, resize_width=None, force_train_classifier=False):
     import gc
     import json
     import os
@@ -5087,6 +5087,15 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
     ml_predict_row = None
     if create_pose_classifier_predictor and ensure_classifier_ready:
         try:
+            if force_train_classifier and train_pose_classifier:
+                train_state = train_pose_classifier(PROCESSED_DIR, DB_DIR)
+                if train_state.get("success"):
+                    try:
+                        st.toast("Da cap nhat/train lai ML classifier truoc khi gan nhan.", icon="ML")
+                    except Exception:
+                        pass
+                else:
+                    print(f"[Pose Classifier] Khong train lai duoc, se thu nap model hien co: {train_state.get('message')}")
             clf_state = ensure_classifier_ready(PROCESSED_DIR, DB_DIR, auto_train=True)
             if clf_state.get("ready"):
                 ml_predict_row = create_pose_classifier_predictor(DB_DIR)
@@ -5569,6 +5578,7 @@ def khoi_dong_phan_tich_lai_video(v, auto_start=True):
         confidence=st.session_state.get("ncv_confidence", 0.5),
         skip_step=st.session_state.get("ncv_skip_frames", 0),
         resize_width=st.session_state.get("ncv_resize_width", 720),
+        force_train_classifier=True,
     )
     return True
 
@@ -6141,7 +6151,8 @@ def hien_thi_khu_vuc_phan_tich_chuyen_sau_fragment(v, key_suffix):
                 model_type=st.session_state.get('ncv_model_type', 'MediaPipe Heavy'),
                 confidence=st.session_state.get('ncv_confidence', 0.5),
                 skip_step=st.session_state.get('ncv_skip_frames', 0),
-                resize_width=st.session_state.get('ncv_resize_width', 720)
+                resize_width=st.session_state.get('ncv_resize_width', 720),
+                force_train_classifier=st.session_state.get("reanalyze_triggered", False)
             )
             st.toast("🚀 Đã khởi chạy phân tích dưới nền thành công!", icon="⚡")
 
@@ -6231,7 +6242,8 @@ def bat_dau_phan_tich_background(
     confidence,
     temp_uploaded_path=None,
     skip_step=None,
-    resize_width=None
+    resize_width=None,
+    force_train_classifier=False
 ):
     """Khởi chạy tiến trình phân tích video dưới background thread"""
     # model_type quyết định việc bỏ frame: Heavy/Full = đủ frame, Lite = bỏ frame cho nhanh
@@ -6417,7 +6429,8 @@ def bat_dau_phan_tich_background(
                 analysis_input_path, bt_chuan_ncv, bg_progress_callback,
                 model_type=model_type, min_confidence=confidence,
                 exercise_name=exercise_name,
-                skip_step=skip_step, resize_width=resize_width
+                skip_step=skip_step, resize_width=resize_width,
+                force_train_classifier=force_train_classifier
             )
             
             elap = time.time() - start_t
