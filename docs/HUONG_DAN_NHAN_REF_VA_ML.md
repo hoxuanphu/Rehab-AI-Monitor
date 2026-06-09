@@ -25,13 +25,14 @@ Video YouTube mẫu (Codman, gậy, dây kháng lực) thường dài và gồm 
 
 1. **Trích xuất trước** bản đồ góc chuẩn từ video YouTube (MediaPipe) → lưu trong `database/reference_<bài_tập>.json`  
    Mỗi tư thế mẫu gồm: `time`, `vai`, `khuyu` và (với gậy) `vai_trai`, `khuyu_trai`, `vai_phai`, `khuyu_phai`, kèm `exercise_id` (1/2/3) và `motion_type`.  
-   Chạy lại trích xuất: `python scripts/extract_youtube_reference.py codman gay`
+   Chạy lại trích xuất: `python scripts/extract_youtube_reference.py codman gay day`
 
 2. **Ưu tiên đoạn động tác liên quan xoay / con lắc** (không lấy cả video tuần tự):
    - **Codman:** tập trung đoạn **xoay vòng tròn bàn tay / con lắc** (tay thả lỏng, vai–khuỷu dao động theo vòng cung). File `reference_codman.json` mô tả chu kỳ góc vai ~30°↔60°, khuỷu ~171°↔175° trong pha xoay — **không** dùng phần mở đầu/giới thiệu của video YouTube.
    - **Bài tập gậy (Pulley):** tương tự — bản chuẩn lấy từ các pha **nâng gậy, xoay vai ngoài/trong** có biên độ rõ trên video mẫu (`reference_gay.json`), không ép khớp theo thứ tự thời gian tuyệt đối.
+   - **Dây kháng lực (Theraband):** trích từ các pha **xoay ngoài, xoay trong, dang vai** trong `reference_day.json`; ưu tiên so **góc khuỷu** (khuỷu gập ~90° khi xoay), kèm góc vai.
 
-3. **Nhận dạng động tác con (1/2/3)** từ góc hiện tại — ví dụ bệnh nhân **dơ gậy cao** → khớp mẫu động tác 1 (flexion) trong `reference_gay.json`; Codman xoay vòng → động tác 3 (circular), chỉ so **tay phải**.
+3. **Nhận dạng động tác con (1/2/3)** từ góc hiện tại — ví dụ bệnh nhân **dơ gậy cao** → khớp mẫu BT1 (flexion) trong `reference_gay.json`; Codman xoay vòng → BT3 (circular), chỉ so **tay phải**; dây kháng lực xoay ngoài (khuỷu ~90°) → BT1 trong `reference_day.json`.
 
 4. **Khi phân tích từng frame bệnh nhân**, máy tìm **tư thế mẫu gần nhất** trong JSON (theo góc, không theo giây):
 
@@ -55,7 +56,7 @@ Video YouTube mẫu (Codman, gậy, dây kháng lực) thường dài và gồm 
 |-------------------|------------|-------------------------|
 | Codman — [youtu.be/a4eCRWuqO40](https://youtu.be/a4eCRWuqO40) | `reference_codman.json` | BT1 đung trước-sau · BT2 sang ngang · BT3 xoay vòng (tay phải) |
 | Gậy — [youtube.com/watch?v=s2O8WHT5o2k](https://www.youtube.com/watch?v=s2O8WHT5o2k) | `reference_gay.json` | BT1 dơ gậy cao · BT2 xoay ngoài · BT3 xoay trong (hai bên) |
-| Dây kháng lực — [youtube.com/watch?v=njDHDnZ6lis](https://www.youtube.com/watch?v=njDHDnZ6lis) | `reference_day.json` | Các pha xoay/dang theo mẫu hướng dẫn |
+| Dây kháng lực — [youtube.com/watch?v=njDHDnZ6lis](https://www.youtube.com/watch?v=njDHDnZ6lis) | `reference_day.json` | BT1 xoay ngoài · BT2 xoay trong · BT3 dang vai (hai bên, ưu tiên khuỷu) |
 
 ### 2.2. Cách tính sai số (Δ)
 

@@ -36,6 +36,11 @@ _MOTION_SIGNATURES: dict[str, dict[str, dict[str, float]]] = {
         "2": {"vai_min": 25, "vai_max": 90, "khuyu_min": 70, "khuyu_max": 120},
         "3": {"vai_min": 10, "vai_max": 70, "khuyu_min": 80, "khuyu_max": 150},
     },
+    "day": {
+        "1": {"vai_min": 5, "vai_max": 65, "khuyu_min": 65, "khuyu_max": 135},
+        "2": {"vai_min": 3, "vai_max": 55, "khuyu_min": 85, "khuyu_max": 160},
+        "3": {"vai_min": 35, "vai_max": 110, "khuyu_min": 130, "khuyu_max": 180},
+    },
 }
 
 
@@ -123,6 +128,11 @@ def detect_motion_subtype(
     elif family == "codman":
         vai_use = float(vai_phai if vai_phai is not None else (vai or 0))
         khuyu_use = float(khuyu_phai if khuyu_phai is not None else (khuyu or 170))
+    elif family == "day":
+        khuyu_candidates = [khuyu, khuyu_trai, khuyu_phai]
+        vai_candidates = [vai, vai_trai, vai_phai]
+        khuyu_use = max(float(x) for x in khuyu_candidates if x is not None)
+        vai_use = max(float(x) for x in vai_candidates if x is not None)
     else:
         vai_use = float(vai or 0)
         khuyu_use = float(khuyu or 170)
@@ -215,6 +225,28 @@ def filter_reference_poses(
         if len(filtered) >= 3:
             return filtered
 
+    if is_day_exercise(exercise_name):
+        if motion_subtype == "1":
+            filtered = [
+                r for r in refs
+                if 60 <= float(r.get("khuyu", r.get("khuyu_trai", 170))) <= 140
+            ]
+        elif motion_subtype == "2":
+            filtered = [
+                r for r in refs
+                if 80 <= float(r.get("khuyu", r.get("khuyu_trai", 170))) <= 165
+            ]
+        elif motion_subtype == "3":
+            filtered = [
+                r for r in refs
+                if float(r.get("khuyu", r.get("khuyu_trai", 170))) >= 125
+                or float(r.get("vai", r.get("vai_trai", 0))) >= 40
+            ]
+        else:
+            filtered = [r for r in refs if 50 <= float(r.get("khuyu", 170)) <= 180]
+        if len(filtered) >= 3:
+            return filtered
+
     return refs
 
 
@@ -232,6 +264,12 @@ def _subtype_motion_types(exercise_name: str | None, subtype: str) -> set[str]:
             "2": {"external_rotation", "external", "xoay_ngoai"},
             "3": {"internal_rotation", "internal", "xoay_trong"},
         }.get(subtype, set())
+    if family == "day":
+        return {
+            "1": {"external_rotation", "external", "xoay_ngoai"},
+            "2": {"internal_rotation", "internal", "xoay_trong"},
+            "3": {"abduction", "dang", "lateral_raise"},
+        }.get(subtype, set())
     return set()
 
 
@@ -248,7 +286,11 @@ def _pose_distance(
     weight_vai: float = 1.0,
     weight_khuyu: float = 1.0,
 ) -> float:
-    if is_gay_exercise(exercise_name) and vai_trai is not None and vai_phai is not None:
+    if (
+        (is_gay_exercise(exercise_name) or is_day_exercise(exercise_name))
+        and vai_trai is not None
+        and vai_phai is not None
+    ):
         rv_t = float(ref.get("vai_trai", ref.get("vai", 90)))
         rk_t = float(ref.get("khuyu_trai", ref.get("khuyu", 170)))
         rv_p = float(ref.get("vai_phai", ref.get("vai", 90)))
@@ -305,7 +347,22 @@ def find_closest_reference_pose(
     scoped = filter_reference_poses(refs, exercise_name, subtype)
 
     if is_day_exercise(exercise_name):
-        return min(scoped, key=lambda x: abs(float(x.get("khuyu", 170)) - khuyu_val), default=None)
+        return min(
+            scoped,
+            key=lambda x: _pose_distance(
+                x,
+                float(vai),
+                khuyu_val,
+                vai_trai=vai_trai,
+                vai_phai=vai_phai,
+                khuyu_trai=khuyu_trai,
+                khuyu_phai=khuyu_phai,
+                exercise_name=exercise_name,
+                weight_vai=0.4,
+                weight_khuyu=2.0,
+            ),
+            default=None,
+        )
 
     return min(
         scoped,

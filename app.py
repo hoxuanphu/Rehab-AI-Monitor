@@ -4439,9 +4439,11 @@ def xu_ly_frame(frame, model, chuan, frame_idx, fps=30, dynamic_chuan=None, acti
     motion_subtype_detected = None
     if dynamic_chuan:
         is_gay_ex = any(kw in str(exercise_name or '').lower() for kw in ["gậy", "gay", "pulley", "stick"])
+        is_day_ex = any(kw in str(exercise_name or '').lower() for kw in ["dây", "day", "kháng lực", "khang", "theraband", "band"])
+        is_both_sides = is_gay_ex or is_day_ex
         
-        current_vai = (goc_vai_t + goc_vai_p) / 2 if is_gay_ex else goc_vai
-        current_khuyu = (goc_khuyu_t + goc_khuyu_p) / 2 if is_gay_ex else goc_khuyu
+        current_vai = (goc_vai_t + goc_vai_p) / 2 if is_both_sides else goc_vai
+        current_khuyu = (goc_khuyu_t + goc_khuyu_p) / 2 if is_both_sides else goc_khuyu
         motion_subtype_detected = detect_motion_subtype(
             exercise_name,
             current_vai,
@@ -4477,8 +4479,9 @@ def xu_ly_frame(frame, model, chuan, frame_idx, fps=30, dynamic_chuan=None, acti
     ex_clean = str(exercise_name or '').lower()
     is_gay = any(kw in ex_clean for kw in ["gậy", "gay", "pulley", "stick"])
     is_codman = any(kw in ex_clean for kw in ["codman"])
+    is_day = any(kw in ex_clean for kw in ["dây", "day", "kháng lực", "khang", "theraband", "band"])
     
-    if is_gay:
+    if is_gay or is_day:
         vai_diff_t = abs(goc_vai_t - chuan_vai_t)
         vai_diff_p = abs(goc_vai_p - chuan_vai_p)
         khuyu_diff_t = abs(goc_khuyu_t - chuan_khuyu_t)

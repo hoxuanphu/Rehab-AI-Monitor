@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Trích xuất góc vai/khuỷu từ video YouTube mẫu (MediaPipe) và lưu reference JSON
-theo từng động tác 1, 2, 3 của Codman hoặc bài tập với gậy.
+theo từng động tác 1, 2, 3 của Codman, bài tập với gậy hoặc dây kháng lực.
 """
 
 from __future__ import annotations
@@ -91,6 +91,30 @@ EXERCISE_SEGMENTS: dict[str, dict[str, Any]] = {
                 "motion_type": "internal_rotation",
                 "time_start": 90.0,
                 "time_end": 130.0,
+            },
+        },
+    },
+    "day": {
+        "youtube": "https://www.youtube.com/watch?v=njDHDnZ6lis",
+        "side": "both",
+        "exercises": {
+            "1": {
+                "name": "Xoay vai ngoài (External rotation)",
+                "motion_type": "external_rotation",
+                "time_start": 88.0,
+                "time_end": 118.0,
+            },
+            "2": {
+                "name": "Xoay vai trong (Internal rotation)",
+                "motion_type": "internal_rotation",
+                "time_start": 118.0,
+                "time_end": 148.0,
+            },
+            "3": {
+                "name": "Dang vai (Abduction)",
+                "motion_type": "abduction",
+                "time_start": 148.0,
+                "time_end": 198.0,
             },
         },
     },
@@ -282,7 +306,7 @@ def extract_and_save(exercise_key: str, output_path: str | None = None) -> str:
 
 
 def main() -> int:
-    keys = sys.argv[1:] if len(sys.argv) > 1 else ["codman", "gay"]
+    keys = sys.argv[1:] if len(sys.argv) > 1 else ["codman", "gay", "day"]
     for key in keys:
         if key not in EXERCISE_SEGMENTS:
             print(f"Bỏ qua key không hợp lệ: {key}")
