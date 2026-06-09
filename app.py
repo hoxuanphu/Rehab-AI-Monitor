@@ -182,6 +182,25 @@ def get_video_fps_cached(path, mtime, size):
     except:
         return 15
 
+@st.cache_data(max_entries=80, show_spinner=False)
+def read_csv_cached(path, mtime, size):
+    """Đọc CSV có cache theo mtime/size để biểu đồ phân tích mở lại nhanh hơn."""
+    return pd.read_csv(path)
+
+def read_analysis_csv_fast(path):
+    """Đọc CSV phân tích nhanh: cache nếu file local đã sẵn sàng."""
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        mtime = os.path.getmtime(path)
+        size = os.path.getsize(path)
+        return read_csv_cached(path, mtime, size)
+    except Exception:
+        try:
+            return pd.read_csv(path)
+        except Exception:
+            return None
+
 
 # --- THUMBNAIL GENERATOR ---
 def get_thumbnail(path, width=320):
@@ -1361,25 +1380,9 @@ def khoi_tao_dong_bo_hf():
             except Exception as e:
                 pass
                 
-        # 3. Quét và tải toàn bộ thư mục patient_uploads và processed_results từ dataset về máy
-        try:
-            from huggingface_hub import list_repo_files
-            files = list_repo_files(repo_id=HF_DATASET_ID, repo_type="dataset", token=HF_TOKEN)
-            for f in files:
-                if f.startswith("patient_uploads/") or f.startswith("processed_results/"):
-                    try:
-                        hf_hub_download(
-                            repo_id=HF_DATASET_ID,
-                            filename=f,
-                            repo_type="dataset",
-                            token=HF_TOKEN,
-                            local_dir=DATA_DIR
-                        )
-                        print(f"[HF Sync] Đã đồng bộ file: {f}")
-                    except:
-                        pass
-        except:
-            pass
+        # 3. Không tải hàng loạt patient_uploads/processed_results lúc khởi động.
+        # Các file video/frames/CSV lớn được lazy-load qua ensure_local_file() khi thật sự cần,
+        # giúp đăng nhập và mở kết quả cũ nhanh hơn rất nhiều trên HF Space.
     except Exception as e:
         print(f"[HF Sync] Lỗi khởi động đồng bộ: {e}")
 
@@ -4909,6 +4912,7 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
     
     from concurrent.futures import ThreadPoolExecutor
     img_writer_executor = ThreadPoolExecutor(max_workers=4)
+    frame_write_futures = []
     
     model = get_pose_model(model_type=model_type, min_confidence=min_confidence)
     du_lieu_goc = []
@@ -5092,6 +5096,9 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
     if create_pose_classifier_predictor and ensure_classifier_ready:
         try:
             if force_train_classifier and train_pose_classifier:
+                if callback:
+                    try: callback(0.501)
+                    except: pass
                 train_state = train_pose_classifier(PROCESSED_DIR, DB_DIR)
                 if train_state.get("success"):
                     try:
@@ -5100,6 +5107,9 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
                         pass
                 else:
                     print(f"[Pose Classifier] Khong train lai duoc, se thu nap model hien co: {train_state.get('message')}")
+                if callback:
+                    try: callback(0.505)
+                    except: pass
             clf_state = ensure_classifier_ready(PROCESSED_DIR, DB_DIR, auto_train=True)
             if clf_state.get("ready"):
                 ml_predict_row = create_pose_classifier_predictor(DB_DIR)
@@ -5118,14 +5128,12 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
     # PASS 2: Reset video capture và vẽ đè/ghi video với sai số động theo giai đoạn
     if cap: cap.release()
     
-    # Tạo bản sao của video để Pass 2 đọc độc lập, tránh xung đột khóa file (File Lock)
-    import shutil
-    temp_copy_path = duong_dan_video + "_pass2.mp4"
-    try:
-        shutil.copy(duong_dan_video, temp_copy_path)
-    except Exception as e:
-        print("Lỗi tạo bản sao video:", e)
-        temp_copy_path = duong_dan_video  # Fallback
+    # Pass 2 đọc lại trực tiếp từ video sau khi cap đã release.
+    # Không copy nguyên video GB sang *_pass2.mp4 vì bước copy làm progress đứng rất lâu.
+    temp_copy_path = duong_dan_video
+    if callback:
+        try: callback(0.505)
+        except: pass
         
     cap = cv2.VideoCapture(temp_copy_path)
         
@@ -5281,7 +5289,9 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
 
             # Save extracted frames after all overlays have been drawn.
             try:
-                img_writer_executor.submit(cv2.imwrite, local_frame_path, xu_ly.copy(), [cv2.IMWRITE_JPEG_QUALITY, 85])
+                frame_write_futures.append(
+                    img_writer_executor.submit(cv2.imwrite, local_frame_path, xu_ly.copy(), [cv2.IMWRITE_JPEG_QUALITY, 85])
+                )
             except Exception as write_err:
                 print("Loi submit ghi anh:", write_err)
 
@@ -5289,7 +5299,8 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
             
             if callback and tong_frame > 0:
                 p_len = len(raw_pass1_data)
-                prog = 0.5 + (min(processed_count / p_len, 1.0) * 0.5 if p_len > 0 else 0.5)
+                # Pass 2 chỉ đi tới 90%; phần sau dành cho chờ ghi ảnh/ZIP/đóng gói H.264.
+                prog = 0.5 + (min(processed_count / p_len, 1.0) * 0.40 if p_len > 0 else 0.40)
                 callback(prog)
                 if processed_count % 100 == 1 or processed_count == p_len:
                     print(f"[AI Process] Pass 2: Frame {processed_count}/{p_len} (Tiến độ: {prog*100:.1f}%)")
@@ -5308,12 +5319,27 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
             try: os.unlink(temp_copy_path)
             except: pass
         if 'img_writer_executor' in locals():
-            img_writer_executor.shutdown(wait=True)
+            if frame_write_futures:
+                total_futures = len(frame_write_futures)
+                for fut_idx, fut in enumerate(frame_write_futures, start=1):
+                    try:
+                        fut.result()
+                    except Exception as write_wait_err:
+                        print("Loi cho ghi anh:", write_wait_err)
+                    if callback and (fut_idx % 50 == 0 or fut_idx == total_futures):
+                        try:
+                            callback(0.90 + min(fut_idx / max(total_futures, 1), 1.0) * 0.02)
+                        except:
+                            pass
+            img_writer_executor.shutdown(wait=False)
         gc.collect()
 
     # SAU KHI XỬ LÝ XONG, TIẾN HÀNH TRỘN ÂM THANH NẾU CÓ THAY ĐỔI
     audio_mixed = False
     mixed_audio_path = out_path.replace('.mp4', '_audio.wav')
+    if callback:
+        try: callback(0.925)
+        except: pass
     
     try:
         from pydub import AudioSegment
@@ -5371,12 +5397,18 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
     zip_path = out_path.replace('.mp4', '_frames.zip')
     try:
         import zipfile
+        total_zip_frames = max(len(danh_sach_frame_data), 1)
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=1) as z:
-            for f_data in danh_sach_frame_data:
+            for z_idx, f_data in enumerate(danh_sach_frame_data, start=1):
                 f_name = os.path.basename(f_data.get('path'))
                 local_f_path = os.path.join(local_temp_dir, f_name)
                 if os.path.exists(local_f_path):
                     z.write(local_f_path, f_name)
+                if callback and (z_idx % 100 == 0 or z_idx == total_zip_frames):
+                    try:
+                        callback(0.94 + min(z_idx / total_zip_frames, 1.0) * 0.015)
+                    except:
+                        pass
     except Exception as e:
         print(f"Lỗi tự động tạo file ZIP frames: {e}")
         zip_path = None
@@ -5434,7 +5466,64 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
     
     gc.collect()
     valid_count = sum(1 for row in du_lieu_goc if row['goc_vai'] is not None)
-    
+
+    # ============================================================
+    # KIỂM TRA TOÀN VẸN CUỐI PIPELINE (ĐẢM BẢO KHÔNG SÓT FRAME)
+    # ============================================================
+    expected_frames = len(raw_pass1_data)
+    frame_data_count = len(danh_sach_frame_data)
+    csv_row_count = len(du_lieu_goc)
+
+    # Đếm số ảnh .jpg đã ghi thực tế trước khi dọn thư mục tạm
+    jpg_written = 0
+    if 'local_temp_dir' in locals() and local_temp_dir and os.path.exists(local_temp_dir):
+        try:
+            jpg_written = sum(1 for fn in os.listdir(local_temp_dir) if fn.lower().endswith('.jpg'))
+        except Exception as count_err:
+            print(f"[Integrity] Khong dem duoc anh jpg: {count_err}")
+
+    # Đếm số frame trong file JSON đã lưu
+    json_frame_count = 0
+    try:
+        if json_path and os.path.exists(json_path):
+            with open(json_path, 'r', encoding='utf-8') as jf:
+                json_frame_count = len(json.load(jf))
+    except Exception as json_err:
+        print(f"[Integrity] Khong doc duoc JSON frame: {json_err}")
+
+    print(
+        f"[Integrity] Pass1={expected_frames} | Pass2_frame_data={frame_data_count} | "
+        f"CSV_rows={csv_row_count} | JPG={jpg_written} | JSON={json_frame_count}"
+    )
+
+    # Cảnh báo nếu Pass 2 xử lý thiếu so với Pass 1 (lệch > 1 frame để bỏ qua sai số làm tròn cuối video)
+    if expected_frames > 0 and (expected_frames - frame_data_count) > 1:
+        missing = expected_frames - frame_data_count
+        warn_msg = (
+            f"⚠️ Phát hiện thiếu {missing} khung hình khi vẽ nhãn "
+            f"(Pass 1: {expected_frames}, Pass 2: {frame_data_count}). "
+            "Khuyến nghị chạy lại phân tích để đảm bảo đầy đủ frame."
+        )
+        print(f"[Integrity] {warn_msg}")
+        all_warnings.append(warn_msg)
+
+    # Cảnh báo nếu số ảnh JPG ghi ra thiếu so với số frame dữ liệu
+    if frame_data_count > 0 and jpg_written > 0 and (frame_data_count - jpg_written) > 1:
+        warn_msg_img = (
+            f"⚠️ Có {frame_data_count - jpg_written} khung hình chưa ghi được ảnh "
+            f"(frame data: {frame_data_count}, ảnh JPG: {jpg_written})."
+        )
+        print(f"[Integrity] {warn_msg_img}")
+        all_warnings.append(warn_msg_img)
+
+    # Cảnh báo nếu JSON lưu thiếu frame so với dữ liệu trong RAM
+    if frame_data_count > 0 and json_frame_count != frame_data_count:
+        warn_msg_json = (
+            f"⚠️ File dữ liệu frame (JSON) lưu {json_frame_count}/{frame_data_count} khung hình."
+        )
+        print(f"[Integrity] {warn_msg_json}")
+        all_warnings.append(warn_msg_json)
+
     # Dọn dẹp thư mục tạm chứa các frame cục bộ để giải phóng dung lượng đĩa
     if 'local_temp_dir' in locals() and local_temp_dir and os.path.exists(local_temp_dir):
         try:
@@ -5618,8 +5707,7 @@ def check_and_populate_background_result(video_path):
             df_path = result.get("df_path")
             if df_path and os.path.exists(df_path):
                 try:
-                    import pandas as pd
-                    st.session_state.angle_df = pd.read_csv(df_path)
+                    st.session_state.angle_df = read_analysis_csv_fast(df_path)
                 except Exception as e:
                     print("Lỗi đọc CSV trong check_and_populate:", e)
                     st.session_state.angle_df = None
@@ -5769,8 +5857,7 @@ def hien_thi_tien_trinh_background(video_path):
                     ensure_local_file(v_re.get('df_path'))
                     
                     if v_re.get('df_path') and os.path.exists(v_re['df_path']):
-                        try: st.session_state.angle_df = pd.read_csv(v_re['df_path'])
-                        except: pass
+                        st.session_state.angle_df = read_analysis_csv_fast(v_re['df_path'])
                     st.toast("✅ Đã quay lại kết quả phân tích cũ!", icon="📊")
                     st.rerun()
         except:
@@ -5820,8 +5907,7 @@ def finalize_and_refresh_analysis(video_path):
                     st.session_state.exercise['chuan'] = ex_base['chuan'].copy()
                     st.session_state.exercise['chuan']['sai_so'] = v_re['sai_so']
                 if v_re.get('df_path') and os.path.exists(v_re['df_path']):
-                    try: st.session_state.angle_df = pd.read_csv(v_re['df_path'])
-                    except: pass
+                    st.session_state.angle_df = read_analysis_csv_fast(v_re['df_path'])
                 st.session_state.reanalyze_triggered = False
                 st.toast("✅ Phân tích hoàn tất! Đang hiển thị kết quả...", icon="🎉")
                 st.rerun()
@@ -5861,7 +5947,7 @@ def finalize_and_refresh_analysis(video_path):
     # Đọc DataFrame góc nếu có
     if df_path and os.path.exists(df_path):
         try:
-            st.session_state.angle_df = pd.read_csv(df_path)
+                            st.session_state.angle_df = read_analysis_csv_fast(df_path)
         except Exception as e:
             print(f"[finalize_and_refresh] Lỗi đọc CSV: {e}")
 
@@ -5875,7 +5961,7 @@ def finalize_and_refresh_analysis(video_path):
     st.toast("✅ Phân tích hoàn tất! Đang hiển thị kết quả...", icon="🎉")
     st.rerun()
 
-@st.fragment(run_every=2)
+@st.fragment(run_every=1)
 def hien_thi_tien_trinh_background_small(video_path):
     """Hiển thị tiến trình chạy nền nhỏ gọn bên trong cột phải (không reload toàn trang)"""
     prog = read_progress(video_path)
@@ -5941,8 +6027,7 @@ def hien_thi_tien_trinh_background_small(video_path):
                     ensure_local_file(v_re.get('df_path'))
                     
                     if v_re.get('df_path') and os.path.exists(v_re['df_path']):
-                        try: st.session_state.angle_df = pd.read_csv(v_re['df_path'])
-                        except: pass
+                        st.session_state.angle_df = read_analysis_csv_fast(v_re['df_path'])
                     st.toast("✅ Đã quay lại kết quả phân tích cũ!", icon="📊")
                     st.rerun()
         except:
@@ -5961,7 +6046,7 @@ def hien_thi_tien_trinh_background_small(video_path):
                 pass
             st.rerun()
 
-@st.fragment(run_every=2)
+@st.fragment(run_every=1)
 def hien_thi_tien_trinh_background_home_fragment(video_path):
     """Hiển thị giao diện tiến trình chạy nền ở màn hình trang chủ (không reload toàn trang)"""
     prog = read_progress(video_path)
@@ -6032,8 +6117,7 @@ def hien_thi_tien_trinh_background_home_fragment(video_path):
                     ensure_local_file(v_re.get('df_path'))
                     
                     if v_re.get('df_path') and os.path.exists(v_re['df_path']):
-                        try: st.session_state.angle_df = pd.read_csv(v_re['df_path'])
-                        except: pass
+                        st.session_state.angle_df = read_analysis_csv_fast(v_re['df_path'])
                     st.toast("✅ Đã quay lại kết quả phân tích cũ!", icon="📊")
                     st.rerun()
         except:
@@ -6052,7 +6136,7 @@ def hien_thi_tien_trinh_background_home_fragment(video_path):
                 pass
             st.rerun()
 
-@st.fragment(run_every=2)
+@st.fragment(run_every=1)
 def hien_thi_khu_vuc_phan_tich_chuyen_sau_fragment(v, key_suffix):
     video_path = v['video_path']
     prog_data = read_progress(video_path)
@@ -6128,8 +6212,7 @@ def hien_thi_khu_vuc_phan_tich_chuyen_sau_fragment(v, key_suffix):
                     ensure_local_file(v_re.get('df_path'))
                     
                     if v_re.get('df_path') and os.path.exists(v_re['df_path']):
-                        try: st.session_state.angle_df = pd.read_csv(v_re['df_path'])
-                        except: pass
+                        st.session_state.angle_df = read_analysis_csv_fast(v_re['df_path'])
                     st.toast("✅ Đã quay lại kết quả phân tích cũ!", icon="📊")
                     st.rerun()
         except:
@@ -6399,23 +6482,33 @@ def bat_dau_phan_tich_background(
             def bg_progress_callback(p):
                 now = time.time()
                 elap = now - start_t
-                if temp_uploaded_path:
-                    # Mức tiến độ tổng thể đi từ 0.15 đến 0.95
-                    prog_val = 0.15 + p * 0.80
+                # Chia tiến độ thành các vùng để video lớn không bị đứng ở 99/100% quá lâu:
+                # tải/chuẩn bị 0-18%, Pass 1 18-45%, train/cấu hình 45-50%, Pass 2 50-90%,
+                # ghi ảnh/zip/đóng gói 90-99%.
+                if p <= 0.5:
+                    prog_val = 0.18 + (p / 0.5) * 0.27
+                elif p <= 0.505:
+                    prog_val = 0.45
+                elif p <= 0.92:
+                    prog_val = 0.50 + ((p - 0.5) / 0.42) * 0.40
                 else:
-                    prog_val = p * 0.95
+                    prog_val = min(p, 0.99)
                 
                 # Tạo status_msg sinh động để hiển thị chi tiết tiến trình
                 if p <= 0.5:
                     p1_pct = (p / 0.5) * 100
                     status_msg = f"🔬 Bước 1/2: Trích xuất khung xương ({p1_pct:.0f}%)"
+                elif p <= 0.505:
+                    status_msg = "🤖 Đang chuẩn bị model ML và khởi động Pass 2..."
+                elif p < 0.92:
+                    p2_pct = ((p - 0.5) / 0.42) * 100
+                    status_msg = f"🎨 Bước 2/2: Vẽ nhãn REF/ML & ghi khung hình ({p2_pct:.0f}%)"
                 else:
-                    p2_pct = ((p - 0.5) / 0.5) * 100
-                    status_msg = f"🎨 Bước 2/2: Vẽ đè khớp & tính chỉ số ({p2_pct:.0f}%)"
+                    status_msg = "📦 Đang lưu frames, đóng gói video và hoàn tất kết quả..."
                 
                 percent = int(prog_val * 100)
-                # Chỉ ghi tiến độ xuống đĩa nếu phần trăm thay đổi HOẶC trôi qua ít nhất 1.5 giây để tránh thắt nút cổ chai I/O đĩa
-                if percent != last_prog_percent[0] or (now - last_write_time[0] >= 1.5):
+                # Ghi tiến độ thường xuyên để UI không có cảm giác đứng im với video dài.
+                if percent != last_prog_percent[0] or (now - last_write_time[0] >= 0.7):
                     write_progress(progress_video_path, "processing", username=username, video_name=video_name, progress=prog_val, elapsed=elap, start_time=start_t, status_msg=status_msg)
                     last_write_time[0] = now
                     last_prog_percent[0] = percent
@@ -8205,7 +8298,7 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
                             st.session_state.has_data = True
                             if v.get('df_path') and os.path.exists(v['df_path']):
                                 try:
-                                    st.session_state.angle_df = pd.read_csv(v['df_path'])
+                                    st.session_state.angle_df = read_analysis_csv_fast(v['df_path'])
                                 except:
                                     pass
                             st.toast(f"✅ Tải thành công kết quả phân tích của bệnh nhân {v.get('full_name')}!", icon="📊")
@@ -8225,7 +8318,7 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
                             st.session_state.has_data = True
                             if v.get('df_path') and os.path.exists(v['df_path']):
                                 try:
-                                    st.session_state.angle_df = pd.read_csv(v['df_path'])
+                                    st.session_state.angle_df = read_analysis_csv_fast(v['df_path'])
                                 except:
                                     pass
                             st.toast(f"✅ Tải thành công kết quả phân tích cũ của bệnh nhân {v.get('full_name')}!", icon="📊")
@@ -8264,13 +8357,17 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
                         </div>
                         """, unsafe_allow_html=True)
                     else:
-                        # Kiểm tra xem video đã tồn tại cục bộ chưa để hiển thị spinner khi cần
-                        video_exists = False
-                        if v.get('video_path') and os.path.exists(v['video_path']) and os.path.getsize(v['video_path']) >= 5 * 1024:
-                            video_exists = True
-                            
-                        # Chỉ hiển thị video player, không cần spinner block UI
-                        render_video(v['video_path'], check_h264=False)
+                        st.markdown(f"""
+                        <div style="background: rgba(30, 41, 59, 0.35); border: 1px solid rgba(148, 163, 184, 0.18); border-radius: 12px; padding: 18px;">
+                            <div style="font-weight: 700; color: #e2e8f0; margin-bottom: 6px;">🎬 Video gốc đã chọn</div>
+                            <div style="color: #94a3b8; font-size: 0.88rem;">{v.get('video_name', 'Video bệnh nhân')}</div>
+                            <div style="color: #64748b; font-size: 0.82rem; margin-top: 8px;">Đã ẩn trình phát video để mở panel phân tích nhanh hơn.</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        if st.button("👁️ Xem video gốc", key=f"btn_show_src_video_{key_suffix}", use_container_width=True):
+                            st.session_state[f"show_src_video_{key_suffix}"] = True
+                        if st.session_state.get(f"show_src_video_{key_suffix}"):
+                            render_video(v['video_path'], check_h264=False)
                 with col_v2:
                     hien_thi_khu_vuc_phan_tich_chuyen_sau_fragment(v, key_suffix)
                 return
@@ -8293,7 +8390,7 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
             ensure_local_file(csv_path)
             if os.path.exists(csv_path):
                 try:
-                    df = pd.read_csv(csv_path)
+                    df = read_analysis_csv_fast(csv_path)
                 except:
                     pass
     
@@ -8324,7 +8421,7 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
                         
                     if v_re.get('df_path') and os.path.exists(v_re['df_path']):
                         try:
-                            st.session_state.angle_df = pd.read_csv(v_re['df_path'])
+                            st.session_state.angle_df = read_analysis_csv_fast(v_re['df_path'])
                         except:
                             pass
                     st.toast("✅ Đã khôi phục kết quả phân tích cũ thành công!", icon="📊")
