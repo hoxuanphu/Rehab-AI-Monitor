@@ -5580,8 +5580,9 @@ _db_lock = threading.Lock()
 _running_threads = {}
 
 # Giới hạn số video phân tích chạy SONG SONG để tránh quá tải CPU/RAM (đặc biệt trên HF Space free).
+# Đặt = 1 để mỗi video được dùng toàn bộ CPU -> từng video xong nhanh hơn, kết quả hiện sớm hơn.
 # Các job vượt giới hạn sẽ xếp hàng đợi và tự chạy khi tới lượt.
-MAX_CONCURRENT_ANALYSIS = 2
+MAX_CONCURRENT_ANALYSIS = 1
 _analysis_semaphore = threading.BoundedSemaphore(MAX_CONCURRENT_ANALYSIS)
 
 def doc_lock_save_data(file_path, handle_fn):
