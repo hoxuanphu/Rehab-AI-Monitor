@@ -5520,6 +5520,58 @@ def write_progress(video_path, status, username="", video_name="", progress=0.0,
     except Exception as e:
         print(f"Lỗi ghi progress file: {e}")
 
+def clear_analysis_progress(video_path):
+    """Xóa file progress cũ để tránh nạp nhầm kết quả phân tích trước đó."""
+    if not video_path:
+        return
+    p_file = get_progress_file(video_path)
+    try:
+        if p_file and os.path.exists(p_file):
+            os.remove(p_file)
+    except Exception as exc:
+        print(f"[Progress] Khong xoa duoc progress file: {exc}")
+
+def khoi_dong_phan_tich_lai_video(v, auto_start=True):
+    """
+    Chuẩn bị và khởi chạy phân tích lại: MediaPipe 33 điểm + REF YouTube + ML Classifier.
+    """
+    if not v:
+        return False
+    video_path = v.get("video_path")
+    clear_analysis_progress(video_path)
+    if video_path:
+        done_key = f"_bg_done_{hashlib.md5(video_path.encode()).hexdigest()}"
+        st.session_state.pop(done_key, None)
+    st.session_state.reanalyze_triggered = True
+    st.session_state.view_old_analysis = False
+    st.session_state.has_data = False
+    st.session_state.stats = None
+    st.session_state.angle_df = None
+    st.session_state.processed_video_path = None
+    st.session_state.current_df_csv_path = None
+
+    if not auto_start or not video_path:
+        return True
+
+    ensure_local_file(video_path)
+    if not os.path.exists(video_path) or os.path.getsize(video_path) < 1024:
+        return False
+
+    ncv_gd = st.session_state.get("ncv_giai_doan", "Giai đoạn 2: Hồi phục (Sai số vừa - 30°)")
+    bat_dau_phan_tich_background(
+        video_path=video_path,
+        username=v.get("username"),
+        full_name=v.get("full_name"),
+        video_name=v.get("video_name"),
+        exercise_name=v.get("exercise"),
+        giai_doan=ncv_gd,
+        model_type=st.session_state.get("ncv_model_type", "MediaPipe Heavy"),
+        confidence=st.session_state.get("ncv_confidence", 0.5),
+        skip_step=st.session_state.get("ncv_skip_frames", 0),
+        resize_width=st.session_state.get("ncv_resize_width", 720),
+    )
+    return True
+
 def find_progress_by_video_info(username, video_name):
     """Tìm thông tin tiến trình background cho cặp username và video_name"""
     if not os.path.exists(PROCESSED_DIR):
@@ -5602,6 +5654,41 @@ def check_and_populate_background_result(video_path):
                 pass
             return True
     return False
+
+def finalize_background_analysis_if_ready(video_path):
+    """
+    Nạp kết quả phân tích background khi đã xong.
+    Trả về True nếu vừa nạp xong (cần rerun một lần để cập nhật UI).
+    """
+    if not video_path:
+        return False
+    prog = read_progress(video_path)
+    if not prog or prog.get("status") != "success":
+        return False
+    done_key = f"_bg_done_{hashlib.md5(video_path.encode()).hexdigest()}"
+    if st.session_state.get(done_key) and st.session_state.get("has_data"):
+        clear_analysis_progress(video_path)
+        return False
+    loaded = check_and_populate_background_result(video_path)
+    if loaded:
+        st.session_state[done_key] = True
+        st.session_state.reanalyze_triggered = False
+        st.session_state.view_old_analysis = True
+        return True
+    return False
+
+def poll_background_analysis_complete():
+    """Kiểm tra phân tích nền hoàn tất — cho phép chuyển tab trong lúc chờ."""
+    v = st.session_state.get("current_eval_video")
+    if not v:
+        return
+    video_path = v.get("video_path")
+    if video_path and finalize_background_analysis_if_ready(video_path):
+        st.toast(
+            "✅ Phân tích AI hoàn tất! Xem kết quả tại tab Phân tích hoặc chuyển tab khác.",
+            icon="🎉",
+        )
+        st.rerun()
 
 def hien_thi_tien_trinh_background(video_path):
     """Hiển thị giao diện tiến trình chạy nền"""
@@ -5696,8 +5783,9 @@ def hien_thi_tien_trinh_background_small(video_path):
         </div>
         """, unsafe_allow_html=True)
     elif status == "success":
-        # Tiến trình đã xong -> Rerun toàn bộ trang để nạp kết quả
-        st.rerun()
+        if finalize_background_analysis_if_ready(video_path):
+            st.toast("✅ Phân tích hoàn tất! Bạn có thể chuyển tab khác.", icon="🎉")
+            st.rerun()
     elif status == "error":
         err_msg = prog.get("error_msg", "Lỗi không xác định")
         st.error(f"❌ Phân tích thất bại: {err_msg}")
@@ -5758,7 +5846,9 @@ def hien_thi_tien_trinh_background_home_fragment(video_path):
         </div>
         """, unsafe_allow_html=True)
     elif status == "success":
-        st.rerun()
+        if finalize_background_analysis_if_ready(video_path):
+            st.toast("✅ Phân tích hoàn tất! Bạn có thể chuyển tab khác.", icon="🎉")
+            st.rerun()
     elif status == "error":
         err_msg = prog.get("error_msg", "Lỗi không xác định")
         st.error(f"❌ Phân tích thất bại: {err_msg}")
@@ -5794,7 +5884,9 @@ def hien_thi_khu_vuc_phan_tich_chuyen_sau_fragment(v, key_suffix):
             is_error = True
             err_msg = prog_data.get("error_msg", "Lỗi không xác định")
         elif status == "success":
-            st.rerun()
+            if finalize_background_analysis_if_ready(video_path):
+                st.toast("✅ Phân tích hoàn tất! Bạn có thể chuyển tab khác.", icon="🎉")
+                st.rerun()
             
     st.info("💡 Bạn có thể thực hiện phân tích ngay bây giờ để xem kết quả khung xương và chỉ số lâm sàng.")
 
@@ -7783,7 +7875,11 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
     if st.session_state.get('current_eval_video'):
         v_path = st.session_state.current_eval_video.get('video_path')
         if v_path:
-            check_and_populate_background_result(v_path)
+            prog = read_progress(v_path)
+            if prog and prog.get("status") == "success":
+                check_and_populate_background_result(v_path)
+            elif not st.session_state.get('reanalyze_triggered', False):
+                check_and_populate_background_result(v_path)
 
     # Nếu không có dữ liệu truyền vào -> Kiểm tra tải tự động (Dành cho NCV)
     if stats_ext is None and df_ext is None:
@@ -7841,8 +7937,10 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
                             """, unsafe_allow_html=True)
                             st.markdown("<br>", unsafe_allow_html=True)
                             if st.button("🚀 CHẠY PHÂN TÍCH & TRÍCH XUẤT MỚI", key=f"btn_choose_new_{key_suffix}", type="primary", use_container_width=True):
-                                st.session_state.reanalyze_triggered = True
-                                st.session_state.view_old_analysis = False
+                                if khoi_dong_phan_tich_lai_video(v, auto_start=True):
+                                    st.toast("🚀 Đã bắt đầu phân tích mới (33 điểm + REF + ML)!", icon="⚡")
+                                else:
+                                    st.warning("⚠️ Không tìm thấy file video gốc. Vui lòng tải video từ Cloud trước.")
                                 st.rerun()
                         return
                         
@@ -7917,11 +8015,17 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
                     st.markdown("---")
                 
                 # Nếu video CHƯA CÓ metrics hoặc NCV muốn chạy lại
-                st.warning(f"⚠️ Video '{v.get('video_name')}' của BN {v.get('full_name')} chưa được phân tích.")
-                # Kiểm tra trạng thái tiến trình để ẩn video player khi đang phân tích
                 prog_data = read_progress(v['video_path'])
                 is_processing = prog_data and prog_data.get("status") == "processing"
-                
+                if st.session_state.get('reanalyze_triggered') or is_processing:
+                    st.info(
+                        "🔬 **Chế độ phân tích mới** — MediaPipe 33 landmarks, đối chiếu YouTube (REF), "
+                        "huấn luyện/nạp ML Classifier. **Bạn có thể chuyển sang tab khác** trong lúc chờ; "
+                        "kết quả sẽ tự nạp khi hoàn tất."
+                    )
+                else:
+                    st.warning(f"⚠️ Video '{v.get('video_name')}' của BN {v.get('full_name')} chưa được phân tích.")
+                # Kiểm tra trạng thái tiến trình để ẩn video player khi đang phân tích
                 col_v1, col_v2 = st.columns([1.3, 1.0])
                 with col_v1:
                     if is_processing:
@@ -7972,11 +8076,11 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
         if user_role == "Nghiên cứu viên":
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("⚙️ CHẠY LẠI PHÂN TÍCH AI", type="primary", use_container_width=True, key=f"re_run_ai_missing_{key_suffix}"):
-                st.session_state.reanalyze_triggered = True
-                st.session_state.has_data = False
-                st.session_state.stats = None
-                st.session_state.angle_df = None
-                st.session_state.view_old_analysis = False
+                v_re = st.session_state.get('current_eval_video')
+                if khoi_dong_phan_tich_lai_video(v_re, auto_start=True):
+                    st.toast("🚀 Đã bắt đầu phân tích lại (33 điểm + REF + ML)!", icon="⚡")
+                else:
+                    st.warning("⚠️ Không tìm thấy file video gốc trên máy chủ.")
                 st.rerun()
         return
 
@@ -7984,14 +8088,17 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
     if user_role == "Nghiên cứu viên" and tk is not None:
         c_re1, c_re2 = st.columns([3, 1])
         with c_re1:
-            st.success(f"📊 **KẾT QUẢ ĐÃ LƯU:** Đã tự động tải kết quả phân tích cũ của BN **{st.session_state.get('current_eval_video', {}).get('full_name', 'Bệnh nhân')}**.")
+            st.success(
+                f"📊 **KẾT QUẢ ĐÃ LƯU:** BN **{st.session_state.get('current_eval_video', {}).get('full_name', 'Bệnh nhân')}** — "
+                "có thể xem biểu đồ bên dưới hoặc **chuyển tab khác** (Trang chủ, Khung hình, Báo cáo…)."
+            )
         with c_re2:
             if st.button("⚙️ CHẠY LẠI PHÂN TÍCH AI", type="secondary", use_container_width=True, key=f"re_run_ai_{key_suffix}"):
-                st.session_state.reanalyze_triggered = True
-                st.session_state.has_data = False
-                st.session_state.stats = None
-                st.session_state.angle_df = None
-                st.session_state.view_old_analysis = False
+                v_re = st.session_state.get('current_eval_video')
+                if khoi_dong_phan_tich_lai_video(v_re, auto_start=True):
+                    st.toast("🚀 Đã bắt đầu phân tích lại (33 điểm + REF + ML)!", icon="⚡")
+                else:
+                    st.warning("⚠️ Không tìm thấy file video gốc. Hãy đợi video tải xong từ Cloud.")
                 st.rerun()
         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -12342,6 +12449,8 @@ def hien_thi_danh_sach_video_fragment(user_role):
 # ============================================
 @st.fragment
 def _render_main_tab_content(tab_titles, user_role):
+        poll_background_analysis_complete()
+
         if st.session_state.get('trigger_tab_switch'):
             if st.session_state.trigger_tab_switch in tab_titles:
                 st.session_state.active_tab = st.session_state.trigger_tab_switch
