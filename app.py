@@ -11572,31 +11572,32 @@ def hien_thi_frames_day_du(key_suffix=""):
             
             with col_target:
                 if b64_data:
-                    st.markdown(f"""
-                    <div class="frame-card">
-                        <div class="frame-card-header">
-                            <span class="frame-card-index">#{f_data.get('index')}</span>
-                            <span class="frame-card-badges">
-                                <span class="frame-card-badge" style="background: {bg_alpha}; color: {color}; border-color: {color}40;">{phase_st}</span>
-                                {ml_badge_html}
-                            </span>
-                        </div>
-                        <div class="frame-card-img-wrapper">
-                            <img class="frame-card-img" src="data:image/jpeg;base64,{b64_data}" />
-                        </div>
-                        <div class="frame-card-footer">
-                            <div class="frame-card-row">
-                                <span>Vai: <b>{gv:.0f}°</b> / {cv_ref:.0f}°</span>
-                                <span style="color: {color}; font-weight: bold;">Δ {diff_v:.1f}°</span>
-                            </div>
-                            <div class="frame-card-row">
-                                <span>Khuỷu: <b>{gk:.0f}°</b> / {ck_ref:.0f}°</span>
-                                <span style="color: {color}; font-weight: bold;">Δ {diff_k:.1f}°</span>
-                            </div>
-                            {ml_footer_html}
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    card_html = (
+                        f'<div class="frame-card">'
+                        f'<div class="frame-card-header">'
+                        f'<span class="frame-card-index">#{f_data.get("index")}</span>'
+                        f'<span class="frame-card-badges">'
+                        f'<span class="frame-card-badge" style="background: {bg_alpha}; color: {color}; border-color: {color}40;">{phase_st}</span>'
+                        f'{ml_badge_html}'
+                        f'</span>'
+                        f'</div>'
+                        f'<div class="frame-card-img-wrapper">'
+                        f'<img class="frame-card-img" src="data:image/jpeg;base64,{b64_data}" />'
+                        f'</div>'
+                        f'<div class="frame-card-footer">'
+                        f'<div class="frame-card-row">'
+                        f'<span>Vai: <b>{gv:.0f}°</b> / {cv_ref:.0f}°</span>'
+                        f'<span style="color: {color}; font-weight: bold;">Δ {diff_v:.1f}°</span>'
+                        f'</div>'
+                        f'<div class="frame-card-row">'
+                        f'<span>Khuỷu: <b>{gk:.0f}°</b> / {ck_ref:.0f}°</span>'
+                        f'<span style="color: {color}; font-weight: bold;">Δ {diff_k:.1f}°</span>'
+                        f'</div>'
+                        f'{ml_footer_html}'
+                        f'</div>'
+                        f'</div>'
+                    )
+                    st.markdown(card_html, unsafe_allow_html=True)
                 else:
                     st.error("Ảnh lỗi")
 
