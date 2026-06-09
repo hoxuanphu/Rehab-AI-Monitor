@@ -1708,7 +1708,7 @@ def push_file_to_hf_async(local_path):
 
     threading.Thread(target=_run_upload, daemon=True).start()
 
-def _hf_download_dataset_file(rel_path, quiet=False):
+def _hf_download_dataset_file(rel_path, quiet=False, min_size=5 * 1024):
     """Tải một file từ HF Dataset về DATA_DIR. Trả về đường dẫn local nếu thành công."""
     if not (HF_TOKEN and HF_DATASET_ID and rel_path):
         return None
@@ -1721,10 +1721,10 @@ def _hf_download_dataset_file(rel_path, quiet=False):
             token=HF_TOKEN,
             local_dir=DATA_DIR,
         )
-        if local_fp and os.path.exists(local_fp) and os.path.getsize(local_fp) >= 5 * 1024:
+        if local_fp and os.path.exists(local_fp) and os.path.getsize(local_fp) >= min_size:
             return local_fp
         target = os.path.normpath(os.path.join(DATA_DIR, rel_path.replace("\\", "/")))
-        if os.path.exists(target) and os.path.getsize(target) >= 5 * 1024:
+        if os.path.exists(target) and os.path.getsize(target) >= min_size:
             return target
     except Exception as e:
         err = str(e).lower()
@@ -1842,8 +1842,222 @@ def load_data(file_path):
 def save_data(file_path, data):
     with open(file_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
+    try:
+        _load_data_cached.clear()
+    except Exception:
+        pass
     # Tự động đẩy file dữ liệu lên Hugging Face Dataset
     push_file_to_hf_async(file_path)
+
+HF_JSON_CONFIG_FILES = [
+    "users.json", "patient_symptoms.json", "doctor_evaluations.json",
+    "schedules.json", "video_list.json", "research_data.json",
+    "lich_su_tap_luyen.json", "phan_hoi.json",
+]
+
+
+def dong_bo_json_cau_hinh_tu_hf():
+    """Tải đồng bộ JSON cấu hình từ HF Dataset (video_list.json có thể < 5KB)."""
+    for f_name in HF_JSON_CONFIG_FILES:
+        dst = os.path.join(DATA_DIR, f_name)
+        if os.path.exists(dst) and os.path.getsize(dst) > 2:
+            continue
+        got = _hf_download_dataset_file(f_name, quiet=True, min_size=2)
+        if got:
+            print(f"[HF Sync] Da dong bo JSON: {f_name}")
+            continue
+        src = os.path.join("database", f_name)
+        if not os.path.exists(dst) and os.path.exists(src):
+            try:
+                shutil.copy2(src, dst)
+                print(f"[HF Sync] Copy JSON tu repo: {f_name}")
+            except Exception:
+                pass
+
+
+def _exercise_tu_ten_file(name):
+    n = str(name or "").lower()
+    if any(k in n for k in ["gậy", "gay", "pulley", "stick"]):
+        return "Bài tập với gậy (Pulley Exercise)"
+    if any(k in n for k in ["dây", "day", "theraband", "band", "kháng"]):
+        return "Bài tập với dây kháng lực (Theraband)"
+    return "Bài tập con lắc Codman"
+
+
+def _tim_upload_theo_video_name(username, video_name):
+    if not video_name or not os.path.isdir(UPLOAD_DIR):
+        return None
+    base = os.path.splitext(os.path.basename(video_name))[0].lower()
+    for fn in os.listdir(UPLOAD_DIR):
+        if base in fn.lower():
+            if not username or fn.startswith(f"{username}_"):
+                fp = os.path.join(UPLOAD_DIR, fn)
+                if os.path.getsize(fp) >= 5 * 1024:
+                    return fp
+    return None
+
+
+def khoi_phuc_video_list_tu_tep():
+    """Khôi phục danh sách video từ evaluations, CSV đã phân tích, progress success và patient_uploads."""
+    import glob
+    import re
+    seen = set()
+    out = []
+    users = load_users()
+    evals = load_data(EVALUATIONS_FILE)
+
+    def _add(rec):
+        key = (rec.get("username"), rec.get("video_name"), rec.get("exercise"))
+        if not rec.get("video_name") or key in seen:
+            return
+        seen.add(key)
+        out.append(rec)
+
+    for e in evals:
+        if e.get("doctor_username") != "AI_Researcher":
+            continue
+        uname = e.get("patient_username") or ""
+        vname = e.get("video_name") or ""
+        ex = e.get("exercise") or _exercise_tu_ten_file(vname)
+        fn = users.get(uname, {}).get("full_name", uname) if isinstance(users, dict) else uname
+        vp = _tim_upload_theo_video_name(uname, vname)
+        _add({
+            "username": uname,
+            "full_name": fn or uname,
+            "video_name": vname,
+            "exercise": ex,
+            "accuracy": e.get("ai_accuracy") or 0,
+            "time": e.get("time", "N/A"),
+            "video_path": vp,
+            "processed_path": None,
+            "status": "Đã phân tích" if e.get("ai_accuracy") else "Chờ NCV phân tích",
+            "df_path": None,
+            "all_frames_data_path": None,
+        })
+
+    if os.path.isdir(PROCESSED_DIR):
+        for prog_fn in glob.glob(os.path.join(PROCESSED_DIR, "progress_*.json")):
+            try:
+                with open(prog_fn, "r", encoding="utf-8") as pf:
+                    pdata = json.load(pf)
+            except Exception:
+                continue
+            if pdata.get("status") != "success":
+                continue
+            res = pdata.get("result") or {}
+            uname = pdata.get("username") or ""
+            vname = pdata.get("video_name") or ""
+            meta = pdata.get("job_meta") or {}
+            ex = meta.get("exercise_name") or res.get("exercise", {}).get("ten") or _exercise_tu_ten_file(vname)
+            fn = meta.get("full_name") or (users.get(uname, {}).get("full_name") if isinstance(users, dict) else uname)
+            stats = res.get("stats") or {}
+            _add({
+                "username": uname,
+                "full_name": fn or uname,
+                "video_name": vname,
+                "exercise": ex if isinstance(ex, str) else str(ex),
+                "accuracy": stats.get("do_chinh_xac") or stats.get("ty_le_tong_the") or 0,
+                "time": get_vn_now().strftime("%H:%M - %d/%m/%Y"),
+                "video_path": pdata.get("video_path") or _tim_upload_theo_video_name(uname, vname),
+                "processed_path": res.get("processed_video_path"),
+                "metrics": stats,
+                "df_path": res.get("df_path"),
+                "all_frames_data_path": res.get("all_frames_data_path"),
+                "frames_zip": res.get("frames_zip"),
+                "status": "Đã phân tích",
+            })
+
+        for csv_f in glob.glob(os.path.join(PROCESSED_DIR, "processed_*_f_data.csv")):
+            m = re.search(r"processed_(\d+)_f_data\.csv$", os.path.basename(csv_f))
+            if not m:
+                continue
+            ts = m.group(1)
+            proc_f = os.path.join(PROCESSED_DIR, f"processed_{ts}_f.mp4")
+            proc_raw = os.path.join(PROCESSED_DIR, f"processed_{ts}.mp4")
+            proc_path = proc_f if os.path.exists(proc_f) else proc_raw
+            json_f = os.path.join(PROCESSED_DIR, f"f_{ts}.json")
+            matched = None
+            for item in out:
+                if item.get("df_path") == csv_f:
+                    matched = item
+                    break
+                pp = item.get("processed_path") or ""
+                if ts in str(pp):
+                    item.setdefault("df_path", csv_f)
+                    item.setdefault("all_frames_data_path", json_f if os.path.exists(json_f) else None)
+                    item.setdefault("processed_path", proc_path if os.path.exists(proc_path) else pp)
+                    matched = item
+                    break
+            if matched:
+                continue
+            vname_guess = f"video_processed_{ts}.mp4"
+            _add({
+                "username": "unknown",
+                "full_name": "Bệnh nhân (khôi phục)",
+                "video_name": vname_guess,
+                "exercise": _exercise_tu_ten_file(vname_guess),
+                "accuracy": 0,
+                "time": get_vn_now().strftime("%H:%M - %d/%m/%Y"),
+                "video_path": None,
+                "processed_path": proc_path if os.path.exists(proc_path) else None,
+                "df_path": csv_f,
+                "all_frames_data_path": json_f if os.path.exists(json_f) else None,
+                "status": "Đã phân tích",
+            })
+
+    if os.path.isdir(UPLOAD_DIR):
+        for fn in os.listdir(UPLOAD_DIR):
+            if not fn.lower().endswith((".mp4", ".mov", ".avi", ".mkv")):
+                continue
+            fp = os.path.join(UPLOAD_DIR, fn)
+            if os.path.getsize(fp) < 5 * 1024:
+                continue
+            parts = fn.split("_", 1)
+            uname = parts[0] if parts else "unknown"
+            orig_name = fn
+            if "_" in fn:
+                orig_name = fn.split("_", 2)[-1] if len(fn.split("_")) >= 3 else fn
+            fn_user = users.get(uname, {}).get("full_name", uname) if isinstance(users, dict) else uname
+            _add({
+                "username": uname,
+                "full_name": fn_user,
+                "video_name": orig_name,
+                "exercise": _exercise_tu_ten_file(orig_name),
+                "accuracy": 0,
+                "time": get_vn_now().strftime("%H:%M - %d/%m/%Y"),
+                "video_path": fp,
+                "processed_path": None,
+                "status": "Chờ NCV phân tích",
+            })
+
+    return out
+
+
+def load_video_list_an_toan():
+    """Nạp video_list.json — đồng bộ HF + khôi phục từ CSV/eval nếu file trống sau deploy."""
+    lst = load_data(VIDEOS_FILE)
+    if lst:
+        return lst
+    dong_bo_json_cau_hinh_tu_hf()
+    try:
+        _load_data_cached.clear()
+    except Exception:
+        pass
+    lst = load_data(VIDEOS_FILE)
+    if lst:
+        return lst
+    recovered = khoi_phuc_video_list_tu_tep()
+    if recovered:
+        with open(VIDEOS_FILE, "w", encoding="utf-8") as f:
+            json.dump(recovered, f, ensure_ascii=False, indent=4)
+        push_file_to_hf_async(VIDEOS_FILE)
+        try:
+            _load_data_cached.clear()
+        except Exception:
+            pass
+        print(f"[VideoList] Da khoi phuc {len(recovered)} video vao video_list.json")
+    return recovered
+
 
 def lay_do_chinh_xac_ai_chuan(selected_v):
     if not selected_v:
@@ -1982,8 +2196,9 @@ def don_dep_file_tam():
 @st.cache_resource(show_spinner=False)
 def thuc_hien_khoi_tao_he_thong_mot_lan():
     """Chạy đồng bộ và dọn dẹp hệ thống duy nhất MỘT LẦN khi server khởi động toàn cục"""
-    # Khởi động đồng bộ dữ liệu trong background thread để tránh treo ứng dụng khi có tệp tin lớn
     import threading
+    dong_bo_json_cau_hinh_tu_hf()
+    load_video_list_an_toan()
     threading.Thread(target=khoi_tao_dong_bo_hf, daemon=True).start()
     don_dep_file_tam()
 
@@ -13336,7 +13551,7 @@ def reset_vid_list_page():
 
 @st.fragment
 def hien_thi_danh_sach_video_fragment(user_role):
-    video_list = load_data(VIDEOS_FILE)
+    video_list = load_video_list_an_toan()
     
     if st.session_state.get('delete_success'):
         st.toast(f"🗑️ {st.session_state.delete_success}", icon="✅")
@@ -13344,6 +13559,16 @@ def hien_thi_danh_sach_video_fragment(user_role):
         
     if not video_list:
         st.info("📭 Hiện chưa có video nào được gửi đến.")
+        if st.button("🔄 Tải lại danh sách từ Cloud / khôi phục", key="btn_reload_video_list", use_container_width=True):
+            try:
+                _load_data_cached.clear()
+            except Exception:
+                pass
+            dong_bo_json_cau_hinh_tu_hf()
+            recovered = khoi_phuc_video_list_tu_tep()
+            if recovered:
+                save_data(VIDEOS_FILE, recovered)
+            st.rerun(scope="app")
     else:
         # Load database evaluations outside the loop for extreme speed optimization
         evals_db = load_data(EVALUATIONS_FILE)
