@@ -100,7 +100,7 @@ def get_final_h264_path(video_path):
     return base + "_f.mp4"
 
 
-def sync_transcode_to_h264(src_path, dst_path=None, audio_path=None, timeout=1800):
+def sync_transcode_to_h264(src_path, dst_path=None, audio_path=None, timeout=1800, on_tick=None):
     """Chuyển video sang H.264 MP4 (faststart). Ghi file tạm rồi đổi tên atomic để tránh file hỏng."""
     if not src_path or not os.path.exists(src_path):
         return None
@@ -141,9 +141,33 @@ def sync_transcode_to_h264(src_path, dst_path=None, audio_path=None, timeout=180
         tmp_dst,
     ])
     try:
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout)
-        if result.returncode != 0:
-            print(f"[Transcode] FFmpeg fail ({result.returncode}): {result.stderr[-800:]}")
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        deadline = time.time() + timeout
+        last_tick = time.time()
+        while process.poll() is None:
+            if time.time() > deadline:
+                process.kill()
+                print("[Transcode] FFmpeg timeout")
+                if os.path.exists(tmp_dst):
+                    try:
+                        os.remove(tmp_dst)
+                    except Exception:
+                        pass
+                return None
+            if on_tick and time.time() - last_tick >= 2.0:
+                try:
+                    on_tick()
+                except Exception:
+                    pass
+                last_tick = time.time()
+            time.sleep(0.5)
+        stderr_out = ""
+        try:
+            _, stderr_out = process.communicate(timeout=10)
+        except Exception:
+            pass
+        if process.returncode != 0:
+            print(f"[Transcode] FFmpeg fail ({process.returncode}): {(stderr_out or '')[-800:]}")
             if os.path.exists(tmp_dst):
                 try:
                     os.remove(tmp_dst)
@@ -5263,7 +5287,21 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
                 if callback:
                     try: callback(0.501)
                     except: pass
-                train_state = train_pose_classifier(PROCESSED_DIR, DB_DIR)
+                import threading as _thr_train
+                _train_hb_stop = _thr_train.Event()
+                def _train_heartbeat():
+                    while not _train_hb_stop.wait(5.0):
+                        if callback:
+                            try:
+                                callback(0.503)
+                            except Exception:
+                                pass
+                _train_hb = _thr_train.Thread(target=_train_heartbeat, daemon=True)
+                _train_hb.start()
+                try:
+                    train_state = train_pose_classifier(PROCESSED_DIR, DB_DIR)
+                finally:
+                    _train_hb_stop.set()
                 if train_state.get("success"):
                     try:
                         st.toast("Da cap nhat/train lai ML classifier truoc khi gan nhan.", icon="ML")
@@ -5593,7 +5631,17 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
             pass
     audio_aux = mixed_audio_path if (audio_mixed and os.path.exists(mixed_audio_path)) else None
     start_transcode_time = time.time()
-    h264_out = sync_transcode_to_h264(out_path, final_h264, audio_path=audio_aux)
+
+    def _transcode_tick():
+        if callback:
+            try:
+                elapsed_t = time.time() - start_transcode_time
+                mock_prog = 0.96 + min(elapsed_t / 60.0, 1.0) * 0.03
+                callback(mock_prog)
+            except Exception:
+                pass
+
+    h264_out = sync_transcode_to_h264(out_path, final_h264, audio_path=audio_aux, on_tick=_transcode_tick)
     if h264_out:
         final_video_path = h264_out
     else:
@@ -5688,9 +5736,12 @@ import traceback
 _db_lock = threading.Lock()
 _running_threads = {}
 
-# Giới hạn số video phân tích chạy SONG SONG để tránh quá tải CPU/RAM (đặc biệt trên HF Space free).
-# Cho phép tối đa 2 video chạy song song; các job vượt giới hạn sẽ xếp hàng đợi và tự chạy khi tới lượt.
-MAX_CONCURRENT_ANALYSIS = 2
+# Số video phân tích chạy SONG SONG (mặc định 4). Job thừa xếp hàng đợi tự chạy khi có slot.
+# Có thể giảm trên HF Space yếu: đặt biến môi trường MAX_CONCURRENT_ANALYSIS=2
+try:
+    MAX_CONCURRENT_ANALYSIS = max(1, min(8, int(os.environ.get("MAX_CONCURRENT_ANALYSIS", "4"))))
+except (TypeError, ValueError):
+    MAX_CONCURRENT_ANALYSIS = 4
 _analysis_semaphore = threading.BoundedSemaphore(MAX_CONCURRENT_ANALYSIS)
 
 def doc_lock_save_data(file_path, handle_fn):
@@ -5702,6 +5753,8 @@ def doc_lock_save_data(file_path, handle_fn):
         new_data = handle_fn(data)
         save_data(file_path, new_data)
 
+PROGRESS_STALE_SECONDS = 7200  # 2 giờ — không xóa tiến trình sớm (tránh mất % khi HF reload / bước dài)
+
 def get_progress_file(video_path):
     """Trả về đường dẫn file progress JSON tương ứng với video_path"""
     if not video_path:
@@ -5710,43 +5763,43 @@ def get_progress_file(video_path):
     h = hashlib.md5(clean_p.encode('utf-8')).hexdigest()
     return os.path.join(PROCESSED_DIR, f"progress_{h}.json")
 
-def read_progress(video_path):
-    """Đọc thông tin tiến trình từ đĩa với cơ chế tự động dọn dẹp nếu bị treo/crashed"""
+def _load_progress_file(video_path):
+    """Đọc file progress thuần — không xóa, không side-effect."""
     p_file = get_progress_file(video_path)
-    if os.path.exists(p_file):
+    if not p_file or not os.path.exists(p_file):
+        return None
+    try:
+        with open(p_file, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+def read_progress(video_path):
+    """Đọc tiến trình từ đĩa. Không xóa job đang chạy khi Streamlit reload (thread in-memory mất)."""
+    data = _load_progress_file(video_path)
+    if not data:
+        return None
+    if data.get("status") == "error":
+        err_msg = data.get("error_msg", "")
+        if "final_h264" in err_msg or "referenced before assignment" in err_msg:
+            p_file = get_progress_file(video_path)
+            try:
+                if p_file and os.path.exists(p_file):
+                    os.remove(p_file)
+            except Exception:
+                pass
+            return None
+    if data.get("status") == "processing":
+        p_file = get_progress_file(video_path)
         try:
-            with open(p_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            
-            # Tự động dọn dẹp nếu trạng thái là đang xử lý nhưng thread thực tế đã chết hoặc server khởi động lại
-            if data and data.get("status") == "processing":
-                is_alive = False
-                if '_running_threads' in globals():
-                    is_alive = (video_path in _running_threads and _running_threads[video_path].is_alive())
-                
-                # Nếu không có thread nào đang chạy và file đã hơn 30 giây không cập nhật
-                if not is_alive:
-                    import time
-                    mtime = os.path.getmtime(p_file)
-                    if time.time() - mtime > 30:
-                        try:
-                            os.remove(p_file)
-                        except:
-                            pass
-                        return None
-            elif data and data.get("status") == "error":
-                # Tự động dọn dẹp file lỗi cũ của phiên bản trước
-                err_msg = data.get("error_msg", "")
-                if "final_h264" in err_msg or "referenced before assignment" in err_msg:
-                    try:
-                        os.remove(p_file)
-                    except:
-                        pass
-                    return None
-            return data
-        except:
+            mtime = os.path.getmtime(p_file) if p_file and os.path.exists(p_file) else 0
+            heartbeat = float(data.get("heartbeat") or data.get("start_time") or mtime)
+            if time.time() - max(mtime, heartbeat) > PROGRESS_STALE_SECONDS:
+                print(f"[Progress] Job qua han 2h, bo qua hien thi: {video_path}")
+                return None
+        except Exception:
             pass
-    return None
+    return data
 
 def write_progress(video_path, status, username="", video_name="", progress=0.0, elapsed=0.0, start_time=None, error_msg="", result=None, status_msg=""):
     """Ghi thông tin tiến trình xuống đĩa"""
@@ -5761,6 +5814,7 @@ def write_progress(video_path, status, username="", video_name="", progress=0.0,
         "progress": progress,
         "elapsed": elapsed,
         "start_time": start_time or time.time(),
+        "heartbeat": time.time(),
         "error_msg": error_msg,
         "result": result,
         "status_msg": status_msg
@@ -5974,39 +6028,62 @@ def poll_background_analysis_complete():
     if video_path:
         finalize_background_analysis_if_ready(video_path)
 
-def liet_ke_jobs_dang_chay():
-    """Đọc tất cả file progress trên đĩa để lấy danh sách video đang trích xuất.
-    Nhờ tiến trình ghi ra đĩa dùng chung nên mở link ở thiết bị/nền tảng nào cũng thấy."""
-    jobs = []
+def _scan_progress_by_status(*statuses):
+    """Quét file progress_*.json theo danh sách trạng thái."""
+    items = []
     if not os.path.exists(PROCESSED_DIR):
-        return jobs
+        return items
     seen_paths = set()
     try:
         for fn in sorted(os.listdir(PROCESSED_DIR)):
-            if fn.startswith("progress_") and fn.endswith(".json"):
-                try:
-                    with open(os.path.join(PROCESSED_DIR, fn), 'r', encoding='utf-8') as f:
-                        data = json.load(f)
-                except Exception:
-                    continue
-                if data and data.get("status") == "processing":
-                    # Loại trùng theo video_path để tránh hiển thị/khóa key bị lặp
-                    vp_key = data.get("video_path") or fn
-                    if vp_key in seen_paths:
-                        continue
-                    seen_paths.add(vp_key)
-                    jobs.append(data)
+            if not (fn.startswith("progress_") and fn.endswith(".json")):
+                continue
+            try:
+                with open(os.path.join(PROCESSED_DIR, fn), 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+            except Exception:
+                continue
+            if not data or data.get("status") not in statuses:
+                continue
+            vp_key = data.get("video_path") or fn
+            if vp_key in seen_paths:
+                continue
+            seen_paths.add(vp_key)
+            items.append(data)
     except Exception as scan_err:
         print(f"[Jobs] Loi quet progress: {scan_err}")
-    return jobs
+    return items
 
+def liet_ke_jobs_dang_chay():
+    """Đọc tất cả file progress trên đĩa để lấy danh sách video đang trích xuất.
+    Nhờ tiến trình ghi ra đĩa dùng chung nên mở link ở thiết bị/nền tảng nào cũng thấy."""
+    return _scan_progress_by_status("processing")
+
+def liet_ke_jobs_vua_xong():
+    """Video vừa phân tích xong (status=success), chờ người dùng mở xem kết quả."""
+    return _scan_progress_by_status("success")
+
+@st.fragment(run_every=2)
 def hien_thi_jobs_dang_chay_fragment(key_suffix=""):
-    """Panel theo dõi các video đang trích xuất khung xương — dùng chung cho mọi thiết bị/phiên.
-    Là hàm thường (không phải fragment lồng nhau) để tránh lỗi trùng key widget."""
+    """Panel theo dõi các video đang trích xuất khung xương — dùng chung cho mọi thiết bị/phiên."""
     jobs = liet_ke_jobs_dang_chay()
-    if not jobs:
+    done_jobs = liet_ke_jobs_vua_xong()
+    if not jobs and not done_jobs:
         return
-    st.markdown("#### 🔄 Video đang trích xuất khung xương (chạy nền — mở link ở thiết bị nào cũng theo dõi được)")
+    if jobs:
+        st.markdown(f"#### 🔄 Đang phân tích **{len(jobs)}** video (chạy nền — tối đa {MAX_CONCURRENT_ANALYSIS} song song)")
+        st.caption("Tiến trình lưu trên đĩa: chuyển tab / F5 vẫn theo dõi được. Khi đạt 100% bấm **Xem kết quả**.")
+    if done_jobs:
+        st.success(f"✅ **{len(done_jobs)}** video đã phân tích xong — bấm **Xem kết quả** để mở (Codman / Gậy / ...).")
+        for done_idx, job in enumerate(done_jobs):
+            vname = job.get("video_name", "Video")
+            vp = job.get("video_path", "")
+            if st.button(f"📊 Xem kết quả: {vname}", key=f"view_done_{key_suffix}_{done_idx}_{hashlib.md5((vp or str(done_idx)).encode()).hexdigest()[:8]}", use_container_width=True):
+                if vp and finalize_background_analysis_if_ready(vp):
+                    st.rerun(scope="app")
+                elif vp:
+                    check_and_populate_background_result(vp)
+                    st.rerun(scope="app")
     for job_idx, job in enumerate(jobs):
         vp = job.get("video_path", "")
         vname = job.get("video_name", "Video")
@@ -6573,6 +6650,78 @@ def skip_step_theo_model(model_type, manual_skip=None):
             ms = 0
         return max(ms, 2)
     return 0
+
+def video_dang_phan_tich(video_path):
+    """Video này đang có job phân tích chạy (thread hoặc file progress)."""
+    if not video_path:
+        return False
+    prog = read_progress(video_path)
+    if prog and prog.get("status") == "processing":
+        return True
+    return video_path in _running_threads and _running_threads[video_path].is_alive()
+
+
+def video_can_khoi_dong_phan_tich(v, only_pending=True):
+    """True nếu video có thể đưa vào hàng đợi phân tích."""
+    vp = v.get("video_path")
+    if not vp or video_dang_phan_tich(vp):
+        return False
+    if not only_pending:
+        return True
+    has_metrics = bool(v.get("metrics"))
+    acc = v.get("accuracy") or 0
+    if has_metrics or (isinstance(acc, (int, float)) and float(acc) > 0) or v.get("status") == "Đã phân tích":
+        return False
+    return True
+
+
+def bat_dau_phan_tich_hang_loat(video_records, only_pending=True, force_reanalyze=False):
+    """Khởi chạy phân tích hàng loạt — tối đa MAX_CONCURRENT_ANALYSIS chạy song song, phần còn lại xếp hàng."""
+    started = 0
+    skipped = 0
+    ncv_gd = st.session_state.get("ncv_giai_doan", PHASE_UI_LABELS["g2"])
+    model_type_ncv = st.session_state.get("ncv_model_type", "MediaPipe Heavy")
+    conf_ncv = st.session_state.get("ncv_confidence", 0.5)
+    skip_step = st.session_state.get("ncv_skip_frames", 0)
+    resize_width = st.session_state.get("ncv_resize_width", 720)
+    for v in video_records:
+        vp = v.get("video_path")
+        if not vp:
+            skipped += 1
+            continue
+        if video_dang_phan_tich(vp):
+            skipped += 1
+            continue
+        if only_pending and not force_reanalyze and not video_can_khoi_dong_phan_tich(v, only_pending=True):
+            skipped += 1
+            continue
+        if force_reanalyze:
+            clear_analysis_progress(vp)
+            done_key = f"_bg_done_{hashlib.md5(vp.encode()).hexdigest()}"
+            st.session_state.pop(done_key, None)
+        try:
+            ensure_local_file(vp)
+        except Exception:
+            pass
+        if not os.path.exists(vp) or os.path.getsize(vp) < 1024:
+            skipped += 1
+            continue
+        bat_dau_phan_tich_background(
+            video_path=vp,
+            username=v.get("username"),
+            full_name=v.get("full_name"),
+            video_name=v.get("video_name"),
+            exercise_name=v.get("exercise"),
+            giai_doan=ncv_gd,
+            model_type=model_type_ncv,
+            confidence=conf_ncv,
+            skip_step=skip_step,
+            resize_width=resize_width,
+            force_train_classifier=force_reanalyze,
+        )
+        started += 1
+    return started, skipped
+
 
 def bat_dau_phan_tich_background(
     video_path,
@@ -8490,6 +8639,9 @@ st.markdown(f"""
 def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_ext=None):
     """Hiển thị tab phân tích với thiết kế chuyên nghiệp và nhận định lâm sàng"""
     user_role = st.session_state.user_info.get('role')
+
+    if user_role == "Nghiên cứu viên":
+        hien_thi_jobs_dang_chay_fragment(key_suffix=key_suffix)
 
     # Kiểm tra tiến trình background trước tiên nếu đang chọn một video.
     # Chỉ nạp khi KHÔNG ở chế độ chạy lại (tránh ghi đè trạng thái cấu hình phân tích mới).
@@ -12802,6 +12954,40 @@ def hien_thi_danh_sach_video_fragment(user_role):
         if not filtered_videos:
             st.info("ℹ️ Không tìm thấy video nào khớp với điều kiện lọc.")
         else:
+            if user_role == "Nghiên cứu viên":
+                pending_batch = [v for v in filtered_videos if video_can_khoi_dong_phan_tich(v, only_pending=True)]
+                running_n = len(liet_ke_jobs_dang_chay())
+                st.markdown("##### ⚡ Phân tích hàng loạt (chạy nền)")
+                b_col1, b_col2 = st.columns(2)
+                with b_col1:
+                    if pending_batch:
+                        if st.button(
+                            f"🚀 Phân tích TẤT CẢ chưa xong ({len(pending_batch)} video · {MAX_CONCURRENT_ANALYSIS} song song)",
+                            key="btn_batch_analyze_pending",
+                            type="primary",
+                            use_container_width=True,
+                        ):
+                            n_start, n_skip = bat_dau_phan_tich_hang_loat(pending_batch, only_pending=True)
+                            st.toast(f"Đã khởi chạy {n_start} video (bỏ qua {n_skip}). Đang chạy nền: {running_n + n_start}.", icon="🚀")
+                            st.rerun()
+                    else:
+                        st.caption("✅ Không còn video chưa phân tích trong bộ lọc hiện tại.")
+                with b_col2:
+                    if st.button(
+                        f"🔁 Chạy lại AI TẤT CẢ trong bộ lọc ({len(filtered_videos)} video · {MAX_CONCURRENT_ANALYSIS} song song)",
+                        key="btn_batch_reanalyze_all",
+                        use_container_width=True,
+                    ):
+                        n_start, n_skip = bat_dau_phan_tich_hang_loat(filtered_videos, only_pending=False, force_reanalyze=True)
+                        st.toast(f"Đã xếp hàng chạy lại {n_start} video (bỏ qua {n_skip}).", icon="🔁")
+                        st.rerun()
+                if running_n or pending_batch:
+                    st.caption(
+                        f"Tối đa **{MAX_CONCURRENT_ANALYSIS}** video chạy cùng lúc; video thứ 5+ tự chờ trong hàng đợi. "
+                        "Theo dõi ở tab **Phân tích** hoặc panel **Đang phân tích X video**."
+                    )
+                st.markdown("---")
+
             # --- Pagination: chỉ render 10 video/trang để tránh render quá nhiều expander ---
             PAGE_SIZE = 10
             total_videos = len(filtered_videos)
