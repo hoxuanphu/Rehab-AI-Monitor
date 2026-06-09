@@ -112,6 +112,42 @@ def get_final_h264_path(video_path):
     return base + "_f.mp4"
 
 
+def video_fallback_paths(file_path):
+    """Các đường dẫn video có thể tồn tại trên Dataset (H.264 _f.mp4 hoặc bản gốc .mp4)."""
+    if not file_path:
+        return []
+    try:
+        norm = get_local_frame_path(file_path) or file_path
+    except Exception:
+        norm = file_path
+    candidates = []
+    if norm.endswith('_f.mp4'):
+        candidates = [norm, norm.replace('_f.mp4', '.mp4')]
+    else:
+        h264 = get_final_h264_path(norm)
+        candidates = [h264, norm] if h264 != norm else [norm]
+    seen, out = set(), []
+    for p in candidates:
+        if p and p not in seen:
+            seen.add(p)
+            out.append(p)
+    return out
+
+
+def find_ready_local_video(file_path, min_size=5 * 1024):
+    """Trả về đường dẫn video local hợp lệ đầu tiên trong danh sách fallback."""
+    for p in video_fallback_paths(file_path):
+        if is_local_file_ready(p, min_size=min_size):
+            try:
+                mtime, size = os.path.getmtime(p), os.path.getsize(p)
+                if _check_video_valid_cached(p, mtime, size):
+                    return p
+            except Exception:
+                if is_local_file_ready(p, min_size=min_size):
+                    return p
+    return None
+
+
 def sync_transcode_to_h264(src_path, dst_path=None, audio_path=None, timeout=1800, on_tick=None):
     """Chuyển video sang H.264 MP4 (faststart). Ghi file tạm rồi đổi tên atomic để tránh file hỏng."""
     if not src_path or not os.path.exists(src_path):
@@ -944,20 +980,23 @@ def _render_video_streamlit_native(target_path):
 
 
 def dam_bao_tai_video_phan_tich(processed_path):
-    """Tải video phân tích (_f.mp4) về local trước khi phát cho bệnh nhân."""
+    """Tải video phân tích về local — ưu tiên H.264, fallback bản .mp4 gốc nếu _f chua co tren HF."""
     if not processed_path:
         return None
-    local_path = get_local_frame_path(processed_path)
-    if not local_path:
-        local_path = processed_path
-    if not is_local_file_ready(local_path):
-        ensure_local_file(local_path)
-    playback = resolve_playback_video_path(local_path)
-    if playback and not is_local_file_ready(playback):
-        ensure_local_file(playback)
-    return playback if (playback and is_local_file_ready(playback)) else (
-        local_path if is_local_file_ready(local_path) else None
-    )
+    ready = find_ready_local_video(processed_path)
+    if ready:
+        pb = resolve_playback_video_path(ready)
+        if pb and is_local_file_ready(pb):
+            return pb
+        return ready
+    if ensure_local_file(processed_path, quiet=True, try_fallbacks=True):
+        ready = find_ready_local_video(processed_path)
+        if ready:
+            pb = resolve_playback_video_path(ready, sync_transcode=True)
+            if pb and is_local_file_ready(pb):
+                return pb
+            return ready
+    return None
 
 
 def nap_phien_benh_nhan_vao_session(selected_v):
@@ -1023,13 +1062,12 @@ def render_video(video_path, check_h264=True):
             st.error(f'⚠️ Lỗi hiển thị video: {e}')
         return
 
-    # Bước 1: Kiểm tra xem file H264 có sẵn local và hợp lệ không
+    # Bước 1: Tải video từ HF nếu cần (_f.mp4 hoặc .mp4 gốc — không lỗi khi _f chua upload)
     final_h264 = get_final_h264_path(video_path)
-    # Thử tải _f.mp4 từ HF Dataset nếu chưa có local (file chỉ ~10MB, tải rất nhanh)
-    if check_h264 and (not os.path.exists(final_h264) or os.path.getsize(final_h264) < 5 * 1024):
+    if check_h264 and not find_ready_local_video(video_path):
         try:
-            ensure_local_file(final_h264)
-        except:
+            ensure_local_file(video_path, quiet=True, try_fallbacks=True)
+        except Exception:
             pass
     is_local_h264 = False
     if os.path.exists(final_h264) and os.path.getsize(final_h264) >= 5 * 1024:
@@ -1049,12 +1087,18 @@ def render_video(video_path, check_h264=True):
         except:
             pass
 
-    # Xác định đường dẫn thực tế phát
+    # Xác định đường dẫn thực tế phát (sau khi đã thử fallback _f / .mp4)
     target_path = None
-    if is_local_h264:
+    ready_any = find_ready_local_video(video_path)
+    if ready_any:
+        h264_ready = get_final_h264_path(ready_any)
+        if is_local_file_ready(h264_ready):
+            target_path = h264_ready
+        else:
+            target_path = ensure_playable_video(ready_any) or ready_any
+    elif is_local_h264:
         target_path = final_h264
     elif is_local_raw:
-        # File gốc có sẵn local nhưng chưa có H264 hoặc H264 bị hỏng, kích hoạt convert dưới nền và dùng tạm file gốc
         target_path = ensure_playable_video(video_path)
 
     # 1. TRƯỜNG HỢP 1: Có sẵn file cục bộ (local)
@@ -1664,46 +1708,63 @@ def push_file_to_hf_async(local_path):
 
     threading.Thread(target=_run_upload, daemon=True).start()
 
-def ensure_local_file(file_path):
-    """Đảm bảo file tồn tại cục bộ và hợp lệ. Nếu không có hoặc bị lỗi (nhỏ hơn 5KB), thử tải từ Hugging Face Dataset."""
+def _hf_download_dataset_file(rel_path, quiet=False):
+    """Tải một file từ HF Dataset về DATA_DIR. Trả về đường dẫn local nếu thành công."""
+    if not (HF_TOKEN and HF_DATASET_ID and rel_path):
+        return None
+    try:
+        from huggingface_hub import hf_hub_download
+        local_fp = hf_hub_download(
+            repo_id=HF_DATASET_ID,
+            filename=rel_path,
+            repo_type="dataset",
+            token=HF_TOKEN,
+            local_dir=DATA_DIR,
+        )
+        if local_fp and os.path.exists(local_fp) and os.path.getsize(local_fp) >= 5 * 1024:
+            return local_fp
+        target = os.path.normpath(os.path.join(DATA_DIR, rel_path.replace("\\", "/")))
+        if os.path.exists(target) and os.path.getsize(target) >= 5 * 1024:
+            return target
+    except Exception as e:
+        err = str(e).lower()
+        if "404" in err or "not found" in err or "entry not found" in err:
+            if not quiet:
+                print(f"[HF Sync] Chua co tren Dataset: {rel_path}")
+        elif not quiet:
+            print(f"[HF Sync] Khong tai duoc {rel_path}: {e}")
+    return None
+
+
+def ensure_local_file(file_path, quiet=False, try_fallbacks=True):
+    """Đảm bảo file tồn tại cục bộ. Thử _f.mp4 rồi .mp4 gốc — không báo lỗi đỏ khi _f chua upload."""
     if not file_path:
         return False
-        
-    is_valid = False
-    if os.path.exists(file_path):
-        try:
-            # File LFS pointer thường có kích thước rất nhỏ (~130 byte)
-            # File video hợp lệ luôn lớn hơn 5KB
-            if os.path.getsize(file_path) >= 5 * 1024:
-                is_valid = True
-        except:
-            pass
-            
-    if is_valid:
-        return True
-        
-    # Nếu file tồn tại nhưng bị lỗi/là LFS pointer thô, xóa nó đi để tải lại file thật từ Hugging Face
-    if os.path.exists(file_path):
-        try: os.remove(file_path)
-        except: pass
-        
-    if HF_TOKEN and HF_DATASET_ID:
-        try:
-            rel_path = get_clean_rel_path(file_path)
-            from huggingface_hub import hf_hub_download
-            hf_hub_download(
-                repo_id=HF_DATASET_ID,
-                filename=rel_path,
-                repo_type="dataset",
-                token=HF_TOKEN,
-                local_dir=DATA_DIR
-            )
-            # Kiểm tra xem file sau khi tải về có hợp lệ không
-            if os.path.exists(file_path) and os.path.getsize(file_path) >= 5 * 1024:
-                return True
-            return os.path.exists(file_path)
-        except Exception as e:
-            print(f"[HF Sync] Không thể tải file yêu cầu {file_path}: {e}")
+
+    paths = video_fallback_paths(file_path) if try_fallbacks else [file_path]
+
+    for fp in paths:
+        if is_local_file_ready(fp):
+            return True
+        if os.path.exists(fp):
+            try:
+                os.remove(fp)
+            except Exception:
+                pass
+
+    if not (HF_TOKEN and HF_DATASET_ID):
+        return False
+
+    for fp in paths:
+        rel_path = get_clean_rel_path(fp)
+        got = _hf_download_dataset_file(rel_path, quiet=True)
+        if got and is_local_file_ready(got):
+            return True
+        if is_local_file_ready(fp):
+            return True
+
+    if not quiet:
+        print(f"[HF Sync] Khong tim thay tren Dataset (da thu fallback): {file_path}")
     return False
 
 def get_local_frame_path(stored_path):
@@ -7509,6 +7570,9 @@ def bat_dau_phan_tich_background(
                 push_file_to_hf_async(all_frames_data)
                 if zip_data:
                     push_file_to_hf_async(zip_data)
+                h264_out = resolve_playback_video_path(output_path)
+                if h264_out and h264_out != output_path and os.path.exists(h264_out):
+                    push_file_to_hf_async(h264_out)
                 
                 # Lưu kết quả hoàn tất vào progress file
                 result_data = {
@@ -11979,10 +12043,11 @@ def hien_thi_frames_day_du(key_suffix=""):
             st.info("ℹ️ Video trích xuất chưa có sẵn local. Bấm nút dưới để tải khi cần xem video.")
             if st.button("⚡ Tải video khung xương", key=f"btn_lazy_processed_video_{key_suffix}", use_container_width=True):
                 with st.spinner("📥 Đang tải video khung xương..."):
-                    if ensure_local_file(processed_video_path):
+                    got = dam_bao_tai_video_phan_tich(processed_video_path)
+                    if got:
                         st.rerun()
                     else:
-                        st.error("Không tải được video từ Cloud.")
+                        st.warning("Chưa có file video trên Cloud. Bảng số liệu và biểu đồ bên cạnh vẫn xem được.")
             
     with v_col2:
         is_light = st.session_state.theme == 'light'
