@@ -38,6 +38,7 @@ try:
         draw_ml_badge,
         draw_rule_badge,
         ensure_classifier_ready,
+        format_ml_display,
         get_pose_classifier_status,
         merge_ml_metrics,
         refresh_saved_frame_labels,
@@ -51,6 +52,7 @@ except Exception as _pose_classifier_import_error:
     draw_ml_badge = None
     draw_rule_badge = None
     ensure_classifier_ready = None
+    format_ml_display = None
     get_pose_classifier_status = None
     merge_ml_metrics = None
     refresh_saved_frame_labels = None
@@ -11381,6 +11383,30 @@ def hien_thi_frames_day_du(key_suffix=""):
     else:
         st.markdown("### 📷 KHUNG HÌNH TRÍCH XUẤT — PHÂN LOẠI THEO 3 GIAI ĐOẠN")
 
+    with st.expander("📖 Giải thích nhãn REF (PASS) và ML (%) — bấm để xem", expanded=False):
+        st.markdown(
+            """
+**Mỗi khung hình có 2 nhãn độc lập:**
+
+| Nhãn | Cách chấm | Ý nghĩa |
+|------|-----------|---------|
+| **PASS / NEAR / FAIL** (REF) | So góc vai & khuỷu với video chuẩn YouTube | **PASS**: sai số Δ vai **và** Δ khuỷu ≤ ngưỡng giai đoạn (G1 **45°**, G2 **30°**, G3 **15°**) · **NEAR**: Δ ≤ ngưỡng × **1.5** (chưa đạt PASS) · **FAIL**: vượt NEAR |
+| **ML · Đúng / Gần đúng / Sai** | Mô hình RandomForest học từ dữ liệu các video đã phân tích | Chọn **1 trong 3 lớp** có xác suất cao nhất (không dùng ngưỡng % cố định kiểu 80/60) |
+
+**Con số % bên cạnh ML** = **độ tin cậy vào đúng nhãn ML đang hiển thị** (ví dụ *Gần đúng · tin cậy 42%* = mô hình 42% chắc frame thuộc lớp *Gần đúng*).
+
+| Mức tin cậy ML | Ý nghĩa khi đọc kết quả |
+|----------------|-------------------------|
+| **≥ 70%** | Tin cậy cao — có thể tham khảo mạnh |
+| **50–69%** | Tin cậy vừa — nên xem kèm nhãn REF và góc Δ |
+| **< 50%** | Không chắc chắn — mô hình phân vân giữa các lớp |
+
+**Ví dụ ảnh của bạn:** `PASS` (REF: góc đạt ngưỡng) nhưng `ML · Gần đúng · tin cậy 33%` (ML thấy tư thế gần đúng và **không chắc** — dưới 50%).
+
+Dòng **Xác suất 3 lớp** (nếu có): tổng ~100%, cho biết mô hình phân bố giữa Sai / Gần đúng / Đúng.
+            """
+        )
+
     # Hàm helper tính G1/G2/G3 status cho một frame_data
     def _frame_phase_status(f_data, threshold):
         """Tính PASS/NEAR/FAIL cho frame theo ngưỡng sai số threshold"""
@@ -11682,23 +11708,25 @@ def hien_thi_frames_day_du(key_suffix=""):
             bg_alpha = "rgba(34,197,94,0.12)" if phase_st == "PASS" else ("rgba(245,158,11,0.12)" if phase_st == "NEAR" else "rgba(239,68,68,0.12)")
 
             ml_label = f_data.get('ml_label_text')
-            ml_score = f_data.get('ml_score')
-            if ml_score is None:
-                ml_score = f_data.get('ml_confidence')
             ml_badge_html = ""
             ml_footer_html = ""
             if ml_label:
-                ml_label_text = str(ml_label)
-                ml_key = ml_label_text.strip().lower()
-                ml_color = "#22c55e" if ("dung" in ml_key and "gan" not in ml_key) else ("#f59e0b" if "gan" in ml_key else "#ef4444")
-                ml_score_text = ""
-                if ml_score is not None:
-                    try:
-                        ml_score_text = f" {float(ml_score):.0f}%"
-                    except (TypeError, ValueError):
-                        ml_score_text = ""
-                ml_badge_html = f'<span class="frame-card-badge" style="background: {ml_color}1f; color: {ml_color}; border-color: {ml_color}40;">ML {ml_label_text}{ml_score_text}</span>'
-                ml_footer_html = f'<div class="frame-card-row"><span>Model ML:</span><span style="color: {ml_color}; font-weight: bold;">{ml_label_text}{ml_score_text}</span></div>'
+                if format_ml_display:
+                    ml_disp = format_ml_display(f_data)
+                    ml_label_text = ml_disp.get("label_vi") or str(ml_label)
+                    ml_key = ml_label_text.strip().lower()
+                else:
+                    ml_label_text = str(ml_label)
+                    ml_key = ml_label_text.strip().lower()
+                    ml_disp = {"badge_text": ml_label_text, "footer_text": f"ML: {ml_label_text}", "prob_text": ""}
+                ml_color = "#22c55e" if ("đúng" in ml_key and "gần" not in ml_key) or ("dung" in ml_key and "gan" not in ml_key) else ("#f59e0b" if "gần" in ml_key or "gan" in ml_key else "#ef4444")
+                badge_text = ml_disp.get("badge_text") or ml_label_text
+                footer_text = ml_disp.get("footer_text") or f"ML: {ml_label_text}"
+                prob_text = ml_disp.get("prob_text") or ""
+                ml_badge_html = f'<span class="frame-card-badge" style="background: {ml_color}1f; color: {ml_color}; border-color: {ml_color}40;">ML · {badge_text}</span>'
+                ml_footer_html = f'<div class="frame-card-row"><span>Model ML:</span><span style="color: {ml_color}; font-weight: bold;">{footer_text}</span></div>'
+                if prob_text:
+                    ml_footer_html += f'<div class="frame-card-row"><span>Xác suất 3 lớp:</span><span style="font-size: 0.72rem;">{prob_text}</span></div>'
 
             gv = f_data.get('goc_vai', 0) or 0
             gk = f_data.get('goc_khuyu', 0) or 0

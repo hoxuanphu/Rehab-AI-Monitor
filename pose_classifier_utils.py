@@ -37,6 +37,131 @@ LABEL_NAMES = {
     1: "Gan dung",
     2: "Dung",
 }
+ML_LABEL_DISPLAY = {
+    0: "Sai",
+    1: "Gần đúng",
+    2: "Đúng",
+}
+ML_PROB_KEYS = {
+    0: "ml_prob_sai",
+    1: "ml_prob_gan_dung",
+    2: "ml_prob_dung",
+}
+
+
+def ml_label_to_display(label_text: str | None = None, ml_label: int | None = None) -> str:
+    if ml_label is not None:
+        try:
+            return ML_LABEL_DISPLAY.get(int(ml_label), str(ml_label))
+        except (TypeError, ValueError):
+            pass
+    key = str(label_text or "").strip().lower()
+    if key in {"dung", "đúng"}:
+        return "Đúng"
+    if "gan" in key:
+        return "Gần đúng"
+    if key in {"sai", "fail"}:
+        return "Sai"
+    return str(label_text or "N/A")
+
+
+def _confidence_tier(confidence: float | None) -> str:
+    if confidence is None:
+        return ""
+    if confidence >= 70:
+        return "Tin cậy cao"
+    if confidence >= 50:
+        return "Tin cậy vừa"
+    return "Không chắc chắn"
+
+
+def _attach_ml_probabilities(result: dict[str, Any], probabilities: np.ndarray, classes: list[int]) -> None:
+    for cls_id, prob in zip(classes, probabilities):
+        key = ML_PROB_KEYS.get(int(cls_id))
+        if key:
+            result[key] = round(float(prob * 100), 2)
+
+
+def _resolve_ml_confidence(ml_info: Mapping[str, Any]) -> float | None:
+    confidence = ml_info.get("ml_confidence")
+    if confidence is not None:
+        try:
+            return float(confidence)
+        except (TypeError, ValueError):
+            pass
+
+    label_key = str(ml_info.get("ml_label_text") or "").strip().lower()
+    prob_map = {
+        "sai": ml_info.get("ml_prob_sai"),
+        "gan dung": ml_info.get("ml_prob_gan_dung"),
+        "dung": ml_info.get("ml_prob_dung"),
+    }
+    if label_key in prob_map and prob_map[label_key] is not None:
+        try:
+            return float(prob_map[label_key])
+        except (TypeError, ValueError):
+            pass
+
+    # Du lieu cu: ml_score chi phan anh xac suat lop "Dung"
+    score = ml_info.get("ml_score")
+    if score is not None and label_key == "dung":
+        try:
+            return float(score)
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def format_ml_display(ml_info: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Chuan hoa text hien thi ML de nguoi xem hieu ro nhan va % tin cay."""
+    if not ml_info:
+        return {
+            "label_vi": "",
+            "confidence": None,
+            "confidence_tier": "",
+            "badge_text": "",
+            "footer_text": "",
+            "prob_text": "",
+            "overlay_text": "",
+        }
+
+    label_vi = ml_label_to_display(
+        ml_info.get("ml_label_text"),
+        ml_info.get("ml_label"),
+    )
+    confidence = _resolve_ml_confidence(ml_info)
+    tier = _confidence_tier(confidence)
+
+    prob_parts: list[str] = []
+    for cls_id, label in ML_LABEL_DISPLAY.items():
+        prob_val = ml_info.get(ML_PROB_KEYS[cls_id])
+        if prob_val is not None:
+            try:
+                prob_parts.append(f"{label} {float(prob_val):.0f}%")
+            except (TypeError, ValueError):
+                pass
+    prob_text = " · ".join(prob_parts)
+
+    if confidence is not None:
+        badge_text = f"{label_vi} · tin cậy {confidence:.0f}%"
+        footer_text = f"ML: {label_vi} · tin cậy {confidence:.0f}%"
+        if tier:
+            footer_text += f" · {tier}"
+        overlay_text = f"{label_vi.upper()} {confidence:.0f}%"
+    else:
+        badge_text = label_vi
+        footer_text = f"ML: {label_vi}"
+        overlay_text = label_vi.upper()
+
+    return {
+        "label_vi": label_vi,
+        "confidence": confidence,
+        "confidence_tier": tier,
+        "badge_text": badge_text,
+        "footer_text": footer_text,
+        "prob_text": prob_text,
+        "overlay_text": overlay_text,
+    }
 
 
 def get_model_paths(db_dir: str = "database") -> tuple[str, str]:
@@ -279,6 +404,7 @@ def create_pose_classifier_predictor(db_dir: str = "database") -> Callable[[Mapp
                 result["ml_score"] = round(float(probabilities[classes.index(pass_label)] * 100), 2)
             if prediction in classes:
                 result["ml_confidence"] = round(float(probabilities[classes.index(prediction)] * 100), 2)
+            _attach_ml_probabilities(result, probabilities, classes)
         return result
 
     return predict_row
@@ -414,9 +540,18 @@ def apply_classifier_to_dataframe(
     if pass_label == 2:
         out_df["gan_dung_ml"] = predictions == 1
     if hasattr(clf, "predict_proba"):
+        proba = clf.predict_proba(X)
         if pass_label in classes:
             class_idx = classes.index(pass_label)
-            out_df["ml_score"] = np.round(clf.predict_proba(X)[:, class_idx] * 100, 2)
+            out_df["ml_score"] = np.round(proba[:, class_idx] * 100, 2)
+        conf_indices = [classes.index(int(pred)) if int(pred) in classes else 0 for pred in predictions]
+        out_df["ml_confidence"] = np.round(
+            np.array([proba[row_idx, col_idx] for row_idx, col_idx in enumerate(conf_indices)]) * 100,
+            2,
+        )
+        for cls_id, col_name in ML_PROB_KEYS.items():
+            if cls_id in classes:
+                out_df[col_name] = np.round(proba[:, classes.index(cls_id)] * 100, 2)
 
     if phase_bounds_fn is not None and phase_bounds is None:
         try:
@@ -579,13 +714,8 @@ def draw_ml_badge(frame_output, ml_info: Mapping[str, Any] | None, scale_factor:
         return frame_output
     import cv2
 
-    label = str(ml_info.get("ml_label_text") or "N/A").upper()
-    score = ml_info.get("ml_score", ml_info.get("ml_confidence"))
-    if score is not None:
-        try:
-            label = f"{label} {float(score):.0f}%"
-        except (TypeError, ValueError):
-            pass
+    display = format_ml_display(ml_info)
+    label = display.get("overlay_text") or str(ml_info.get("ml_label_text") or "N/A").upper()
     text = f"ML: {label}"
     color = _badge_color_for_ml(ml_info.get("ml_label_text"))
 
