@@ -14894,7 +14894,6 @@ def reset_vid_list_page():
     st.session_state.vid_list_page = 0
 
 
-@st.fragment
 def hien_thi_danh_sach_video_fragment(user_role):
     evals_db = _evals_dedup_cached(_mtimes_video_eval()[1])
     video_list = load_danh_sach_video_nghien_cuu()
@@ -15026,7 +15025,7 @@ def hien_thi_danh_sach_video_fragment(user_role):
                         ):
                             n_start, n_skip = bat_dau_phan_tich_hang_loat(pending_batch, only_pending=True)
                             st.toast(f"Đã khởi chạy {n_start} video (bỏ qua {n_skip}). Đang chạy nền: {running_n + n_start}.", icon="🚀")
-                            st.rerun(scope="fragment")
+                            st.rerun()
                     else:
                         st.caption("✅ Không còn video chưa phân tích trong bộ lọc hiện tại.")
                 with b_col2:
@@ -15037,7 +15036,7 @@ def hien_thi_danh_sach_video_fragment(user_role):
                     ):
                         n_start, n_skip = bat_dau_phan_tich_hang_loat(filtered_videos, only_pending=False, force_reanalyze=True)
                         st.toast(f"Đã xếp hàng chạy lại {n_start} video (bỏ qua {n_skip}).", icon="🔁")
-                        st.rerun(scope="fragment")
+                        st.rerun()
                 if running_n or pending_batch:
                     st.caption(
                         f"Tối đa **{MAX_CONCURRENT_ANALYSIS}** video chạy cùng lúc; video tiếp theo tự xếp hàng. "
@@ -15062,7 +15061,7 @@ def hien_thi_danh_sach_video_fragment(user_role):
                 with pg_c1:
                     if st.button("◀ Trang trước", disabled=(st.session_state.vid_list_page == 0), key="vid_pg_prev"):
                         st.session_state.vid_list_page -= 1
-                        st.rerun(scope="fragment")
+                        st.rerun()
                 with pg_c2:
                     st.markdown(
                         f"<div style='text-align:center; padding:6px; color:#aaa;'>Trang {st.session_state.vid_list_page + 1} / {total_pages} "
@@ -15072,7 +15071,7 @@ def hien_thi_danh_sach_video_fragment(user_role):
                 with pg_c3:
                     if st.button("Trang sau ▶", disabled=(st.session_state.vid_list_page >= total_pages - 1), key="vid_pg_next"):
                         st.session_state.vid_list_page += 1
-                        st.rerun(scope="fragment")
+                        st.rerun()
 
             start_idx = st.session_state.vid_list_page * PAGE_SIZE
             page_videos = list(enumerate(filtered_videos))[start_idx: start_idx + PAGE_SIZE]
