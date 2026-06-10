@@ -348,33 +348,30 @@ def get_data_science_logo_base64():
 
 
 def hien_thi_hang_logo_header():
-    """Ba logo header bằng st.image — không dùng base64 trong HTML."""
-    st.markdown("""
-    <style>
-    div[data-testid="stHorizontalBlock"]:has(.logo-header-marker) {
-        justify-content: center; gap: 28px; margin-bottom: 8px;
-    }
-    div[data-testid="stHorizontalBlock"]:has(.logo-header-marker) [data-testid="column"] {
-        display: flex; justify-content: center; align-items: center; flex: 0 0 auto !important;
-        width: 100px !important; min-width: 100px;
-    }
-    div[data-testid="stHorizontalBlock"]:has(.logo-header-marker) img {
-        border-radius: 50%; object-fit: contain; width: 78px !important;
-    }
-    </style>
-    <div class="logo-header-marker" style="display:none"></div>
-    """, unsafe_allow_html=True)
-    c1, c2, c3 = st.columns([1, 1, 1])
+    """Ba logo header — nhúng base64/URL trong HTML (ổn định trên HF, giống giao diện login)."""
     school_path = _duong_dan_logo_asset("abc1.png")
-    ds_path = _duong_dan_logo_asset("logo_data_science_sm.png", "logo_data_science_huph.png", "logo_data_science_huph.jpg")
-    pnt_url = "https://benhandientu.moh.gov.vn/storage/uploads/2025/11/bvpntlogo-1763704605.jpg"
-    school_url = "https://huph.edu.vn/uploads/logo/logo-huph.png"
-    with c1:
-        st.image(school_path or school_url, width=78)
-    with c2:
-        st.image(ds_path or DS_LOGO_URL, width=78)
-    with c3:
-        st.image(pnt_url, width=78)
+    school_uri = (_image_path_to_data_uri(school_path) if school_path else None) or get_school_logo_base64()
+    ds_path = _duong_dan_logo_asset("logo_data_science_sm.png", "logo_data_science_huph.jpg")
+    ds_uri = (_image_path_to_data_uri(ds_path) if ds_path else None) or DS_LOGO_URL
+    pnt_uri = "https://benhandientu.moh.gov.vn/storage/uploads/2025/11/bvpntlogo-1763704605.jpg"
+    st.markdown(
+        f"""
+        <div style="display:flex;justify-content:center;align-items:center;gap:36px;
+            margin:0 auto 14px auto;max-width:520px;padding-top:4px;">
+            <img src="{school_uri}" alt="HUPH"
+                style="width:80px;height:80px;border-radius:50%;object-fit:contain;
+                background:#fff;padding:3px;box-shadow:0 2px 8px rgba(0,0,0,.3);" />
+            <img src="{ds_uri}" alt="Data Science"
+                style="width:80px;height:80px;border-radius:50%;object-fit:contain;
+                background:#fff;padding:3px;border:2px solid #00e676;
+                box-shadow:0 0 14px rgba(0,230,118,.55);" />
+            <img src="{pnt_uri}" alt="BV Phạm Ngọc Thạch"
+                style="width:80px;height:80px;border-radius:50%;object-fit:contain;
+                background:#fff;padding:3px;box-shadow:0 2px 8px rgba(0,0,0,.3);" />
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _chuan_hoa_ten_video(name):
@@ -430,20 +427,32 @@ def _dedup_evaluations(evals):
     return result
 
 
+BN_NGHIEN_CUU = (
+    "Cao Thị Thường",
+    "Hoàng Hạnh Nguyên",
+    "Nguyễn Thị Nga",
+    "Vũ Thị Hòa",
+)
+BAI_NGHIEN_CUU = (
+    "Bài tập con lắc Codman",
+    "Bài tập với gậy (Pulley Exercise)",
+)
+
+
+def _slot_nghien_cuu_key(username, exercise):
+    return (str(username or "").strip(), str(exercise or "").strip())
+
+
 def _lay_khoa_video_da_danh_gia_bac_si(evals, patient_username=None):
-    """Các video gốc đã có nhận xét bác sĩ/KTV (không tính AI)."""
-    keys = set()
-    for e in _dedup_evaluations(evals):
-        if e.get("doctor_username") == "AI_Researcher":
-            continue
-        pu = e.get("patient_username")
+    """8 slot nghiên cứu (4 BN × 2 bài tập) đã có nhận xét bác sĩ/KTV."""
+    slots = set()
+    for pu in BN_NGHIEN_CUU:
         if patient_username and pu != patient_username:
             continue
-        vn = e.get("video_name")
-        ex = e.get("exercise")
-        if pu and vn and ex:
-            keys.add(_normalize_video_key(pu, vn, ex))
-    return keys
+        for ex in BAI_NGHIEN_CUU:
+            if _lay_eval_moi_nhat_theo_bai_tap(evals, pu, ex):
+                slots.add(_slot_nghien_cuu_key(pu, ex))
+    return slots
 
 
 def _loc_bo_trung_video_danh_sach(videos):
@@ -585,50 +594,38 @@ def _tao_ban_ghi_video_tu_danh_gia(doc_eval, ai_eval, users=None):
 
 
 def _lay_video_nghien_cuu_chinh_thuc(video_list, evals=None):
-    """Chỉ giữ 8 video gốc (4 BN × 2 bài tập) đã có nhận xét bác sĩ/KTV."""
+    """Luôn trả đủ 8 video (4 BN × 2 bài tập) đã có đánh giá bác sĩ — khóa theo BN+bài tập."""
     evals = _dedup_evaluations(evals if evals is not None else load_data(EVALUATIONS_FILE))
-    doc_keys = _lay_khoa_video_da_danh_gia_bac_si(evals)
-    if not doc_keys:
+    slots = [
+        _slot_nghien_cuu_key(pu, ex)
+        for pu in BN_NGHIEN_CUU
+        for ex in BAI_NGHIEN_CUU
+        if _lay_eval_moi_nhat_theo_bai_tap(evals, pu, ex)
+    ]
+    if not slots:
         return []
 
-    ai_by_key = {}
-    ai_by_exercise = {}
-    doc_by_key = {}
-    doc_by_exercise = {}
-    for e in evals:
-        nk = _normalize_video_key(e.get("patient_username"), e.get("video_name"), e.get("exercise"))
-        pu, ex = e.get("patient_username"), e.get("exercise")
-        if e.get("doctor_username") == "AI_Researcher":
-            ai_by_key[nk] = e
-            prev = ai_by_exercise.get((pu, ex))
-            if not prev or (_parse_vn_datetime(e.get("time")) or datetime.min) >= (_parse_vn_datetime(prev.get("time")) or datetime.min):
-                ai_by_exercise[(pu, ex)] = e
-        elif nk in doc_keys:
-            doc_by_key[nk] = e
-            prev = doc_by_exercise.get((pu, ex))
-            if not prev or (_parse_vn_datetime(e.get("time")) or datetime.min) >= (_parse_vn_datetime(prev.get("time")) or datetime.min):
-                doc_by_exercise[(pu, ex)] = e
-
-    vlist_by_key = {}
+    valid_slots = {_slot_nghien_cuu_key(pu, ex) for pu in BN_NGHIEN_CUU for ex in BAI_NGHIEN_CUU}
+    vlist_by_slot = {}
     for v in video_list or []:
         if _la_ban_ghi_video_mo_co(v):
             continue
-        nk = _normalize_video_key(v.get("username"), v.get("video_name"), v.get("exercise"))
-        if nk in doc_keys:
-            if nk in vlist_by_key:
-                vlist_by_key[nk] = _chon_video_moi_hon(v, vlist_by_key[nk])
+        sk = _slot_nghien_cuu_key(v.get("username"), v.get("exercise"))
+        if sk in valid_slots:
+            if sk in vlist_by_slot:
+                vlist_by_slot[sk] = _chon_video_moi_hon(v, vlist_by_slot[sk])
             else:
-                vlist_by_key[nk] = dict(v)
+                vlist_by_slot[sk] = dict(v)
 
     out = []
     users = load_users()
-    for nk in doc_keys:
-        pu, _, ex = nk
-        ai_eval = ai_by_key.get(nk) or ai_by_exercise.get((pu, ex))
-        if nk in vlist_by_key:
-            out.append(_ap_dung_ket_qua_moi_nhat_vao_video(vlist_by_key[nk], ai_eval))
+    for pu, ex in slots:
+        sk = (pu, ex)
+        doc_eval = _lay_eval_moi_nhat_theo_bai_tap(evals, pu, ex)
+        ai_eval = _lay_eval_moi_nhat_theo_bai_tap(evals, pu, ex, doctor_username="AI_Researcher")
+        if sk in vlist_by_slot:
+            out.append(_ap_dung_ket_qua_moi_nhat_vao_video(vlist_by_slot[sk], ai_eval))
             continue
-        doc_eval = doc_by_key.get(nk) or doc_by_exercise.get((pu, ex))
         if doc_eval:
             rec = _tao_ban_ghi_video_tu_danh_gia(doc_eval, ai_eval, users=users)
             out.append(_ap_dung_ket_qua_moi_nhat_vao_video(rec, ai_eval))
@@ -637,7 +634,25 @@ def _lay_video_nghien_cuu_chinh_thuc(video_list, evals=None):
         key=lambda x: _parse_vn_datetime(_lay_thoi_gian_upload_video(x)) or datetime.min,
         reverse=True,
     )
-    return _loc_bo_trung_video_danh_sach(out)
+    return out
+
+
+def _thong_ke_video_nghien_cuu():
+    """Thống kê chỉ trên 8 video nghiên cứu — không đếm toàn bộ video_list."""
+    evals_db = _dedup_evaluations(load_data(EVALUATIONS_FILE))
+    v_research = _lay_video_nghien_cuu_chinh_thuc(load_video_list_an_toan(), evals_db)
+    total = len(v_research)
+    pending = 0
+    acc_vals = []
+    for v in v_research:
+        pu, ex = v.get("username"), v.get("exercise")
+        ai_eval = _lay_eval_moi_nhat_theo_bai_tap(evals_db, pu, ex, doctor_username="AI_Researcher")
+        has_result = bool(v.get("metrics")) or bool(ai_eval)
+        if not has_result:
+            pending += 1
+        acc_vals.append(_lay_do_chinh_xac_hien_thi(v, ai_eval))
+    avg_acc = sum(acc_vals) / len(acc_vals) if acc_vals else 0.0
+    return total, pending, avg_acc
 
 
 # --- OPTIMIZED CACHING FOR FASTER PAGE LOADS ---
@@ -15854,19 +15869,7 @@ def main():
                          help="Điều chỉnh ngưỡng sai số để vẽ khung xương và phát âm thanh phản hồi trực tiếp khi xử lý video.")
             
             st.markdown("### 📊 THỐNG KÊ HỆ THỐNG")
-            # TÍNH TOÁN CÁC CON SỐ THỰC TẾ
-            v_list = load_data(VIDEOS_FILE)
-            evals_db = load_data(EVALUATIONS_FILE)
-            
-            # 1. Video chưa phân tích AI
-            pending_ai = len([v for v in v_list if not v.get('metrics')])
-            
-            # 2. Độ chính xác trung bình của AI
-            ai_evals = [e.get('ai_accuracy', 0) for e in evals_db if e.get('doctor_username') == "AI_Researcher"]
-            avg_acc = sum(ai_evals) / len(ai_evals) if ai_evals else 0
-            
-            # 3. Tổng số video trong hệ thống
-            total_vids = len(v_list)
+            total_vids, pending_ai, avg_acc = _thong_ke_video_nghien_cuu()
             
             st.markdown(f"""
             <div style="background: rgba(255, 255, 255, 0.05); padding: 12px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.1);">

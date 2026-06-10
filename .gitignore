@@ -14,6 +14,17 @@ __pycache__/
 *.json
 !BAI_TAP.json
 !reference_*.json
+!database/video_list.json
+!database/doctor_evaluations.json
+!database/users.json
+!database/patient_symptoms.json
+!database/lich_su_tap_luyen.json
+!database/schedules.json
+!database/research_data.json
+!database/pose_classifier_features.json
+!video_list.json
+!doctor_evaluations.json
+!users.json
 # Exclude data directories
 temp_frames/
 frames/
