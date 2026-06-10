@@ -3517,6 +3517,8 @@ if not st.session_state.logged_in:
                     "email": users[logged_user].get('email'),
                     "role": logged_role
                 }
+                for _fk in ("filter_video_patient", "filter_video_status", "vid_list_page", "_vid_filter_heal_rerun"):
+                    st.session_state.pop(_fk, None)
         except:
             pass
 
@@ -14962,6 +14964,14 @@ def reset_vid_list_page():
     st.session_state.vid_list_page = 0
 
 
+def _chuan_hoa_widget_loc_video(key, options, default):
+    """Sau F5 session/widget có thể lệch — xóa key nếu giá trị không còn trong options."""
+    if st.session_state.get(key) not in options:
+        st.session_state.pop(key, None)
+    if key not in st.session_state:
+        st.session_state[key] = default
+
+
 def hien_thi_danh_sach_video_fragment(user_role):
     evals_db = _evals_dedup_cached(_mtimes_video_eval()[1])
     video_list = load_danh_sach_video_nghien_cuu()
@@ -15017,10 +15027,10 @@ def hien_thi_danh_sach_video_fragment(user_role):
         patient_lookup = {item[1]: item[0] for item in sorted_patients}
 
         status_list_opts = ["-- Tất cả trạng thái --", "Đã đánh giá", "Đang chờ bác sĩ đánh giá"]
-        if st.session_state.get("filter_video_patient") not in patient_list_opts:
-            st.session_state.filter_video_patient = "-- Tất cả bệnh nhân --"
-        if st.session_state.get("filter_video_status") not in status_list_opts:
-            st.session_state.filter_video_status = "-- Tất cả trạng thái --"
+        _chuan_hoa_widget_loc_video("filter_video_patient", patient_list_opts, "-- Tất cả bệnh nhân --")
+        _chuan_hoa_widget_loc_video("filter_video_status", status_list_opts, "-- Tất cả trạng thái --")
+        if st.session_state.get("vid_list_page", 0) < 0:
+            st.session_state.vid_list_page = 0
 
         col_f1, col_f2 = st.columns(2)
         with col_f1:
@@ -15074,10 +15084,21 @@ def hien_thi_danh_sach_video_fragment(user_role):
         ):
             filtered_videos = [v for v in video_list if not _la_ban_ghi_video_mo_co(v)]
 
-        page_videos = []
         if not filtered_videos:
             st.info("ℹ️ Không tìm thấy video nào khớp với điều kiện lọc.")
+            if (
+                video_list
+                and selected_patient_opt == "-- Tất cả bệnh nhân --"
+                and selected_status_opt == "-- Tất cả trạng thái --"
+                and not st.session_state.get("_vid_filter_heal_rerun")
+            ):
+                for _fk in ("filter_video_patient", "filter_video_status", "vid_list_page"):
+                    st.session_state.pop(_fk, None)
+                st.session_state._vid_filter_heal_rerun = True
+                st.rerun()
         else:
+            st.session_state.pop("_vid_filter_heal_rerun", None)
+            page_videos = []
             if user_role == "Nghiên cứu viên":
                 pending_batch = [v for v in filtered_videos if video_can_khoi_dong_phan_tich(v, only_pending=True)]
                 running_n = len(liet_ke_jobs_dang_chay())
@@ -15143,231 +15164,221 @@ def hien_thi_danh_sach_video_fragment(user_role):
 
             start_idx = st.session_state.vid_list_page * PAGE_SIZE
             page_videos = list(enumerate(filtered_videos))[start_idx: start_idx + PAGE_SIZE]
+            if not page_videos and total_videos > 0:
+                st.session_state.vid_list_page = 0
+                page_videos = list(enumerate(filtered_videos))[0:PAGE_SIZE]
 
-            if page_videos:
-                def _prewarm_video_cache(videos_on_page):
-                    for _, vv in videos_on_page:
-                        vp = vv.get("video_path") or vv.get("processed_path")
-                        if vp and os.path.exists(vp):
+            st.caption(f"📌 Đang hiển thị **{len(page_videos)}** / **{total_videos}** video trong bộ lọc.")
+
+            for idx, v in page_videos:
+                col_list1, col_list2 = st.columns([12, 1])
+                with col_list1:
+                    processed_path = v.get('processed_path')
+                    raw_path = v.get('video_path')
+                    active_display_path = _lay_duong_dan_video_hien_thi(v)
+                    final_h264 = get_final_h264_path(active_display_path) if active_display_path else ""
+
+                    def is_valid_local_file(path):
+                        if path and os.path.exists(path):
                             try:
-                                _mtime = os.path.getmtime(vp)
-                                _size = os.path.getsize(vp)
-                                if _size >= 5 * 1024:
-                                    _get_playable_path_fast(vp, _mtime, _size)
-                            except Exception:
+                                mtime = os.path.getmtime(path)
+                                size = os.path.getsize(path)
+                                return _check_video_valid_cached(path, mtime, size)
+                            except:
                                 pass
-                import threading as _threading
-                _threading.Thread(target=_prewarm_video_cache, args=(page_videos,), daemon=True).start()
+                        return False
 
-        for idx, v in page_videos:
-            col_list1, col_list2 = st.columns([12, 1])
-            with col_list1:
-                processed_path = v.get('processed_path')
-                raw_path = v.get('video_path')
-                active_display_path = _lay_duong_dan_video_hien_thi(v)
-                final_h264 = get_final_h264_path(active_display_path) if active_display_path else ""
-
-                def is_valid_local_file(path):
-                    if path and os.path.exists(path):
-                        try:
-                            mtime = os.path.getmtime(path)
-                            size = os.path.getsize(path)
-                            return _check_video_valid_cached(path, mtime, size)
-                        except:
-                            pass
-                    return False
-
-                local_exists = bool(active_display_path and is_valid_local_file(
-                    find_ready_local_video(active_display_path) or active_display_path
-                ))
+                    local_exists = bool(active_display_path and is_valid_local_file(
+                        find_ready_local_video(active_display_path) or active_display_path
+                    ))
                 
-                # Tra cứu O(1) từ dict đã build sẵn
-                ev_key = _normalize_video_key(v.get('username'), v.get('video_name'), v.get('exercise'))
-                ai_eval = ai_eval_lookup.get(ev_key) or ai_eval_by_exercise.get((v.get('username'), v.get('exercise')))
-                doc_eval = doc_eval_lookup.get(ev_key) or doc_eval_by_exercise.get((v.get('username'), v.get('exercise')))
-                v_has_ai = ai_eval is not None
+                    # Tra cứu O(1) từ dict đã build sẵn
+                    ev_key = _normalize_video_key(v.get('username'), v.get('video_name'), v.get('exercise'))
+                    ai_eval = ai_eval_lookup.get(ev_key) or ai_eval_by_exercise.get((v.get('username'), v.get('exercise')))
+                    doc_eval = doc_eval_lookup.get(ev_key) or doc_eval_by_exercise.get((v.get('username'), v.get('exercise')))
+                    v_has_ai = ai_eval is not None
 
-                display_status = _lay_trang_thai_video_danh_sach(v, ai_eval, doc_eval, user_role)
-                upload_time = _lay_thoi_gian_upload_video(v)
-                with st.expander(f"🎬 {v['full_name']} - {v['exercise']} (📤 {upload_time}) - {display_status}"):
-                    # Tỷ lệ cột [1.3, 1.0] để nới rộng video hiển thị vừa vặn hơn
-                    col_v1, col_v2 = st.columns([1.3, 1.0])
-                    with col_v1:
-                        show_vid_key = f"show_video_{v.get('username')}_{v.get('video_name')}_{idx}"
-                        if st.session_state.get(show_vid_key):
-                            if active_display_path:
-                                with st.spinner("📥 Đang tải video..."):
-                                    play_path = _dam_bao_video_san_sang_play(active_display_path)
-                                    if play_path:
-                                        render_video(play_path, check_h264=(v.get('status') == "Đã phân tích"))
-                                    else:
-                                        st.error("❌ Không tìm thấy file video. Vui lòng thử lại sau vài giây.")
+                    display_status = _lay_trang_thai_video_danh_sach(v, ai_eval, doc_eval, user_role)
+                    upload_time = _lay_thoi_gian_upload_video(v)
+                    with st.expander(f"🎬 {v['full_name']} - {v['exercise']} (📤 {upload_time}) - {display_status}"):
+                        # Tỷ lệ cột [1.3, 1.0] để nới rộng video hiển thị vừa vặn hơn
+                        col_v1, col_v2 = st.columns([1.3, 1.0])
+                        with col_v1:
+                            show_vid_key = f"show_video_{v.get('username')}_{v.get('video_name')}_{idx}"
+                            if st.session_state.get(show_vid_key):
+                                if active_display_path:
+                                    with st.spinner("📥 Đang tải video..."):
+                                        play_path = _dam_bao_video_san_sang_play(active_display_path)
+                                        if play_path:
+                                            render_video(play_path, check_h264=(v.get('status') == "Đã phân tích"))
+                                        else:
+                                            st.error("❌ Không tìm thấy file video. Vui lòng thử lại sau vài giây.")
+                                else:
+                                    st.error("❌ Chưa có đường dẫn video cho mục này.")
+                                if st.button("⏸️ Ẩn video", key=f"hide_vid_btn_{idx}", use_container_width=True):
+                                    st.session_state[show_vid_key] = False
+                                    st.rerun()
                             else:
-                                st.error("❌ Chưa có đường dẫn video cho mục này.")
-                            if st.button("⏸️ Ẩn video", key=f"hide_vid_btn_{idx}", use_container_width=True):
-                                st.session_state[show_vid_key] = False
-                                st.rerun()
-                        else:
-                            st.info("ℹ️ Nhấp vào nút bên dưới để xem video (hệ thống tự tải từ Cloud nếu cần).")
-                            if st.button("▶️ Xem video", key=f"play_vid_btn_{idx}", type="primary", use_container_width=True):
-                                st.session_state[show_vid_key] = True
-                                st.rerun()
-                    with col_v2:
-                        st.write(f"**Người tập:** {v['full_name']}")
-                        is_gay_ex = any(kw in str(v.get('exercise', '')).lower() for kw in ["gậy", "gay", "pulley", "stick"])
+                                st.info("ℹ️ Nhấp vào nút bên dưới để xem video (hệ thống tự tải từ Cloud nếu cần).")
+                                if st.button("▶️ Xem video", key=f"play_vid_btn_{idx}", type="primary", use_container_width=True):
+                                    st.session_state[show_vid_key] = True
+                                    st.rerun()
+                        with col_v2:
+                            st.write(f"**Người tập:** {v['full_name']}")
+                            is_gay_ex = any(kw in str(v.get('exercise', '')).lower() for kw in ["gậy", "gay", "pulley", "stick"])
                         
-                        if user_role == "Bác sĩ / KTV PHCN" and not v_has_ai:
-                            st.write("**Độ chính xác AI:** ⏳ Chờ NCV phân tích")
-                        else:
-                            # Lấy accuracy mới nhất từ evals hoặc video và hiển thị chi tiết theo 3 giai đoạn
-                            ai_eval_record = ai_eval
-                            
-                            metrics_v = v.get('metrics', {}) if isinstance(v.get('metrics'), dict) else {}
-                            acc_g1 = metrics_v.get('metrics_g1', {}).get('do_chinh_xac') if isinstance(metrics_v.get('metrics_g1'), dict) else None
-                            acc_g2 = metrics_v.get('metrics_g2', {}).get('do_chinh_xac') if isinstance(metrics_v.get('metrics_g2'), dict) else None
-                            acc_g3 = metrics_v.get('metrics_g3', {}).get('do_chinh_xac') if isinstance(metrics_v.get('metrics_g3'), dict) else None
-                            
-                            if ai_eval_record:
-                                acc_g1 = ai_eval_record.get('ai_accuracy_g1', acc_g1)
-                                acc_g2 = ai_eval_record.get('ai_accuracy_g2', acc_g2)
-                                acc_g3 = ai_eval_record.get('ai_accuracy_g3', acc_g3)
-                            
-                            if acc_g1 is not None and acc_g2 is not None and acc_g3 is not None and not is_gay_ex:
-                                st.write("**Độ chính xác AI theo 3 giai đoạn:**")
-                                st.markdown(
-                                    f"<ul style='margin: 0 0 10px 10px; padding: 0; list-style-type: none;'>"
-                                    f"<li style='margin-bottom:3px;'>🌱 Giai đoạn 1 (ss±{PHASE_ERROR['g1']}°): <b style='color:#22c55e;'>{acc_g1:.1f}%</b></li>"
-                                    f"<li style='margin-bottom:3px;'>📈 Giai đoạn 2 (ss±{PHASE_ERROR['g2']}°): <b style='color:#eab308;'>{acc_g2:.1f}%</b></li>"
-                                    f"<li style='margin-bottom:3px;'>🎯 Giai đoạn 3 (ss±{PHASE_ERROR['g3']}°): <b style='color:#ef4444;'>{acc_g3:.1f}%</b></li>"
-                                    f"</ul>",
-                                    unsafe_allow_html=True
-                                )
+                            if user_role == "Bác sĩ / KTV PHCN" and not v_has_ai:
+                                st.write("**Độ chính xác AI:** ⏳ Chờ NCV phân tích")
                             else:
-                                acc_val = _lay_do_chinh_xac_hien_thi(v, ai_eval_record)
-                                acc_text = f"{acc_val:.1f}%" if isinstance(acc_val, (int, float)) and acc_val > 0 else ("Chưa phân tích" if acc_val == 0 else f"{acc_val}%")
-                                st.write(f"**Độ chính xác AI:** {acc_text}")
+                                # Lấy accuracy mới nhất từ evals hoặc video và hiển thị chi tiết theo 3 giai đoạn
+                                ai_eval_record = ai_eval
                             
-                        st.write(f"**Trạng thái:** {display_status}")
-                        if ai_eval and ai_eval.get("time"):
-                            st.write(f"**Thời gian phân tích AI:** {_format_vn_time(ai_eval.get('time'), default='N/A')}")
+                                metrics_v = v.get('metrics', {}) if isinstance(v.get('metrics'), dict) else {}
+                                acc_g1 = metrics_v.get('metrics_g1', {}).get('do_chinh_xac') if isinstance(metrics_v.get('metrics_g1'), dict) else None
+                                acc_g2 = metrics_v.get('metrics_g2', {}).get('do_chinh_xac') if isinstance(metrics_v.get('metrics_g2'), dict) else None
+                                acc_g3 = metrics_v.get('metrics_g3', {}).get('do_chinh_xac') if isinstance(metrics_v.get('metrics_g3'), dict) else None
+                            
+                                if ai_eval_record:
+                                    acc_g1 = ai_eval_record.get('ai_accuracy_g1', acc_g1)
+                                    acc_g2 = ai_eval_record.get('ai_accuracy_g2', acc_g2)
+                                    acc_g3 = ai_eval_record.get('ai_accuracy_g3', acc_g3)
+                            
+                                if acc_g1 is not None and acc_g2 is not None and acc_g3 is not None and not is_gay_ex:
+                                    st.write("**Độ chính xác AI theo 3 giai đoạn:**")
+                                    st.markdown(
+                                        f"<ul style='margin: 0 0 10px 10px; padding: 0; list-style-type: none;'>"
+                                        f"<li style='margin-bottom:3px;'>🌱 Giai đoạn 1 (ss±{PHASE_ERROR['g1']}°): <b style='color:#22c55e;'>{acc_g1:.1f}%</b></li>"
+                                        f"<li style='margin-bottom:3px;'>📈 Giai đoạn 2 (ss±{PHASE_ERROR['g2']}°): <b style='color:#eab308;'>{acc_g2:.1f}%</b></li>"
+                                        f"<li style='margin-bottom:3px;'>🎯 Giai đoạn 3 (ss±{PHASE_ERROR['g3']}°): <b style='color:#ef4444;'>{acc_g3:.1f}%</b></li>"
+                                        f"</ul>",
+                                        unsafe_allow_html=True
+                                    )
+                                else:
+                                    acc_val = _lay_do_chinh_xac_hien_thi(v, ai_eval_record)
+                                    acc_text = f"{acc_val:.1f}%" if isinstance(acc_val, (int, float)) and acc_val > 0 else ("Chưa phân tích" if acc_val == 0 else f"{acc_val}%")
+                                    st.write(f"**Độ chính xác AI:** {acc_text}")
+                            
+                            st.write(f"**Trạng thái:** {display_status}")
+                            if ai_eval and ai_eval.get("time"):
+                                st.write(f"**Thời gian phân tích AI:** {_format_vn_time(ai_eval.get('time'), default='N/A')}")
                         
-                        # Khối chẩn đoán thông tin file (chỉ hiển thị cho bác sĩ/NCV để debug)
-                        if user_role in ["Bác sĩ / KTV PHCN", "Nghiên cứu viên"]:
-                            with st.popover("🔍 Kiểm tra tệp tin (Debug)"):
-                                st.markdown(f"**Tệp hiển thị:** `{active_display_path or '(chưa có — chỉ có metadata đánh giá)'}`")
-                                st.write(f"- Video gốc BN: `{raw_path or '(n/a)'}`")
-                                st.write(f"- Video processed: `{processed_path or '(n/a)'}`")
-                                st.write(f"- Tồn tại cục bộ: {'✅ Có' if local_exists else '☁️ Sẽ stream/tải từ Cloud khi xem'}")
-                                if active_display_path and os.path.exists(active_display_path):
-                                    st.write(f"- Kích thước tệp: `{os.path.getsize(active_display_path)/(1024*1024):.2f} MB`")
-                                    try:
-                                        v_codec, a_codec = get_video_codec(active_display_path)
-                                        st.write(f"- Codec: `{v_codec} / {a_codec}`")
-                                        import subprocess
-                                        cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', active_display_path]
-                                        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3)
-                                        dur = res.stdout.strip()
-                                        st.write(f"- Thời lượng ffprobe: `{dur if dur else 'Không xác định'} giây`")
-                                        if res.returncode != 0:
-                                            st.error(f"Lỗi ffprobe: {res.stderr.strip()}")
-                                    except Exception as e:
-                                        st.write(f"- Lỗi quét ffprobe: `{e}`")
+                            # Khối chẩn đoán thông tin file (chỉ hiển thị cho bác sĩ/NCV để debug)
+                            if user_role in ["Bác sĩ / KTV PHCN", "Nghiên cứu viên"]:
+                                with st.popover("🔍 Kiểm tra tệp tin (Debug)"):
+                                    st.markdown(f"**Tệp hiển thị:** `{active_display_path or '(chưa có — chỉ có metadata đánh giá)'}`")
+                                    st.write(f"- Video gốc BN: `{raw_path or '(n/a)'}`")
+                                    st.write(f"- Video processed: `{processed_path or '(n/a)'}`")
+                                    st.write(f"- Tồn tại cục bộ: {'✅ Có' if local_exists else '☁️ Sẽ stream/tải từ Cloud khi xem'}")
+                                    if active_display_path and os.path.exists(active_display_path):
+                                        st.write(f"- Kích thước tệp: `{os.path.getsize(active_display_path)/(1024*1024):.2f} MB`")
+                                        try:
+                                            v_codec, a_codec = get_video_codec(active_display_path)
+                                            st.write(f"- Codec: `{v_codec} / {a_codec}`")
+                                            import subprocess
+                                            cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', active_display_path]
+                                            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3)
+                                            dur = res.stdout.strip()
+                                            st.write(f"- Thời lượng ffprobe: `{dur if dur else 'Không xác định'} giây`")
+                                            if res.returncode != 0:
+                                                st.error(f"Lỗi ffprobe: {res.stderr.strip()}")
+                                        except Exception as e:
+                                            st.write(f"- Lỗi quét ffprobe: `{e}`")
                                 
-                                st.markdown(f"**Tệp nén H.264:** `{final_h264 or '(n/a)'}`")
-                                h264_exists = False
-                                if final_h264 and os.path.exists(final_h264) and os.path.getsize(final_h264) >= 5 * 1024:
-                                    try:
-                                        mtime = os.path.getmtime(final_h264)
-                                        size = os.path.getsize(final_h264)
-                                        h264_exists = _check_video_valid_cached(final_h264, mtime, size)
-                                    except:
-                                        pass
-                                st.write(f"- Tồn tại cục bộ và hợp lệ: {'✅ Có' if h264_exists else '❌ Không'}")
-                                if final_h264 and os.path.exists(final_h264):
-                                    st.write(f"- Kích thước tệp: `{os.path.getsize(final_h264)/(1024*1024):.2f} MB`")
-                                    try:
-                                        v_codec_h, a_codec_h = get_video_codec(final_h264)
-                                        st.write(f"- Codec H264: `{v_codec_h} / {a_codec_h}`")
-                                        import subprocess
-                                        cmd_h = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', final_h264]
-                                        res_h = subprocess.run(cmd_h, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3)
-                                        dur_h = res_h.stdout.strip()
-                                        st.write(f"- Thời lượng ffprobe H264: `{dur_h if dur_h else 'Không xác định'} giây`")
-                                        if res_h.returncode != 0:
-                                            st.error(f"Lỗi ffprobe H264: {res_h.stderr.strip()}")
-                                    except Exception as e_h:
-                                        st.write(f"- Lỗi quét ffprobe H264: `{e_h}`")
+                                    st.markdown(f"**Tệp nén H.264:** `{final_h264 or '(n/a)'}`")
+                                    h264_exists = False
+                                    if final_h264 and os.path.exists(final_h264) and os.path.getsize(final_h264) >= 5 * 1024:
+                                        try:
+                                            mtime = os.path.getmtime(final_h264)
+                                            size = os.path.getsize(final_h264)
+                                            h264_exists = _check_video_valid_cached(final_h264, mtime, size)
+                                        except:
+                                            pass
+                                    st.write(f"- Tồn tại cục bộ và hợp lệ: {'✅ Có' if h264_exists else '❌ Không'}")
+                                    if final_h264 and os.path.exists(final_h264):
+                                        st.write(f"- Kích thước tệp: `{os.path.getsize(final_h264)/(1024*1024):.2f} MB`")
+                                        try:
+                                            v_codec_h, a_codec_h = get_video_codec(final_h264)
+                                            st.write(f"- Codec H264: `{v_codec_h} / {a_codec_h}`")
+                                            import subprocess
+                                            cmd_h = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', final_h264]
+                                            res_h = subprocess.run(cmd_h, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3)
+                                            dur_h = res_h.stdout.strip()
+                                            st.write(f"- Thời lượng ffprobe H264: `{dur_h if dur_h else 'Không xác định'} giây`")
+                                            if res_h.returncode != 0:
+                                                st.error(f"Lỗi ffprobe H264: {res_h.stderr.strip()}")
+                                        except Exception as e_h:
+                                            st.write(f"- Lỗi quét ffprobe H264: `{e_h}`")
                                         
-                                error_log_path = os.path.join(os.path.dirname(final_h264 or PROCESSED_DIR), "transcode_error.txt")
-                                if final_h264 and os.path.exists(error_log_path):
-                                    st.warning("⚠️ Phát hiện log lỗi nén gần nhất:")
-                                    try:
-                                        import hashlib as _hl_log
-                                        _log_key = f"ffmpeg_err_{_hl_log.md5(final_h264.encode()).hexdigest()[:8]}"
-                                        with open(error_log_path, "r", encoding="utf-8") as f_err:
-                                            st.text_area("Chi tiết lỗi ffmpeg:", value=f_err.read(), height=150, key=_log_key)
-                                    except Exception as e_log:
-                                        st.write(f"Không thể đọc log lỗi: {e_log}")
+                                    error_log_path = os.path.join(os.path.dirname(final_h264 or PROCESSED_DIR), "transcode_error.txt")
+                                    if final_h264 and os.path.exists(error_log_path):
+                                        st.warning("⚠️ Phát hiện log lỗi nén gần nhất:")
+                                        try:
+                                            import hashlib as _hl_log
+                                            _log_key = f"ffmpeg_err_{_hl_log.md5(final_h264.encode()).hexdigest()[:8]}"
+                                            with open(error_log_path, "r", encoding="utf-8") as f_err:
+                                                st.text_area("Chi tiết lỗi ffmpeg:", value=f_err.read(), height=150, key=_log_key)
+                                        except Exception as e_log:
+                                            st.write(f"Không thể đọc log lỗi: {e_log}")
                                     
-                                st.markdown("**Trạng thái Cloud:**")
-                                if HF_TOKEN and HF_DATASET_ID and active_display_path:
-                                    rel_path = get_clean_rel_path(active_display_path)
-                                    import urllib.parse
-                                    rel_path_encoded = urllib.parse.quote(rel_path, safe='/')
-                                    cloud_url = f"https://huggingface.co/datasets/{HF_DATASET_ID}/resolve/main/{rel_path_encoded}?token={HF_TOKEN}"
-                                    st.write(f"- URL: `{cloud_url}`")
-                                else:
-                                    st.write("- Chưa cấu hình Cloud Dataset.")
+                                    st.markdown("**Trạng thái Cloud:**")
+                                    if HF_TOKEN and HF_DATASET_ID and active_display_path:
+                                        rel_path = get_clean_rel_path(active_display_path)
+                                        import urllib.parse
+                                        rel_path_encoded = urllib.parse.quote(rel_path, safe='/')
+                                        cloud_url = f"https://huggingface.co/datasets/{HF_DATASET_ID}/resolve/main/{rel_path_encoded}?token={HF_TOKEN}"
+                                        st.write(f"- URL: `{cloud_url}`")
+                                    else:
+                                        st.write("- Chưa cấu hình Cloud Dataset.")
                         
-                        # HIỂN THỊ ĐÁNH GIÁ CỦA BÁC SĨ (GROUND TRUTH) CHO NCV
-                        if doc_eval:
-                            eval_time_formatted = _format_vn_time(doc_eval.get('time'), default='N/A')
-                            with st.expander("🩺 ĐÁNH GIÁ CHUYÊN MÔN (GROUND TRUTH)", expanded=True):
-                                st.success(f"**Bác sĩ:** {doc_eval.get('doctor_name', 'Bác sĩ')} | 🕒 **Thời gian đánh giá:** {eval_time_formatted}")
-                                st.write(f"**Kết quả:** {doc_eval['doctor_result']}")
-                                if doc_eval.get('comments_ncv'):
-                                    st.markdown(f"<div style='background: rgba(0,198,255,0.1); padding: 10px; border-radius: 5px; border-left: 3px solid #00c6ff;'><b>💬 Ghi chú cho NCV:</b> {doc_eval['comments_ncv']}</div>", unsafe_allow_html=True)
-                                st.write(f"**Nhận xét cho BN:** {doc_eval['comments']}")
-                                st.write(f"**Kế hoạch:** {doc_eval['plan']}")
-                        elif user_role == "Nghiên cứu viên":
-                            st.warning("⏳ Đang chờ Bác sĩ / KTV đánh giá chuyên môn.")
-                        
-                        # Đổi nhãn nút theo vai trò
-                        eval_btn_label = "📝 Đánh giá của chuyên môn PHCN" if user_role == "Bác sĩ / KTV PHCN" else "📝 Phân tích và trích xuất khung xương AI"
-                        if st.button(eval_btn_label, key=f"eval_btn_{idx}", width="stretch"):
-                            st.session_state.current_eval_video = v
-                            st.session_state.has_data = False
-                            st.session_state.stats = None
-                            vp = v.get("video_path")
-                            if user_role == "Nghiên cứu viên":
-                                st.session_state.reanalyze_triggered = True
-                                st.session_state.view_old_analysis = False
-                                # Khởi chạy ngay — không chờ sang tab Phân tích rồi bấm thêm lần nữa
-                                if vp and not video_dang_phan_tich(vp):
-                                    khoi_dong_phan_tich_lai_video(v, auto_start=True)
-                                    st.toast("⚡ Đã khởi chạy trích xuất khung xương — chuyển tab Phân tích...", icon="🚀")
-                                else:
-                                    st.toast("🔄 Video đang phân tích — mở tab theo dõi tiến độ...", icon="⏳")
-                            else:
-                                st.session_state.reanalyze_triggered = False
-                                st.session_state.view_old_analysis = bool(v.get("metrics"))
-                                if user_role == "Bác sĩ / KTV PHCN":
-                                    st.toast("🚀 Đang chuyển sang tab 📊 QUẢN LÝ ĐÁNH GIÁ & NCKH...", icon="🔄")
-                                else:
-                                    st.toast("🚀 Đang chuyển tab...", icon="🔄")
-
-                            if user_role == "Bác sĩ / KTV PHCN":
-                                st.session_state.trigger_tab_switch = "📊 QUẢN LÝ ĐÁNH GIÁ & NCKH"
+                            # HIỂN THỊ ĐÁNH GIÁ CỦA BÁC SĨ (GROUND TRUTH) CHO NCV
+                            if doc_eval:
+                                eval_time_formatted = _format_vn_time(doc_eval.get('time'), default='N/A')
+                                with st.expander("🩺 ĐÁNH GIÁ CHUYÊN MÔN (GROUND TRUTH)", expanded=True):
+                                    st.success(f"**Bác sĩ:** {doc_eval.get('doctor_name', 'Bác sĩ')} | 🕒 **Thời gian đánh giá:** {eval_time_formatted}")
+                                    st.write(f"**Kết quả:** {doc_eval['doctor_result']}")
+                                    if doc_eval.get('comments_ncv'):
+                                        st.markdown(f"<div style='background: rgba(0,198,255,0.1); padding: 10px; border-radius: 5px; border-left: 3px solid #00c6ff;'><b>💬 Ghi chú cho NCV:</b> {doc_eval['comments_ncv']}</div>", unsafe_allow_html=True)
+                                    st.write(f"**Nhận xét cho BN:** {doc_eval['comments']}")
+                                    st.write(f"**Kế hoạch:** {doc_eval['plan']}")
                             elif user_role == "Nghiên cứu viên":
-                                st.session_state.trigger_tab_switch = "🔬 PHÂN TÍCH & TRÍCH XUẤT DỮ LIỆU"
-                            # Phải rerun TOÀN TRANG — fragment rerun không đổi được tab segmented_control
-                            st.rerun(scope="app")
+                                st.warning("⏳ Đang chờ Bác sĩ / KTV đánh giá chuyên môn.")
                         
-                    st.button("🗑️ Xóa video này", key=f"del_video_{idx}", width="stretch",
+                            # Đổi nhãn nút theo vai trò
+                            eval_btn_label = "📝 Đánh giá của chuyên môn PHCN" if user_role == "Bác sĩ / KTV PHCN" else "📝 Phân tích và trích xuất khung xương AI"
+                            if st.button(eval_btn_label, key=f"eval_btn_{idx}", width="stretch"):
+                                st.session_state.current_eval_video = v
+                                st.session_state.has_data = False
+                                st.session_state.stats = None
+                                vp = v.get("video_path")
+                                if user_role == "Nghiên cứu viên":
+                                    st.session_state.reanalyze_triggered = True
+                                    st.session_state.view_old_analysis = False
+                                    # Khởi chạy ngay — không chờ sang tab Phân tích rồi bấm thêm lần nữa
+                                    if vp and not video_dang_phan_tich(vp):
+                                        khoi_dong_phan_tich_lai_video(v, auto_start=True)
+                                        st.toast("⚡ Đã khởi chạy trích xuất khung xương — chuyển tab Phân tích...", icon="🚀")
+                                    else:
+                                        st.toast("🔄 Video đang phân tích — mở tab theo dõi tiến độ...", icon="⏳")
+                                else:
+                                    st.session_state.reanalyze_triggered = False
+                                    st.session_state.view_old_analysis = bool(v.get("metrics"))
+                                    if user_role == "Bác sĩ / KTV PHCN":
+                                        st.toast("🚀 Đang chuyển sang tab 📊 QUẢN LÝ ĐÁNH GIÁ & NCKH...", icon="🔄")
+                                    else:
+                                        st.toast("🚀 Đang chuyển tab...", icon="🔄")
+
+                                if user_role == "Bác sĩ / KTV PHCN":
+                                    st.session_state.trigger_tab_switch = "📊 QUẢN LÝ ĐÁNH GIÁ & NCKH"
+                                elif user_role == "Nghiên cứu viên":
+                                    st.session_state.trigger_tab_switch = "🔬 PHÂN TÍCH & TRÍCH XUẤT DỮ LIỆU"
+                                # Phải rerun TOÀN TRANG — fragment rerun không đổi được tab segmented_control
+                                st.rerun(scope="app")
+                        
+                        st.button("🗑️ Xóa video này", key=f"del_video_{idx}", width="stretch",
+                                  on_click=delete_video_callback, args=(v.get('video_name'), v.get('username')))
+                with col_list2:
+                    st.button("❌", key=f"quick_x_video_{idx}", help="Xóa nhanh",
                               on_click=delete_video_callback, args=(v.get('video_name'), v.get('username')))
-            with col_list2:
-                st.button("❌", key=f"quick_x_video_{idx}", help="Xóa nhanh",
-                          on_click=delete_video_callback, args=(v.get('video_name'), v.get('username')))
 
 
 # ============================================
@@ -15511,7 +15522,7 @@ def _render_main_tab_content(tab_titles, user_role):
                                                 s_name = s['full_name']
                                                 s_data_new = [item for item in symptoms_data if item.get('patient_id') != s_id and item.get('full_name') != s_name]
                                                 save_data(SYMPTOMS_FILE, s_data_new)
-                                                st.rerun(scope="fragment")
+                                                st.rerun()
                         else:
                             st.info("ℹ️ Hiện chưa có thông tin khai báo triệu chứng mới từ bệnh nhân.")
                     
