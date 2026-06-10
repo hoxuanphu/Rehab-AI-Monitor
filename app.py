@@ -489,19 +489,25 @@ def _lay_eval_moi_nhat_theo_bai_tap(evals, username, exercise, doctor_username=N
 
 
 def _lay_do_chinh_xac_hien_thi(v, ai_eval=None):
-    """Độ chính xác hiển thị — ưu tiên metrics mới nhất trong video_list, rồi AI eval."""
+    """Độ chính xác hiển thị — ưu tiên báo cáo AI mới nhất, không dùng do_chinh_xac cũ trong video_list."""
+    if ai_eval and ai_eval.get("ai_accuracy") is not None:
+        try:
+            return float(ai_eval["ai_accuracy"])
+        except (TypeError, ValueError):
+            pass
     metrics = v.get("metrics") if isinstance(v.get("metrics"), dict) else {}
+    mg2 = metrics.get("metrics_g2")
+    if isinstance(mg2, dict) and mg2.get("do_chinh_xac") is not None:
+        try:
+            return float(mg2["do_chinh_xac"])
+        except (TypeError, ValueError):
+            pass
     for fld in ("do_chinh_xac", "ty_le_tong_the"):
         if metrics.get(fld) is not None:
             try:
                 return float(metrics[fld])
             except (TypeError, ValueError):
                 pass
-    if ai_eval and ai_eval.get("ai_accuracy") is not None:
-        try:
-            return float(ai_eval["ai_accuracy"])
-        except (TypeError, ValueError):
-            pass
     try:
         return float(v.get("accuracy") or 0)
     except (TypeError, ValueError):
@@ -516,9 +522,12 @@ def _ap_dung_ket_qua_moi_nhat_vao_video(v, ai_eval=None):
     upload_time = out.get("time")
     if ai_eval:
         acc = ai_eval.get("ai_accuracy")
+        metrics = dict(out.get("metrics") or {}) if isinstance(out.get("metrics"), dict) else {}
         if acc is not None:
             out["accuracy"] = acc
-        metrics = dict(out.get("metrics") or {}) if isinstance(out.get("metrics"), dict) else {}
+            metrics["do_chinh_xac"] = acc
+            if metrics.get("ty_le_tong_the") is not None:
+                metrics["ty_le_tong_the"] = acc
         for g, fld in (("g1", "ai_accuracy_g1"), ("g2", "ai_accuracy_g2"), ("g3", "ai_accuracy_g3")):
             val = ai_eval.get(fld)
             if val is None:
@@ -528,8 +537,6 @@ def _ap_dung_ket_qua_moi_nhat_vao_video(v, ai_eval=None):
                 mg = {}
             mg["do_chinh_xac"] = val
             metrics[f"metrics_{g}"] = mg
-        if acc is not None and not metrics.get("do_chinh_xac"):
-            metrics["do_chinh_xac"] = acc
         if metrics:
             out["metrics"] = metrics
     if upload_time is not None:
