@@ -3359,19 +3359,13 @@ def thuc_hien_khoi_tao_he_thong_mot_lan():
 
     threading.Thread(target=_auto_transcode_all_hevc, daemon=True).start()
 
+    try:
+        _chay_khoi_phuc_phan_tich_sau_deploy()
+    except Exception as boot_resume_err:
+        print(f"[Resume] Loi khoi phuc dong bo luc boot: {boot_resume_err}")
+
     def _resume_and_watch_analysis_jobs():
-        """Sau deploy HF: tiếp tục các video đang load dở; theo dõi job bị crash/OOM."""
-        time.sleep(8)
-        try:
-            _tai_trang_thai_phan_tich_tu_hf()
-        except Exception as hf_restore_err:
-            print(f"[HF Resume] Loi tai progress tu Dataset: {hf_restore_err}")
-        try:
-            n = khoi_phuc_job_phan_tich_sau_deploy(cold_start=True)
-            if n:
-                print(f"[Resume] Da khoi dong lai {n} job phan tich sau khoi dong Space")
-        except Exception as resume_err:
-            print(f"[Resume] Loi khoi phuc job: {resume_err}")
+        """Theo dõi job bị crash/OOM sau khi Space đã chạy."""
         while True:
             time.sleep(120)
             try:
@@ -7447,6 +7441,38 @@ def _load_progress_file(video_path):
     except Exception:
         return None
 
+
+def _tien_do_phan_tich_hien_tai(video_path, ckpt=None):
+    """Lấy % / elapsed / start_time tốt nhất — giữ tiến độ sau push HF / redeploy Space."""
+    if ckpt is None and video_path:
+        ckpt = load_checkpoint(get_checkpoint_path(video_path, PROCESSED_DIR))
+    if ckpt and ckpt.get("pass1_data"):
+        ui_prog, ui_msg = checkpoint_ui_progress(ckpt)
+        return {
+            "progress": ui_prog,
+            "elapsed": float(ckpt.get("elapsed") or 0),
+            "start_time": ckpt.get("start_time") or time.time(),
+            "status_msg": ui_msg,
+        }
+    existing = _load_progress_file(video_path) or {}
+    if existing.get("status") == "processing":
+        try:
+            prog = min(max(float(existing.get("progress") or 0), 0.01), 0.99)
+        except (TypeError, ValueError):
+            prog = 0.01
+        return {
+            "progress": prog,
+            "elapsed": float(existing.get("elapsed") or 0),
+            "start_time": existing.get("start_time") or time.time(),
+            "status_msg": existing.get("status_msg") or "🔄 Tiếp tục phân tích sau khi Space khởi động lại...",
+        }
+    return {
+        "progress": 0.01,
+        "elapsed": 0.0,
+        "start_time": time.time(),
+        "status_msg": "🚀 Đang chuẩn bị phân tích...",
+    }
+
 def read_progress(video_path):
     """Đọc tiến trình từ đĩa. Không xóa job đang chạy khi Streamlit reload (thread in-memory mất)."""
     data = _load_progress_file(video_path)
@@ -7475,6 +7501,8 @@ def read_progress(video_path):
     return data
 
 _last_progress_hf_push = {}
+_resume_phan_tich_lock = threading.Lock()
+_resume_phan_tich_done = False
 
 
 def _day_progress_checkpoint_len_hf(video_path, p_file=None, force=False):
@@ -7485,7 +7513,9 @@ def _day_progress_checkpoint_len_hf(video_path, p_file=None, force=False):
     if not key:
         return
     now = time.time()
-    if not force and (now - _last_progress_hf_push.get(key, 0)) < 40:
+    # HF Space: đẩy thường xuyên hơn (40s → 12s) để push code không mất % gần nhất
+    throttle = 12 if (HF_SPACE_ID or os.path.exists("/data")) else 40
+    if not force and (now - _last_progress_hf_push.get(key, 0)) < throttle:
         return
     _last_progress_hf_push[key] = now
     if p_file and os.path.exists(p_file):
@@ -7496,7 +7526,7 @@ def _day_progress_checkpoint_len_hf(video_path, p_file=None, force=False):
             push_file_to_hf_async(ckpt)
 
 
-def _tai_trang_thai_phan_tich_tu_hf():
+def _tai_trang_thai_phan_tich_tu_hf(force=False):
     """Tải progress/checkpoint đang chạy từ HF Dataset sau khi Space redeploy."""
     if not (HF_TOKEN and HF_DATASET_ID):
         return 0
@@ -7511,11 +7541,12 @@ def _tai_trang_thai_phan_tich_tu_hf():
                 continue
             base = os.path.basename(rel_norm)
             dst = os.path.join(PROCESSED_DIR, base)
-            need = False
+            need = force
             if base.startswith("progress_") and base.endswith(".json"):
-                need = not os.path.exists(dst) or os.path.getsize(dst) < 2
+                # JSON nhỏ — luôn tải lại sau deploy để giữ đúng % hiển thị
+                need = True
             elif base.startswith("checkpoint_") and base.endswith(".pkl.gz"):
-                need = not os.path.exists(dst) or os.path.getsize(dst) < 100
+                need = force or not os.path.exists(dst) or os.path.getsize(dst) < 100
             if need and _hf_download_dataset_file(rel_norm, quiet=True, min_size=2):
                 restored += 1
     except Exception as e:
@@ -7523,6 +7554,27 @@ def _tai_trang_thai_phan_tich_tu_hf():
     if restored:
         print(f"[HF Resume] Da tai {restored} file progress/checkpoint tu Dataset")
     return restored
+
+
+def _chay_khoi_phuc_phan_tich_sau_deploy():
+    """Tải progress từ Dataset + khởi động lại thread — gọi một lần khi Space boot."""
+    global _resume_phan_tich_done
+    with _resume_phan_tich_lock:
+        if _resume_phan_tich_done:
+            return 0
+        try:
+            _tai_trang_thai_phan_tich_tu_hf(force=True)
+        except Exception as hf_restore_err:
+            print(f"[HF Resume] Loi tai progress tu Dataset: {hf_restore_err}")
+        try:
+            n = khoi_phuc_job_phan_tich_sau_deploy(cold_start=True)
+            if n:
+                print(f"[Resume] Da khoi dong lai {n} job phan tich sau khoi dong Space")
+        except Exception as resume_err:
+            print(f"[Resume] Loi khoi phuc job: {resume_err}")
+            n = 0
+        _resume_phan_tich_done = True
+        return n
 
 
 def write_progress(video_path, status, username="", video_name="", progress=0.0, elapsed=0.0, start_time=None, error_msg="", result=None, status_msg="", job_meta=None):
@@ -8688,25 +8740,18 @@ def bat_dau_phan_tich_background(
         "resize_width": resize_width,
         "force_train_classifier": force_train_classifier,
     }
-    if has_ckpt:
-        ui_prog, ui_msg = checkpoint_ui_progress(ckpt_existing)
-        write_progress(
-            video_path, "processing", username=username, video_name=video_name,
-            progress=ui_prog, elapsed=float(ckpt_existing.get("elapsed") or 0),
-            start_time=ckpt_existing.get("start_time") or time.time(),
-            status_msg=ui_msg, job_meta=job_meta
-        )
-    else:
-        write_progress(
-            video_path, "processing", username=username, video_name=video_name,
-            progress=0.01, elapsed=0.0, start_time=time.time(),
-            status_msg="🚀 Đang chuẩn bị phân tích...", job_meta=job_meta
-        )
-        
+    snap = _tien_do_phan_tich_hien_tai(video_path, ckpt_existing if has_ckpt else None)
+    write_progress(
+        video_path, "processing", username=username, video_name=video_name,
+        progress=snap["progress"], elapsed=snap["elapsed"],
+        start_time=snap["start_time"],
+        status_msg=snap["status_msg"], job_meta=job_meta,
+    )
+
     def thread_target():
         nonlocal video_path
         progress_video_path = video_path
-        start_t = time.time()
+        start_t = snap["start_time"]
 
         # HÀNG ĐỢI: chỉ cho tối đa MAX_CONCURRENT_ANALYSIS video chạy cùng lúc.
         # Job vượt giới hạn sẽ chờ ở đây và hiển thị trạng thái "đang chờ trong hàng đợi".
@@ -8716,13 +8761,20 @@ def bat_dau_phan_tich_background(
             sem_acquired = _analysis_semaphore.acquire(timeout=2.0)
             if not sem_acquired:
                 waited = time.time() - wait_started
+                q_snap = _tien_do_phan_tich_hien_tai(progress_video_path)
                 write_progress(
                     progress_video_path, "processing", username=username, video_name=video_name,
-                    progress=0.01, elapsed=time.time() - start_t, start_time=start_t,
+                    progress=q_snap["progress"], elapsed=time.time() - start_t, start_time=start_t,
                     status_msg=f"⏳ Đang chờ trong hàng đợi (tối đa {MAX_CONCURRENT_ANALYSIS} video chạy song song)... {waited:.0f}s"
                 )
 
-        write_progress(progress_video_path, "processing", username=username, video_name=video_name, progress=0.02, elapsed=0.0, start_time=start_t, status_msg="🚀 Đang khởi tạo luồng phân tích...")
+        boot_snap = _tien_do_phan_tich_hien_tai(progress_video_path)
+        write_progress(
+            progress_video_path, "processing", username=username, video_name=video_name,
+            progress=max(boot_snap["progress"], 0.02), elapsed=time.time() - start_t,
+            start_time=start_t,
+            status_msg=boot_snap["status_msg"] or "🚀 Đang khởi tạo luồng phân tích...",
+        )
         
         try:
             # Bước A: Nếu có tệp tải lên tạm thời, thực hiện nén/FFmpeg trong background trước
