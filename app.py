@@ -10837,10 +10837,27 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
                         st.session_state.view_old_analysis = True
                         st.rerun(scope="fragment")
                     st.markdown("---")
-                
-                # Nếu video CHƯA CÓ metrics hoặc NCV muốn chạy lại
+
                 prog_data = read_progress(v['video_path'])
                 is_processing = prog_data and prog_data.get("status") == "processing"
+                # Tự khởi chạy một lần khi vào tab từ Trang chủ (fallback nếu thread chưa kịp start)
+                if (
+                    user_role == "Nghiên cứu viên"
+                    and st.session_state.get("reanalyze_triggered")
+                    and v.get("video_path")
+                    and not is_processing
+                    and not video_dang_phan_tich(v["video_path"])
+                ):
+                    _sk = f"_auto_started_{hashlib.md5(v['video_path'].encode()).hexdigest()[:12]}"
+                    if not st.session_state.get(_sk):
+                        khoi_dong_phan_tich_lai_video(v, auto_start=True)
+                        st.session_state[_sk] = True
+                        is_processing = True
+                        prog_data = read_progress(v["video_path"]) or prog_data
+                        if prog_data and prog_data.get("status") == "processing":
+                            is_processing = True
+                
+                # Nếu video CHƯA CÓ metrics hoặc NCV muốn chạy lại
                 if st.session_state.get('reanalyze_triggered') or is_processing:
                     st.info(
                         "🔬 **Chế độ phân tích mới** — MediaPipe 33 landmarks, đối chiếu YouTube (REF), "
@@ -15254,26 +15271,30 @@ def hien_thi_danh_sach_video_fragment(user_role):
                             st.session_state.current_eval_video = v
                             st.session_state.has_data = False
                             st.session_state.stats = None
+                            vp = v.get("video_path")
                             if user_role == "Nghiên cứu viên":
                                 st.session_state.reanalyze_triggered = True
                                 st.session_state.view_old_analysis = False
+                                # Khởi chạy ngay — không chờ sang tab Phân tích rồi bấm thêm lần nữa
+                                if vp and not video_dang_phan_tich(vp):
+                                    khoi_dong_phan_tich_lai_video(v, auto_start=True)
+                                    st.toast("⚡ Đã khởi chạy trích xuất khung xương — chuyển tab Phân tích...", icon="🚀")
+                                else:
+                                    st.toast("🔄 Video đang phân tích — mở tab theo dõi tiến độ...", icon="⏳")
                             else:
                                 st.session_state.reanalyze_triggered = False
-                            
-                            # Nếu video ĐÃ CÓ kết quả phân tích cũ → tự động load ngay biểu đồ,
-                            # không hiện choice screen để tiết kiệm thời gian chờ
-                            if v.get('metrics'):
-                                st.session_state.view_old_analysis = True
-                            else:
-                                st.session_state.view_old_analysis = False
-                            
+                                st.session_state.view_old_analysis = bool(v.get("metrics"))
+                                if user_role == "Bác sĩ / KTV PHCN":
+                                    st.toast("🚀 Đang chuyển sang tab 📊 QUẢN LÝ ĐÁNH GIÁ & NCKH...", icon="🔄")
+                                else:
+                                    st.toast("🚀 Đang chuyển tab...", icon="🔄")
+
                             if user_role == "Bác sĩ / KTV PHCN":
-                                st.toast("🚀 Đang chuyển sang tab 📊 QUẢN LÝ ĐÁNH GIÁ & NCKH...", icon="🔄")
                                 st.session_state.trigger_tab_switch = "📊 QUẢN LÝ ĐÁNH GIÁ & NCKH"
-                            else:
-                                st.toast("🚀 Đang chuyển sang tab 🔬 PHÂN TÍCH & TRÍCH XUẤT DỮ LIỆU...", icon="🔄")
+                            elif user_role == "Nghiên cứu viên":
                                 st.session_state.trigger_tab_switch = "🔬 PHÂN TÍCH & TRÍCH XUẤT DỮ LIỆU"
-                            st.rerun(scope="fragment")
+                            # Phải rerun TOÀN TRANG — fragment rerun không đổi được tab segmented_control
+                            st.rerun(scope="app")
                         
                     st.button("🗑️ Xóa video này", key=f"del_video_{idx}", width="stretch",
                               on_click=delete_video_callback, args=(v.get('video_name'), v.get('username')))
