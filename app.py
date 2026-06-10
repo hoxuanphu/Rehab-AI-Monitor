@@ -1462,10 +1462,40 @@ def nap_phien_benh_nhan_vao_session(selected_v):
     st.session_state.current_df_csv_path = selected_v.get('df_path')
 
 
-def khoi_phuc_ket_qua_cu(v, tai_csv=True):
+def _lam_moi_ban_ghi_video_tu_db(v):
+    """Lấy bản ghi video mới nhất từ DB (đường dẫn/metrics có thể đã cập nhật)."""
+    if not v:
+        return v
+    u, vn, ex = v.get("username"), v.get("video_name"), v.get("exercise")
+    for cand in load_danh_sach_video_nghien_cuu():
+        if (
+            cand.get("username") == u
+            and cand.get("video_name") == vn
+            and cand.get("exercise") == ex
+        ):
+            return cand
+    return v
+
+
+def _xoa_cache_hien_thi_ket_qua():
+    """Xóa cache UI để tải lại biểu đồ / video / frames không bị dữ liệu cũ."""
+    for k in (
+        "segment_bounds", "last_processed_video_for_bounds", "all_frames_paths",
+        "all_frames_data", "video_ready", "frames_ready", "frames_loaded", "temp_frames_dir",
+    ):
+        st.session_state.pop(k, None)
+    try:
+        load_all_frames_data_cached.clear()
+    except Exception:
+        pass
+
+
+def khoi_phuc_ket_qua_cu(v, tai_csv=True, tai_day_du=False):
     """Khôi phục kết quả phân tích đã lưu vào session — dùng khi hủy phân tích mới / xem bản cũ."""
+    v = _lam_moi_ban_ghi_video_tu_db(v)
     if not v or not v.get("metrics"):
         return False
+    _xoa_cache_hien_thi_ket_qua()
     st.session_state.current_eval_video = v
     st.session_state.reanalyze_triggered = False
     st.session_state.view_old_analysis = True
@@ -1481,7 +1511,7 @@ def khoi_phuc_ket_qua_cu(v, tai_csv=True):
     if "sai_so" in v:
         st.session_state.exercise["chuan"] = ex_base["chuan"].copy()
         st.session_state.exercise["chuan"]["sai_so"] = v["sai_so"]
-    if tai_csv:
+    if tai_csv or tai_day_du:
         df_path = v.get("df_path")
         if df_path:
             ensure_local_file(df_path)
@@ -1494,7 +1524,61 @@ def khoi_phuc_ket_qua_cu(v, tai_csv=True):
                 st.session_state.angle_df = None
         else:
             st.session_state.angle_df = None
+    if tai_day_du:
+        proc = v.get("processed_path") or v.get("video_path")
+        if proc:
+            ensure_local_file(proc, try_fallbacks=True)
+            dam_bao_tai_video_phan_tich(proc)
+        frames_json = v.get("all_frames_data_path")
+        if frames_json:
+            ensure_local_file(frames_json)
+        fz = v.get("frames_zip")
+        if fz:
+            ensure_local_file(fz)
+        if proc:
+            check_and_extract_frames_zip(proc)
     return True
+
+
+def hien_thi_nut_tai_lai_va_phan_tich_moi(v_re, key_suffix=""):
+    """Hai nút thao tác nhanh: tải lại kết quả đã lưu + chạy phân tích mới."""
+    if not v_re:
+        return
+    st.markdown("##### 🔄 Thao tác nhanh")
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button(
+            "📂 Tải lại kết quả đã lưu",
+            key=f"btn_reload_saved_{key_suffix}",
+            type="primary",
+            use_container_width=True,
+        ):
+            with st.spinner("📥 Đang tải biểu đồ, video và ảnh frame..."):
+                ok = khoi_phuc_ket_qua_cu(v_re, tai_day_du=True)
+            if ok:
+                chi_tiet = []
+                if st.session_state.get("angle_df") is not None:
+                    chi_tiet.append("biểu đồ")
+                if st.session_state.get("processed_video_path"):
+                    chi_tiet.append("video")
+                if st.session_state.get("all_frames_data_path") or st.session_state.get("frames_zip"):
+                    chi_tiet.append("ảnh frame")
+                st.success(f"✅ Đã cập nhật: {', '.join(chi_tiet) if chi_tiet else 'dữ liệu phân tích'}!")
+            else:
+                st.error("❌ Không tìm thấy kết quả cũ cho video này.")
+            st.rerun(scope="app")
+    with c2:
+        if st.button(
+            "🚀 Chạy phân tích mới",
+            key=f"btn_new_analysis_{key_suffix}",
+            type="secondary",
+            use_container_width=True,
+        ):
+            if khoi_dong_phan_tich_lai_video(v_re, auto_start=True):
+                st.toast("🚀 Đã khởi chạy phân tích mới — theo dõi tiến độ bên dưới!", icon="⚡")
+            else:
+                st.error("❌ Không khởi chạy được — kiểm tra đường dẫn video.")
+            st.rerun(scope="app")
 
 
 def render_video(video_path, check_h264=True):
@@ -5642,6 +5726,15 @@ def hien_thi_tab_phan_tich_va_video_ncv():
             v_cur.get("video_name"),
             key_suffix="ncv_combined",
         )
+        hien_thi_nut_tai_lai_va_phan_tich_moi(v_cur, key_suffix="ncv_combined_top")
+        if st.session_state.get("reanalyze_triggered") and v_cur.get("video_path"):
+            prog = read_progress(v_cur["video_path"])
+            if prog and prog.get("status") == "processing":
+                p_pct = prog.get("progress", 0.0) * 100
+                st.info(
+                    f"🔄 **Đang chạy phân tích mới** — tiến độ **{p_pct:.0f}%**. "
+                    "Mở tab **📊 BIỂU ĐỒ PHÂN TÍCH** bên dưới để xem chi tiết và video gốc."
+                )
         st.markdown("---")
     
     # Tạo sub-tabs bên trong
@@ -7994,7 +8087,8 @@ def hien_thi_tien_trinh_background(video_path):
             v_re = _tim_video_cho_progress(video_path)
             if v_re and v_re.get('metrics'):
                 if st.button("⬅️ Quay lại xem kết quả cũ đã lưu", key=f"btn_cancel_processing_{hashlib.md5(video_path.encode()).hexdigest()}", type="secondary", use_container_width=True):
-                    khoi_phuc_ket_qua_cu(v_re)
+                    with st.spinner("📥 Đang tải biểu đồ, video và ảnh frame..."):
+                        khoi_phuc_ket_qua_cu(v_re, tai_day_du=True)
                     st.toast("✅ Đã quay lại kết quả phân tích cũ!", icon="📊")
                     st.rerun(scope="app")
         except:
@@ -8142,7 +8236,8 @@ def hien_thi_tien_trinh_background_small(video_path):
             if v_re and v_re.get('metrics'):
                 st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
                 if st.button("⬅️ Quay lại xem kết quả cũ đã lưu", key=f"btn_cancel_proc_small_{hashlib.md5(video_path.encode()).hexdigest()}", type="secondary", use_container_width=True):
-                    khoi_phuc_ket_qua_cu(v_re)
+                    with st.spinner("📥 Đang tải biểu đồ, video và ảnh frame..."):
+                        khoi_phuc_ket_qua_cu(v_re, tai_day_du=True)
                     st.toast("✅ Đã quay lại kết quả phân tích cũ!", icon="📊")
                     st.rerun(scope="app")
         except:
@@ -8215,7 +8310,8 @@ def hien_thi_tien_trinh_background_home_fragment(video_path):
             if v_re and v_re.get('metrics'):
                 st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
                 if st.button("⬅️ Quay lại xem kết quả cũ đã lưu", key=f"btn_cancel_proc_home_{hashlib.md5(video_path.encode()).hexdigest()}", type="secondary", use_container_width=True):
-                    khoi_phuc_ket_qua_cu(v_re)
+                    with st.spinner("📥 Đang tải biểu đồ, video và ảnh frame..."):
+                        khoi_phuc_ket_qua_cu(v_re, tai_day_du=True)
                     st.toast("✅ Đã quay lại kết quả phân tích cũ!", icon="📊")
                     st.rerun(scope="app")
         except:
@@ -8327,7 +8423,8 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
             if v_re and v_re.get('metrics'):
                 st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
                 if st.button("⬅️ Quay lại xem kết quả cũ đã lưu", key=f"btn_cancel_proc_frag_{key_suffix}", use_container_width=True, type="secondary"):
-                    khoi_phuc_ket_qua_cu(v_re)
+                    with st.spinner("📥 Đang tải biểu đồ, video và ảnh frame..."):
+                        khoi_phuc_ket_qua_cu(v_re, tai_day_du=True)
                     st.toast("✅ Đã quay lại kết quả phân tích cũ!", icon="📊")
                     st.rerun(scope="app")
         except:
@@ -10728,8 +10825,9 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
                             """, unsafe_allow_html=True)
                             st.markdown("<br>", unsafe_allow_html=True)
                             if st.button("📂 XEM KẾT QUẢ CŨ (ĐÃ LƯU)", key=f"btn_choose_old_{key_suffix}", type="secondary", use_container_width=True):
-                                khoi_phuc_ket_qua_cu(v)
-                                st.toast("✅ Đang mở kết quả phân tích đã lưu...", icon="📊")
+                                with st.spinner("📥 Đang tải biểu đồ, video và ảnh frame..."):
+                                    khoi_phuc_ket_qua_cu(v, tai_day_du=True)
+                                st.toast("✅ Đã mở kết quả phân tích đã lưu!", icon="📊")
                                 st.rerun(scope="app")
                                 
                         with col_c2:
@@ -10747,7 +10845,7 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
                                     st.toast("🚀 Đã khởi chạy trích xuất khung xương — theo dõi tiến độ bên phải!", icon="⚡")
                                 else:
                                     st.error("❌ Không khởi chạy được — kiểm tra đường dẫn video.")
-                                st.rerun(scope="fragment")
+                                st.rerun(scope="app")
                         return
                         
                     # Nếu đã chọn xem bản cũ (hoặc không phải NCV), tiến hành tải lại tự động
@@ -10806,7 +10904,8 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
                 if st.session_state.get('reanalyze_triggered', False):
                     st.info("💡 Bạn đang cấu hình lại để chạy phân tích AI mới. Kết quả phân tích cũ vẫn được bảo lưu an toàn.")
                     if st.button("⬅️ HỦY BỎ & XEM LẠI KẾT QUẢ ĐÃ LƯU", key=f"btn_cancel_reanalyze_{key_suffix}", width="stretch"):
-                        khoi_phuc_ket_qua_cu(v)
+                        with st.spinner("📥 Đang tải biểu đồ, video và ảnh frame..."):
+                            khoi_phuc_ket_qua_cu(v, tai_day_du=True)
                         st.toast("✅ Đã quay lại kết quả phân tích cũ!", icon="📊")
                         st.rerun(scope="app")
                     st.markdown("---")
@@ -10886,39 +10985,20 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
             st.info("💡 Vui lòng đảm bảo Nghiên cứu viên đã hoàn tất việc trích xuất khung xương cho video này.")
             if user_role == "Nghiên cứu viên":
                 st.markdown("<br>", unsafe_allow_html=True)
-                c_retry, c_new = st.columns(2)
-                with c_retry:
-                    if st.button("📂 TẢI LẠI KẾT QUẢ ĐÃ LƯU", type="primary", use_container_width=True, key=f"retry_old_{key_suffix}"):
-                        if v_re and khoi_phuc_ket_qua_cu(v_re):
-                            st.toast("✅ Đã khôi phục kết quả phân tích cũ!", icon="📊")
-                        else:
-                            st.error("❌ Không tìm thấy kết quả cũ cho video này.")
-                        st.rerun(scope="app")
-                with c_new:
-                    if st.button("⚙️ CHẠY PHÂN TÍCH MỚI", type="secondary", use_container_width=True, key=f"re_run_ai_missing_{key_suffix}"):
-                        if v_re and v_re.get("metrics"):
-                            khoi_phuc_ket_qua_cu(v_re)
-                            st.toast("✅ Đã mở kết quả cũ — hoặc chọn chạy lại từ nút bên dưới.", icon="📊")
-                        elif v_re:
-                            khoi_dong_phan_tich_lai_video(v_re, auto_start=True)
-                            st.toast("🚀 Đã khởi chạy phân tích AI!", icon="⚡")
-                        st.rerun(scope="app")
+                hien_thi_nut_tai_lai_va_phan_tich_moi(v_re, key_suffix=f"missing_{key_suffix}")
             return
 
-    # Nút chạy lại phân tích dành cho Nghiên cứu viên
+    # Nút thao tác nhanh khi đã có kết quả (NCV) — tab gộp đã có ở parent, tránh trùng
     if user_role == "Nghiên cứu viên" and tk is not None:
-        c_re1, c_re2 = st.columns([3, 1])
-        with c_re1:
-            st.success(
-                f"📊 **KẾT QUẢ ĐÃ LƯU:** BN **{st.session_state.get('current_eval_video', {}).get('full_name', 'Bệnh nhân')}** — "
-                "có thể xem biểu đồ bên dưới hoặc **chuyển tab khác** (Trang chủ, Khung hình, Báo cáo…)."
+        st.success(
+            f"📊 **KẾT QUẢ ĐÃ LƯU:** BN **{st.session_state.get('current_eval_video', {}).get('full_name', 'Bệnh nhân')}** — "
+            "xem biểu đồ bên dưới hoặc chuyển sang tab **🎬 VIDEO & ẢNH FRAME**."
+        )
+        if "ncv_combined" not in key_suffix:
+            hien_thi_nut_tai_lai_va_phan_tich_moi(
+                st.session_state.get("current_eval_video"),
+                key_suffix=f"loaded_{key_suffix}",
             )
-        with c_re2:
-            if st.button("⚙️ CHẠY LẠI PHÂN TÍCH AI", type="secondary", use_container_width=True, key=f"re_run_ai_{key_suffix}"):
-                v_re = st.session_state.get('current_eval_video')
-                if khoi_dong_phan_tich_lai_video(v_re, auto_start=True):
-                    st.toast("🚀 Đã khởi chạy phân tích lại!", icon="⚡")
-                st.rerun(scope="fragment")
         st.markdown("<br>", unsafe_allow_html=True)
 
     is_gay_ex = any(kw in str(bt.get('ten', '')).lower() for kw in ["gậy", "gay", "pulley", "stick"])
@@ -13417,17 +13497,35 @@ def hien_thi_frames_day_du(key_suffix=""):
     all_frames_data_path = get_local_frame_path(st.session_state.get('all_frames_data_path'))
     if not all_frames_data_path:
         st.info("📭 Không có dữ liệu khung hình để hiển thị.")
+        if st.session_state.get("current_eval_video"):
+            hien_thi_nut_tai_lai_va_phan_tich_moi(st.session_state.current_eval_video, key_suffix=f"frames_empty_{key_suffix}")
         return
 
     if not is_local_file_ready(all_frames_data_path):
-        st.info("📭 Dữ liệu frames chưa có sẵn local. Biểu đồ/chỉ số vẫn đã hiển thị ở tab phân tích.")
-        if st.button("⚡ Tải nhanh dữ liệu frames khi cần xem ảnh", key=f"btn_lazy_frames_data_{key_suffix}", use_container_width=True):
-            with st.spinner("📥 Đang tải dữ liệu frames..."):
-                if ensure_local_file(all_frames_data_path):
-                    st.rerun()
-                else:
-                    st.error("Không tải được dữ liệu frames từ Cloud.")
-        return
+        if st.session_state.get("view_old_analysis"):
+            with st.spinner("📥 Đang tải video và ảnh frame từ Cloud..."):
+                ensure_local_file(all_frames_data_path)
+                proc = st.session_state.get("processed_video_path")
+                if proc:
+                    ensure_local_file(proc, try_fallbacks=True)
+                    check_and_extract_frames_zip(proc)
+                fz = st.session_state.get("frames_zip")
+                if fz:
+                    ensure_local_file(get_local_frame_path(fz) or fz)
+        if not is_local_file_ready(all_frames_data_path):
+            st.info("📭 Dữ liệu frames chưa có sẵn local. Bấm **Tải lại kết quả đã lưu** ở trên để tải đầy đủ.")
+            if st.button("⚡ Tải nhanh dữ liệu frames", key=f"btn_lazy_frames_data_{key_suffix}", use_container_width=True):
+                with st.spinner("📥 Đang tải dữ liệu frames..."):
+                    if ensure_local_file(all_frames_data_path):
+                        proc = st.session_state.get("processed_video_path")
+                        if proc:
+                            check_and_extract_frames_zip(proc)
+                        st.rerun(scope="app")
+                    else:
+                        st.error("Không tải được dữ liệu frames từ Cloud.")
+            if st.session_state.get("current_eval_video"):
+                hien_thi_nut_tai_lai_va_phan_tich_moi(st.session_state.current_eval_video, key_suffix=f"frames_retry_{key_suffix}")
+            return
 
     all_frames_data = load_all_frames_data_cached(all_frames_data_path)
 
