@@ -1462,6 +1462,41 @@ def nap_phien_benh_nhan_vao_session(selected_v):
     st.session_state.current_df_csv_path = selected_v.get('df_path')
 
 
+def khoi_phuc_ket_qua_cu(v, tai_csv=True):
+    """Khôi phục kết quả phân tích đã lưu vào session — dùng khi hủy phân tích mới / xem bản cũ."""
+    if not v or not v.get("metrics"):
+        return False
+    st.session_state.current_eval_video = v
+    st.session_state.reanalyze_triggered = False
+    st.session_state.view_old_analysis = True
+    st.session_state.stats = v["metrics"]
+    st.session_state.has_data = True
+    st.session_state.processed_video_path = v.get("processed_path", v.get("video_path"))
+    st.session_state.uploaded_file_name = v.get("video_name", "Video đã lưu")
+    st.session_state.all_frames_data_path = v.get("all_frames_data_path")
+    st.session_state.frames_zip = v.get("frames_zip")
+    st.session_state.current_df_csv_path = v.get("df_path")
+    ex_base = next((BAI_TAP[k] for k in BAI_TAP if BAI_TAP[k]["ten"] == v.get("exercise")), BAI_TAP["codman"])
+    st.session_state.exercise = ex_base.copy()
+    if "sai_so" in v:
+        st.session_state.exercise["chuan"] = ex_base["chuan"].copy()
+        st.session_state.exercise["chuan"]["sai_so"] = v["sai_so"]
+    if tai_csv:
+        df_path = v.get("df_path")
+        if df_path:
+            ensure_local_file(df_path)
+            if os.path.exists(df_path):
+                try:
+                    st.session_state.angle_df = read_display_csv_fast(df_path)
+                except Exception:
+                    st.session_state.angle_df = None
+            else:
+                st.session_state.angle_df = None
+        else:
+            st.session_state.angle_df = None
+    return True
+
+
 def render_video(video_path, check_h264=True):
     """Hiển thị video: ưu tiên HTTP Range Request server (local) để phát ngay lập tức.
     Tự động đảm bảo H.264 trước khi phát, hỗ trợ stream trực tiếp từ Cloud nếu chưa tải về local."""
@@ -7959,25 +7994,9 @@ def hien_thi_tien_trinh_background(video_path):
             v_re = _tim_video_cho_progress(video_path)
             if v_re and v_re.get('metrics'):
                 if st.button("⬅️ Quay lại xem kết quả cũ đã lưu", key=f"btn_cancel_processing_{hashlib.md5(video_path.encode()).hexdigest()}", type="secondary", use_container_width=True):
-                    st.session_state.reanalyze_triggered = False
-                    st.session_state.view_old_analysis = True
-                    st.session_state.stats = v_re['metrics']
-                    st.session_state.processed_video_path = v_re.get('processed_path', v_re['video_path'])
-                    st.session_state.uploaded_file_name = v_re.get('video_name', 'Video đã lưu')
-                    st.session_state.all_frames_data_path = v_re.get('all_frames_data_path')
-                    ex_base = next((BAI_TAP[k] for k in BAI_TAP if BAI_TAP[k]['ten'] == v_re['exercise']), BAI_TAP['codman'])
-                    st.session_state.exercise = ex_base.copy()
-                    if 'sai_so' in v_re:
-                        st.session_state.exercise['chuan'] = ex_base['chuan'].copy()
-                        st.session_state.exercise['chuan']['sai_so'] = v_re['sai_so']
-                    st.session_state.has_data = True
-                    
-                    ensure_local_file(v_re.get('df_path'))
-                    
-                    if v_re.get('df_path') and os.path.exists(v_re['df_path']):
-                        st.session_state.angle_df = read_display_csv_fast(v_re['df_path'])
+                    khoi_phuc_ket_qua_cu(v_re)
                     st.toast("✅ Đã quay lại kết quả phân tích cũ!", icon="📊")
-                    st.rerun()
+                    st.rerun(scope="app")
         except:
             pass
         return True
@@ -8123,25 +8142,9 @@ def hien_thi_tien_trinh_background_small(video_path):
             if v_re and v_re.get('metrics'):
                 st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
                 if st.button("⬅️ Quay lại xem kết quả cũ đã lưu", key=f"btn_cancel_proc_small_{hashlib.md5(video_path.encode()).hexdigest()}", type="secondary", use_container_width=True):
-                    st.session_state.reanalyze_triggered = False
-                    st.session_state.view_old_analysis = True
-                    st.session_state.stats = v_re['metrics']
-                    st.session_state.processed_video_path = v_re.get('processed_path', v_re['video_path'])
-                    st.session_state.uploaded_file_name = v_re.get('video_name', 'Video đã lưu')
-                    st.session_state.all_frames_data_path = v_re.get('all_frames_data_path')
-                    ex_base = next((BAI_TAP[k] for k in BAI_TAP if BAI_TAP[k]['ten'] == v_re['exercise']), BAI_TAP['codman'])
-                    st.session_state.exercise = ex_base.copy()
-                    if 'sai_so' in v_re:
-                        st.session_state.exercise['chuan'] = ex_base['chuan'].copy()
-                        st.session_state.exercise['chuan']['sai_so'] = v_re['sai_so']
-                    st.session_state.has_data = True
-                    
-                    ensure_local_file(v_re.get('df_path'))
-                    
-                    if v_re.get('df_path') and os.path.exists(v_re['df_path']):
-                        st.session_state.angle_df = read_display_csv_fast(v_re['df_path'])
+                    khoi_phuc_ket_qua_cu(v_re)
                     st.toast("✅ Đã quay lại kết quả phân tích cũ!", icon="📊")
-                    st.rerun()
+                    st.rerun(scope="app")
         except:
             pass
     elif status == "success":
@@ -8212,25 +8215,9 @@ def hien_thi_tien_trinh_background_home_fragment(video_path):
             if v_re and v_re.get('metrics'):
                 st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
                 if st.button("⬅️ Quay lại xem kết quả cũ đã lưu", key=f"btn_cancel_proc_home_{hashlib.md5(video_path.encode()).hexdigest()}", type="secondary", use_container_width=True):
-                    st.session_state.reanalyze_triggered = False
-                    st.session_state.view_old_analysis = True
-                    st.session_state.stats = v_re['metrics']
-                    st.session_state.processed_video_path = v_re.get('processed_path', v_re['video_path'])
-                    st.session_state.uploaded_file_name = v_re.get('video_name', 'Video đã lưu')
-                    st.session_state.all_frames_data_path = v_re.get('all_frames_data_path')
-                    ex_base = next((BAI_TAP[k] for k in BAI_TAP if BAI_TAP[k]['ten'] == v_re['exercise']), BAI_TAP['codman'])
-                    st.session_state.exercise = ex_base.copy()
-                    if 'sai_so' in v_re:
-                        st.session_state.exercise['chuan'] = ex_base['chuan'].copy()
-                        st.session_state.exercise['chuan']['sai_so'] = v_re['sai_so']
-                    st.session_state.has_data = True
-                    
-                    ensure_local_file(v_re.get('df_path'))
-                    
-                    if v_re.get('df_path') and os.path.exists(v_re['df_path']):
-                        st.session_state.angle_df = read_display_csv_fast(v_re['df_path'])
+                    khoi_phuc_ket_qua_cu(v_re)
                     st.toast("✅ Đã quay lại kết quả phân tích cũ!", icon="📊")
-                    st.rerun()
+                    st.rerun(scope="app")
         except:
             pass
     elif status == "success":
@@ -8327,7 +8314,7 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
             except:
                 pass
             st.rerun(scope="fragment")
-    elif is_processing:
+    elif is_processing and not (st.session_state.get("view_old_analysis") and st.session_state.get("has_data")):
         st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
         st.progress(p_val)
         detail = f" — {status_msg}" if status_msg else ""
@@ -8340,27 +8327,13 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
             if v_re and v_re.get('metrics'):
                 st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
                 if st.button("⬅️ Quay lại xem kết quả cũ đã lưu", key=f"btn_cancel_proc_frag_{key_suffix}", use_container_width=True, type="secondary"):
-                    st.session_state.reanalyze_triggered = False
-                    st.session_state.view_old_analysis = True
-                    st.session_state.stats = v_re['metrics']
-                    st.session_state.processed_video_path = v_re.get('processed_path', v_re['video_path'])
-                    st.session_state.uploaded_file_name = v_re.get('video_name', 'Video đã lưu')
-                    st.session_state.all_frames_data_path = v_re.get('all_frames_data_path')
-                    ex_base = next((BAI_TAP[k] for k in BAI_TAP if BAI_TAP[k]['ten'] == v_re['exercise']), BAI_TAP['codman'])
-                    st.session_state.exercise = ex_base.copy()
-                    if 'sai_so' in v_re:
-                        st.session_state.exercise['chuan'] = ex_base['chuan'].copy()
-                        st.session_state.exercise['chuan']['sai_so'] = v_re['sai_so']
-                    st.session_state.has_data = True
-                    
-                    ensure_local_file(v_re.get('df_path'))
-                    
-                    if v_re.get('df_path') and os.path.exists(v_re['df_path']):
-                        st.session_state.angle_df = read_display_csv_fast(v_re['df_path'])
+                    khoi_phuc_ket_qua_cu(v_re)
                     st.toast("✅ Đã quay lại kết quả phân tích cũ!", icon="📊")
-                    st.rerun(scope="fragment")
+                    st.rerun(scope="app")
         except:
             pass
+    elif is_processing and st.session_state.get("view_old_analysis") and st.session_state.get("has_data"):
+        st.success("📂 Đang xem kết quả đã lưu. Phân tích mới (nếu có) vẫn chạy nền — xem biểu đồ ở khu vực bên trái.")
     else:
         if st.button("🚀 PHÂN TÍCH VÀ TRÍCH XUẤT KHUNG XƯƠNG NGAY", width="stretch", type="primary", key=f"btn_analyze_now_{key_suffix}"):
             st.session_state.reanalyze_triggered = True
@@ -10755,9 +10728,9 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
                             """, unsafe_allow_html=True)
                             st.markdown("<br>", unsafe_allow_html=True)
                             if st.button("📂 XEM KẾT QUẢ CŨ (ĐÃ LƯU)", key=f"btn_choose_old_{key_suffix}", type="secondary", use_container_width=True):
-                                st.session_state.view_old_analysis = True
-                                st.session_state.reanalyze_triggered = False
-                                st.rerun(scope="fragment")
+                                khoi_phuc_ket_qua_cu(v)
+                                st.toast("✅ Đang mở kết quả phân tích đã lưu...", icon="📊")
+                                st.rerun(scope="app")
                                 
                         with col_c2:
                             st.markdown("""
@@ -10807,7 +10780,7 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
                                     pass
                             st.toast(f"✅ Tải thành công kết quả phân tích của bệnh nhân {v.get('full_name')}!", icon="📊")
                             st.rerun(scope="fragment")
-                        elif not csv_ok and user_role == "Nghiên cứu viên":
+                        elif not csv_ok and user_role == "Nghiên cứu viên" and not st.session_state.get("view_old_analysis", False):
                             # Nếu file CSV bị thiếu và là Nghiên cứu viên, tự động chuyển sang chế độ phân tích lại
                             st.session_state.reanalyze_triggered = True
                             st.session_state.stats = v['metrics']
@@ -10833,13 +10806,17 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
                 if st.session_state.get('reanalyze_triggered', False):
                     st.info("💡 Bạn đang cấu hình lại để chạy phân tích AI mới. Kết quả phân tích cũ vẫn được bảo lưu an toàn.")
                     if st.button("⬅️ HỦY BỎ & XEM LẠI KẾT QUẢ ĐÃ LƯU", key=f"btn_cancel_reanalyze_{key_suffix}", width="stretch"):
-                        st.session_state.reanalyze_triggered = False
-                        st.session_state.view_old_analysis = True
-                        st.rerun(scope="fragment")
+                        khoi_phuc_ket_qua_cu(v)
+                        st.toast("✅ Đã quay lại kết quả phân tích cũ!", icon="📊")
+                        st.rerun(scope="app")
                     st.markdown("---")
 
                 prog_data = read_progress(v['video_path'])
-                is_processing = prog_data and prog_data.get("status") == "processing"
+                is_processing = (
+                    not st.session_state.get("view_old_analysis", False)
+                    and prog_data
+                    and prog_data.get("status") == "processing"
+                )
                 # Tự khởi chạy một lần khi vào tab từ Trang chủ (fallback nếu thread chưa kịp start)
                 if (
                     user_role == "Nghiên cứu viên"
@@ -10899,41 +10876,34 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
                     pass
     
     if tk is None or df is None:
-        st.warning("⚠️ Dữ liệu phân tích chi tiết không khả dụng hoặc chưa được tải.")
-        st.info("💡 Vui lòng đảm bảo Nghiên cứu viên đã hoàn tất việc trích xuất khung xương cho video này.")
-        if user_role == "Nghiên cứu viên":
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("⚙️ CHẠY LẠI PHÂN TÍCH AI", type="primary", use_container_width=True, key=f"re_run_ai_missing_{key_suffix}"):
-                v_re = st.session_state.get('current_eval_video')
-                if v_re and v_re.get('metrics'):
-                    # Nếu video đã có kết quả phân tích cũ lưu trong CSDL, khôi phục và hiển thị ngay
-                    st.session_state.view_old_analysis = True
-                    st.session_state.reanalyze_triggered = False
-                    st.session_state.stats = v_re['metrics']
-                    st.session_state.processed_video_path = v_re.get('processed_path', v_re['video_path'])
-                    st.session_state.uploaded_file_name = v_re.get('video_name', 'Video đã lưu')
-                    st.session_state.all_frames_data_path = v_re.get('all_frames_data_path')
-                    ex_base = next((BAI_TAP[k] for k in BAI_TAP if BAI_TAP[k]['ten'] == v_re['exercise']), BAI_TAP['codman'])
-                    st.session_state.exercise = ex_base.copy()
-                    if 'sai_so' in v_re:
-                        st.session_state.exercise['chuan'] = ex_base['chuan'].copy()
-                        st.session_state.exercise['chuan']['sai_so'] = v_re['sai_so']
-                    st.session_state.has_data = True
-                    
-                    with st.spinner("📥 Đang tải nhanh dữ liệu biểu đồ (CSV)..."):
-                        ensure_local_file(v_re.get('df_path'))
-                        
-                    if v_re.get('df_path') and os.path.exists(v_re['df_path']):
-                        try:
-                            st.session_state.angle_df = read_display_csv_fast(v_re['df_path'])
-                        except:
-                            pass
-                    st.toast("✅ Đã khôi phục kết quả phân tích cũ thành công!", icon="📊")
-                else:
-                    khoi_dong_phan_tich_lai_video(v_re, auto_start=True)
-                    st.toast("🚀 Đã khởi chạy phân tích AI!", icon="⚡")
-                st.rerun(scope="fragment")
-        return
+        v_re = st.session_state.get("current_eval_video")
+        if tk is not None and df is None and v_re:
+            with st.spinner("📥 Đang tải dữ liệu biểu đồ (CSV) từ Cloud..."):
+                khoi_phuc_ket_qua_cu(v_re)
+            df = st.session_state.get("angle_df")
+        if tk is None or df is None:
+            st.warning("⚠️ Dữ liệu phân tích chi tiết không khả dụng hoặc chưa được tải.")
+            st.info("💡 Vui lòng đảm bảo Nghiên cứu viên đã hoàn tất việc trích xuất khung xương cho video này.")
+            if user_role == "Nghiên cứu viên":
+                st.markdown("<br>", unsafe_allow_html=True)
+                c_retry, c_new = st.columns(2)
+                with c_retry:
+                    if st.button("📂 TẢI LẠI KẾT QUẢ ĐÃ LƯU", type="primary", use_container_width=True, key=f"retry_old_{key_suffix}"):
+                        if v_re and khoi_phuc_ket_qua_cu(v_re):
+                            st.toast("✅ Đã khôi phục kết quả phân tích cũ!", icon="📊")
+                        else:
+                            st.error("❌ Không tìm thấy kết quả cũ cho video này.")
+                        st.rerun(scope="app")
+                with c_new:
+                    if st.button("⚙️ CHẠY PHÂN TÍCH MỚI", type="secondary", use_container_width=True, key=f"re_run_ai_missing_{key_suffix}"):
+                        if v_re and v_re.get("metrics"):
+                            khoi_phuc_ket_qua_cu(v_re)
+                            st.toast("✅ Đã mở kết quả cũ — hoặc chọn chạy lại từ nút bên dưới.", icon="📊")
+                        elif v_re:
+                            khoi_dong_phan_tich_lai_video(v_re, auto_start=True)
+                            st.toast("🚀 Đã khởi chạy phân tích AI!", icon="⚡")
+                        st.rerun(scope="app")
+            return
 
     # Nút chạy lại phân tích dành cho Nghiên cứu viên
     if user_role == "Nghiên cứu viên" and tk is not None:
