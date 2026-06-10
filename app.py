@@ -292,7 +292,11 @@ def _image_path_to_data_uri(path, max_b64_len=90000, thumb_px=96):
             from PIL import Image
             from io import BytesIO
             img = Image.open(BytesIO(raw)).convert("RGBA")
-            img.thumbnail((thumb_px, thumb_px), Image.Resampling.LANCZOS)
+            try:
+                resample = Image.Resampling.LANCZOS
+            except AttributeError:
+                resample = Image.LANCZOS
+            img.thumbnail((thumb_px, thumb_px), resample)
             buf = BytesIO()
             img.save(buf, format="PNG", optimize=True)
             raw = buf.getvalue()
@@ -320,32 +324,57 @@ def get_school_logo_base64():
     return "https://huph.edu.vn/uploads/logo/logo-huph.png"
 
 
-def get_data_science_logo_base64():
-    """Lay logo Khoa Khoa hoc du lieu de nhung vao HTML duoi dang base64."""
-    import pathlib as _pl, re as _re
+DS_LOGO_URL = (
+    "https://raw.githubusercontent.com/quynhphuong1209/Rehab-AI-Monitor/main/"
+    "assets/logo_data_science_sm.png"
+)
+
+
+def _duong_dan_logo_asset(*names):
+    """Tìm file logo trong assets/ (local hoặc HF Space)."""
+    import pathlib as _pl
     script_dir = _pl.Path(__file__).resolve().parent
+    for base in (script_dir, _pl.Path.cwd(), _pl.Path("/home/user/app"), _pl.Path("/app")):
+        for name in names:
+            p = base / "assets" / name
+            if p.exists():
+                return str(p)
+    return None
 
-    search_paths = []
-    for base in (script_dir, _pl.Path.cwd(), _pl.Path("/app"), _pl.Path("/home/user/app")):
-        for name in ("logo_data_science_huph.jpg", "logo_data_science_huph.png", "logo_data_science_huph.JPG"):
-            search_paths.append(base / "assets" / name)
-            search_paths.append(base / name)
-    for p in search_paths:
-        uri = _image_path_to_data_uri(p)
-        if uri:
-            return uri
 
-    for p in [script_dir / "scratch" / "logo_html.txt", _pl.Path.cwd() / "scratch" / "logo_html.txt"]:
-        if p.exists():
-            try:
-                txt = p.read_text(encoding="utf-8")
-                m = _re.search(r'src=["\'](data:image/[^"\'\s]+)["\']', txt)
-                if m:
-                    return m.group(1)
-            except Exception:
-                pass
+def get_data_science_logo_base64():
+    """Logo Khoa Khoa hoc du lieu — URL HTTPS (ổn định trên HF; tránh base64 bị Streamlit cắt)."""
+    return DS_LOGO_URL
 
-    return "https://huph.edu.vn/uploads/logo/logo-huph.png"
+
+def hien_thi_hang_logo_header():
+    """Ba logo header bằng st.image — không dùng base64 trong HTML."""
+    st.markdown("""
+    <style>
+    div[data-testid="stHorizontalBlock"]:has(.logo-header-marker) {
+        justify-content: center; gap: 28px; margin-bottom: 8px;
+    }
+    div[data-testid="stHorizontalBlock"]:has(.logo-header-marker) [data-testid="column"] {
+        display: flex; justify-content: center; align-items: center; flex: 0 0 auto !important;
+        width: 100px !important; min-width: 100px;
+    }
+    div[data-testid="stHorizontalBlock"]:has(.logo-header-marker) img {
+        border-radius: 50%; object-fit: contain; width: 78px !important;
+    }
+    </style>
+    <div class="logo-header-marker" style="display:none"></div>
+    """, unsafe_allow_html=True)
+    c1, c2, c3 = st.columns([1, 1, 1])
+    school_path = _duong_dan_logo_asset("abc1.png")
+    ds_path = _duong_dan_logo_asset("logo_data_science_sm.png", "logo_data_science_huph.png", "logo_data_science_huph.jpg")
+    pnt_url = "https://benhandientu.moh.gov.vn/storage/uploads/2025/11/bvpntlogo-1763704605.jpg"
+    school_url = "https://huph.edu.vn/uploads/logo/logo-huph.png"
+    with c1:
+        st.image(school_path or school_url, width=78)
+    with c2:
+        st.image(ds_path or DS_LOGO_URL, width=78)
+    with c3:
+        st.image(pnt_url, width=78)
 
 
 def _chuan_hoa_ten_video(name):
@@ -431,9 +460,90 @@ def _loc_bo_trung_video_danh_sach(videos):
 
 
 def _lay_thoi_gian_upload_video(v):
-    """Thời gian BN upload — ưu tiên parse từ tên file gốc."""
+    """Thời gian BN upload mới nhất — ưu tiên video_list.time, rồi parse tên file."""
+    t_json = _format_vn_time(v.get("time"), default="")
+    if t_json and t_json != "N/A":
+        return t_json
     t = _parse_upload_time_from_filename(v.get("video_path") or v.get("video_name"))
-    return t or _format_vn_time(v.get("time"), default="N/A")
+    return t or "N/A"
+
+
+def _lay_eval_moi_nhat_theo_bai_tap(evals, username, exercise, doctor_username=None):
+    """Lấy đánh giá mới nhất theo BN + bài tập (bỏ qua lệch tên file)."""
+    best = None
+    best_t = datetime.min
+    for e in evals or []:
+        if e.get("patient_username") != username:
+            continue
+        if e.get("exercise") != exercise:
+            continue
+        if doctor_username is not None and e.get("doctor_username") != doctor_username:
+            continue
+        if doctor_username is None and e.get("doctor_username") == "AI_Researcher":
+            continue
+        t = _parse_vn_datetime(e.get("time")) or datetime.min
+        if t >= best_t:
+            best_t = t
+            best = e
+    return best
+
+
+def _lay_do_chinh_xac_hien_thi(v, ai_eval=None):
+    """Độ chính xác hiển thị — ưu tiên metrics mới nhất trong video_list, rồi AI eval."""
+    metrics = v.get("metrics") if isinstance(v.get("metrics"), dict) else {}
+    for fld in ("do_chinh_xac", "ty_le_tong_the"):
+        if metrics.get(fld) is not None:
+            try:
+                return float(metrics[fld])
+            except (TypeError, ValueError):
+                pass
+    if ai_eval and ai_eval.get("ai_accuracy") is not None:
+        try:
+            return float(ai_eval["ai_accuracy"])
+        except (TypeError, ValueError):
+            pass
+    try:
+        return float(v.get("accuracy") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _ap_dung_ket_qua_moi_nhat_vao_video(v, ai_eval=None):
+    """Gắn kết quả AI mới nhất vào bản ghi video — giữ nguyên thời gian upload."""
+    if not v:
+        return v
+    out = dict(v)
+    upload_time = out.get("time")
+    if ai_eval:
+        acc = ai_eval.get("ai_accuracy")
+        if acc is not None:
+            out["accuracy"] = acc
+        metrics = dict(out.get("metrics") or {}) if isinstance(out.get("metrics"), dict) else {}
+        for g, fld in (("g1", "ai_accuracy_g1"), ("g2", "ai_accuracy_g2"), ("g3", "ai_accuracy_g3")):
+            val = ai_eval.get(fld)
+            if val is None:
+                continue
+            mg = metrics.get(f"metrics_{g}")
+            if not isinstance(mg, dict):
+                mg = {}
+            mg["do_chinh_xac"] = val
+            metrics[f"metrics_{g}"] = mg
+        if acc is not None and not metrics.get("do_chinh_xac"):
+            metrics["do_chinh_xac"] = acc
+        if metrics:
+            out["metrics"] = metrics
+    if upload_time is not None:
+        out["time"] = upload_time
+    return out
+
+
+def _chon_video_moi_hon(a, b):
+    """Chọn bản ghi video có thời gian upload mới hơn."""
+    t_a = _parse_vn_datetime(_lay_thoi_gian_upload_video(a)) or datetime.min
+    t_b = _parse_vn_datetime(_lay_thoi_gian_upload_video(b)) or datetime.min
+    if t_a >= t_b:
+        return dict(a)
+    return dict(b)
 
 
 def _lay_thoi_gian_phan_tich_hien_thi(v, ai_eval=None):
@@ -460,7 +570,7 @@ def _tao_ban_ghi_video_tu_danh_gia(doc_eval, ai_eval, users=None):
         "video_name": vname,
         "exercise": ex,
         "accuracy": (ai_eval or {}).get("ai_accuracy") or 0,
-        "time": _lay_thoi_gian_phan_tich_hien_thi({"video_path": vp, "video_name": vname}, ai_eval),
+        "time": _lay_thoi_gian_upload_video({"video_path": vp, "video_name": vname, "time": None}),
         "video_path": vp,
         "processed_path": None,
         "status": "Đã phân tích" if ai_eval else "Đã đánh giá (bác sĩ)",
@@ -475,13 +585,22 @@ def _lay_video_nghien_cuu_chinh_thuc(video_list, evals=None):
         return []
 
     ai_by_key = {}
+    ai_by_exercise = {}
     doc_by_key = {}
+    doc_by_exercise = {}
     for e in evals:
         nk = _normalize_video_key(e.get("patient_username"), e.get("video_name"), e.get("exercise"))
+        pu, ex = e.get("patient_username"), e.get("exercise")
         if e.get("doctor_username") == "AI_Researcher":
             ai_by_key[nk] = e
+            prev = ai_by_exercise.get((pu, ex))
+            if not prev or (_parse_vn_datetime(e.get("time")) or datetime.min) >= (_parse_vn_datetime(prev.get("time")) or datetime.min):
+                ai_by_exercise[(pu, ex)] = e
         elif nk in doc_keys:
             doc_by_key[nk] = e
+            prev = doc_by_exercise.get((pu, ex))
+            if not prev or (_parse_vn_datetime(e.get("time")) or datetime.min) >= (_parse_vn_datetime(prev.get("time")) or datetime.min):
+                doc_by_exercise[(pu, ex)] = e
 
     vlist_by_key = {}
     for v in video_list or []:
@@ -489,21 +608,28 @@ def _lay_video_nghien_cuu_chinh_thuc(video_list, evals=None):
             continue
         nk = _normalize_video_key(v.get("username"), v.get("video_name"), v.get("exercise"))
         if nk in doc_keys:
-            v_copy = dict(v)
-            ai_eval = ai_by_key.get(nk)
-            v_copy["time"] = _lay_thoi_gian_phan_tich_hien_thi(v_copy, ai_eval)
-            vlist_by_key[nk] = v_copy
+            if nk in vlist_by_key:
+                vlist_by_key[nk] = _chon_video_moi_hon(v, vlist_by_key[nk])
+            else:
+                vlist_by_key[nk] = dict(v)
 
     out = []
     users = load_users()
-    for nk in sorted(doc_keys):
+    for nk in doc_keys:
+        pu, _, ex = nk
+        ai_eval = ai_by_key.get(nk) or ai_by_exercise.get((pu, ex))
         if nk in vlist_by_key:
-            out.append(vlist_by_key[nk])
+            out.append(_ap_dung_ket_qua_moi_nhat_vao_video(vlist_by_key[nk], ai_eval))
             continue
-        doc_eval = doc_by_key.get(nk)
+        doc_eval = doc_by_key.get(nk) or doc_by_exercise.get((pu, ex))
         if doc_eval:
-            out.append(_tao_ban_ghi_video_tu_danh_gia(doc_eval, ai_by_key.get(nk), users=users))
+            rec = _tao_ban_ghi_video_tu_danh_gia(doc_eval, ai_eval, users=users)
+            out.append(_ap_dung_ket_qua_moi_nhat_vao_video(rec, ai_eval))
 
+    out.sort(
+        key=lambda x: _parse_vn_datetime(_lay_thoi_gian_upload_video(x)) or datetime.min,
+        reverse=True,
+    )
     return _loc_bo_trung_video_danh_sach(out)
 
 
@@ -2563,7 +2689,7 @@ def _video_entry_from_progress(pdata):
 
 
 def _merge_video_lists_union(base_list, extra_list):
-    """Gộp hai danh sách video — giữ bản ghi đầy đủ hơn theo (username, video_name, exercise)."""
+    """Gộp hai danh sách video — ưu tiên bản upload/kết quả mới nhất."""
     by_key = {}
     for x in base_list or []:
         key = (x.get("username"), x.get("video_name"), x.get("exercise"))
@@ -2577,13 +2703,27 @@ def _merge_video_lists_union(base_list, extra_list):
             by_key[key] = rec
             continue
         existing = by_key[key]
-        for fld in ("video_path", "processed_path", "df_path", "all_frames_data_path", "metrics", "frames_zip", "time"):
-            if not existing.get(fld) and rec.get(fld):
-                existing[fld] = rec[fld]
-        if rec.get("accuracy") and float(rec.get("accuracy") or 0) > float(existing.get("accuracy") or 0):
-            existing["accuracy"] = rec["accuracy"]
-        if rec.get("status") == "Đã phân tích":
-            existing["status"] = "Đã phân tích"
+        t_rec = _parse_vn_datetime(_lay_thoi_gian_upload_video(rec)) or datetime.min
+        t_exist = _parse_vn_datetime(_lay_thoi_gian_upload_video(existing)) or datetime.min
+        if t_rec >= t_exist:
+            newer, older = rec, existing
+        else:
+            newer, older = existing, rec
+        merged = dict(newer)
+        for fld in ("video_path", "processed_path", "df_path", "all_frames_data_path", "metrics", "frames_zip"):
+            if not merged.get(fld) and older.get(fld):
+                merged[fld] = older[fld]
+        if t_rec >= t_exist:
+            for fld in ("metrics", "processed_path", "df_path", "all_frames_data_path", "accuracy", "status"):
+                if rec.get(fld) is not None:
+                    merged[fld] = rec[fld]
+        elif existing.get("metrics") and not merged.get("metrics"):
+            merged["metrics"] = existing["metrics"]
+            if existing.get("accuracy"):
+                merged["accuracy"] = existing["accuracy"]
+        if rec.get("status") == "Đã phân tích" or existing.get("status") == "Đã phân tích":
+            merged["status"] = "Đã phân tích"
+        by_key[key] = merged
     return list(by_key.values())
 
 
@@ -2624,12 +2764,12 @@ def tai_lai_video_list_tu_cloud():
         _load_data_cached.clear()
     except Exception:
         pass
-    lst = _merge_video_list_with_evals(load_data(VIDEOS_FILE))
+    lst = load_video_list_an_toan(sync_processed=True)
     recovered = khoi_phuc_video_list_tu_tep()
     if recovered:
         lst = _merge_video_lists_union(lst, _merge_video_list_with_evals(recovered))
-    lst = _merge_missing_from_progress(lst)
-    lst = dong_bo_video_list_tu_processed(lst or [])
+        lst = _merge_missing_from_progress(lst)
+        lst = dong_bo_video_list_tu_processed(lst or [])
     if lst:
         save_data(VIDEOS_FILE, lst)
         print(f"[VideoList] Tai lai tu Cloud: {len(lst)} video")
@@ -2663,8 +2803,6 @@ def _merge_video_list_with_evals(video_list):
                 existing["accuracy"] = rec["accuracy"]
             if rec.get("status") == "Đã phân tích":
                 existing["status"] = "Đã phân tích"
-            if rec.get("status") == "Đã phân tích" and rec.get("time"):
-                existing["time"] = rec.get("time")
         else:
             base.append(rec)
             by_key[key] = rec
@@ -2679,14 +2817,14 @@ def _merge_video_list_with_evals(video_list):
         fn = users.get(uname, {}).get("full_name", uname) if isinstance(users, dict) else uname
         is_ai = e.get("doctor_username") == "AI_Researcher"
         vp = _tim_upload_theo_video_name(uname, vname)
-        eval_time = _format_vn_time(e.get("time"), default="N/A")
+        upload_time = _lay_thoi_gian_upload_video({"video_path": vp, "video_name": vname})
         _upsert({
             "username": uname,
             "full_name": fn or uname,
             "video_name": vname,
             "exercise": ex,
             "accuracy": e.get("ai_accuracy") if is_ai else 0,
-            "time": eval_time,
+            "time": upload_time,
             "video_path": vp,
             "processed_path": None,
             "status": "Đã phân tích" if is_ai else "Đã đánh giá (bác sĩ)",
@@ -2849,21 +2987,35 @@ def dong_bo_video_list_tu_processed(video_list):
     return video_list
 
 
-def load_video_list_an_toan():
-    """Nạp video_list.json — cache theo mtime, gộp eval/progress; không tải HF mỗi lần render."""
+@st.cache_data(show_spinner=False)
+def _load_video_list_core(v_mtime, e_mtime):
+    """Nạp video_list + merge eval — cache theo mtime file JSON."""
     lst = _merge_video_list_with_evals(load_data(VIDEOS_FILE))
     if lst:
-        merged = _merge_missing_from_progress(lst)
-        merged = dong_bo_video_list_tu_processed(merged)
-        return merged
+        return lst
     recovered = khoi_phuc_video_list_tu_tep()
     if recovered:
         recovered = _merge_video_list_with_evals(recovered)
-        recovered = _merge_missing_from_progress(recovered)
-        recovered = dong_bo_video_list_tu_processed(recovered)
         save_data(VIDEOS_FILE, recovered)
         print(f"[VideoList] Da khoi phuc {len(recovered)} video vao video_list.json")
     return recovered or []
+
+
+def load_video_list_an_toan(sync_processed=False):
+    """Nạp video_list — mặc định chỉ đọc (nhanh); sync_processed=True chỉ dùng khi khởi động nền."""
+    try:
+        v_mtime = os.path.getmtime(VIDEOS_FILE) if os.path.exists(VIDEOS_FILE) else 0
+    except Exception:
+        v_mtime = 0
+    try:
+        e_mtime = os.path.getmtime(EVALUATIONS_FILE) if os.path.exists(EVALUATIONS_FILE) else 0
+    except Exception:
+        e_mtime = 0
+    lst = _load_video_list_core(v_mtime, e_mtime) or []
+    if sync_processed and lst:
+        lst = _merge_missing_from_progress(lst)
+        lst = dong_bo_video_list_tu_processed(lst)
+    return lst
 
 
 def lay_do_chinh_xac_ai_chuan(selected_v):
@@ -3004,20 +3156,24 @@ def don_dep_file_tam():
 def thuc_hien_khoi_tao_he_thong_mot_lan():
     """Chạy đồng bộ và dọn dẹp hệ thống duy nhất MỘT LẦN khi server khởi động toàn cục"""
     import threading
-    _ensure_videos_file_exists()
-    _ensure_evaluations_file_exists()
-    dong_bo_json_cau_hinh_tu_hf()
-    lst = load_video_list_an_toan()
-    if lst:
-        merged = _merge_missing_from_progress(lst)
-        merged = dong_bo_video_list_tu_processed(merged)
-        if len(merged) > len(lst):
-            lst = merged
-    try:
-        dong_bo_lich_su_tu_video_list(lst)
-    except Exception as hist_sync_err:
-        print(f"[LichSu] Loi dong bo khoi dong: {hist_sync_err}")
-    threading.Thread(target=khoi_tao_dong_bo_hf, daemon=True).start()
+
+    def _init_nen():
+        """JSON/HF sync + merge video — chạy nền, không block đăng nhập."""
+        _ensure_videos_file_exists()
+        _ensure_evaluations_file_exists()
+        dong_bo_json_cau_hinh_tu_hf()
+        try:
+            _load_video_list_core.clear()
+        except Exception:
+            pass
+        lst = load_video_list_an_toan(sync_processed=True)
+        try:
+            dong_bo_lich_su_tu_video_list(lst)
+        except Exception as hist_sync_err:
+            print(f"[LichSu] Loi dong bo khoi dong: {hist_sync_err}")
+        khoi_tao_dong_bo_hf()
+
+    threading.Thread(target=_init_nen, daemon=True).start()
     don_dep_file_tam()
 
     # ── AUTO-TRANSCODE: Chỉ xử lý video ĐÃ PHÂN TÍCH (processed_results), tối đa 2 file/lần khởi động ──
@@ -3075,7 +3231,11 @@ def thuc_hien_khoi_tao_he_thong_mot_lan():
 
     def _resume_and_watch_analysis_jobs():
         """Sau deploy HF: tiếp tục các video đang load dở; theo dõi job bị crash/OOM."""
-        time.sleep(20)
+        time.sleep(8)
+        try:
+            _tai_trang_thai_phan_tich_tu_hf()
+        except Exception as hf_restore_err:
+            print(f"[HF Resume] Loi tai progress tu Dataset: {hf_restore_err}")
         try:
             n = khoi_phuc_job_phan_tich_sau_deploy(cold_start=True)
             if n:
@@ -6428,6 +6588,8 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
             "last_audio_time": last_audio_time,
             "all_warnings": all_warnings,
         })
+        if ckpt_path and os.path.exists(ckpt_path):
+            _day_progress_checkpoint_len_hf(checkpoint_video_path or duong_dan_video, force=(phase == "pass1_done"))
 
     # Tự động phát hiện bên tay tập chủ đạo (LEFT hoặc RIGHT) để tránh nhảy bên gây lỗi trích xuất
     left_deviations = []
@@ -7133,6 +7295,57 @@ def read_progress(video_path):
             pass
     return data
 
+_last_progress_hf_push = {}
+
+
+def _day_progress_checkpoint_len_hf(video_path, p_file=None, force=False):
+    """Đẩy progress + checkpoint lên HF Dataset (giữ tiến độ sau deploy)."""
+    if not (HF_TOKEN and HF_DATASET_ID):
+        return
+    key = video_path or p_file or ""
+    if not key:
+        return
+    now = time.time()
+    if not force and (now - _last_progress_hf_push.get(key, 0)) < 40:
+        return
+    _last_progress_hf_push[key] = now
+    if p_file and os.path.exists(p_file):
+        push_file_to_hf_async(p_file)
+    if video_path:
+        ckpt = get_checkpoint_path(video_path, PROCESSED_DIR)
+        if ckpt and os.path.exists(ckpt) and os.path.getsize(ckpt) > 100:
+            push_file_to_hf_async(ckpt)
+
+
+def _tai_trang_thai_phan_tich_tu_hf():
+    """Tải progress/checkpoint đang chạy từ HF Dataset sau khi Space redeploy."""
+    if not (HF_TOKEN and HF_DATASET_ID):
+        return 0
+    restored = 0
+    try:
+        from huggingface_hub import list_repo_files
+        os.makedirs(PROCESSED_DIR, exist_ok=True)
+        files = list_repo_files(HF_DATASET_ID, repo_type="dataset", token=HF_TOKEN)
+        for rel in files:
+            rel_norm = rel.replace("\\", "/")
+            if not rel_norm.startswith("processed_results/"):
+                continue
+            base = os.path.basename(rel_norm)
+            dst = os.path.join(PROCESSED_DIR, base)
+            need = False
+            if base.startswith("progress_") and base.endswith(".json"):
+                need = not os.path.exists(dst) or os.path.getsize(dst) < 2
+            elif base.startswith("checkpoint_") and base.endswith(".pkl.gz"):
+                need = not os.path.exists(dst) or os.path.getsize(dst) < 100
+            if need and _hf_download_dataset_file(rel_norm, quiet=True, min_size=2):
+                restored += 1
+    except Exception as e:
+        print(f"[HF Resume] Loi tai trang thai phan tich: {e}")
+    if restored:
+        print(f"[HF Resume] Da tai {restored} file progress/checkpoint tu Dataset")
+    return restored
+
+
 def write_progress(video_path, status, username="", video_name="", progress=0.0, elapsed=0.0, start_time=None, error_msg="", result=None, status_msg="", job_meta=None):
     """Ghi thông tin tiến trình xuống đĩa"""
     p_file = get_progress_file(video_path)
@@ -7158,6 +7371,7 @@ def write_progress(video_path, status, username="", video_name="", progress=0.0,
     try:
         with open(p_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False)
+        _day_progress_checkpoint_len_hf(video_path, p_file)
     except Exception as e:
         print(f"Lỗi ghi progress file: {e}")
 
@@ -11649,17 +11863,9 @@ def hien_thi_ket_qua_cho_benh_nhan(target_username=None):
     else:
         my_history_vids = _lay_video_nghien_cuu_chinh_thuc(all_vids, evals)
 
-    ai_by_key = {}
-    for e in evals:
-        if e.get("doctor_username") == "AI_Researcher":
-            nk = _normalize_video_key(e.get("patient_username"), e.get("video_name"), e.get("exercise"))
-            ai_by_key[nk] = e
-    for v in my_history_vids:
-        nk = _normalize_video_key(v.get("username"), v.get("video_name"), v.get("exercise"))
-        v["time"] = _lay_thoi_gian_phan_tich_hien_thi(v, ai_by_key.get(nk))
     my_history_vids = sorted(
         my_history_vids,
-        key=lambda x: _parse_vn_datetime(x.get("time")) or datetime.min,
+        key=lambda x: _parse_vn_datetime(_lay_thoi_gian_upload_video(x)) or datetime.min,
         reverse=True,
     )
 
@@ -11730,18 +11936,17 @@ def hien_thi_tab_ket_qua_da_chon(my_history_vids, my_evals, has_ai_eval, user_ro
 
         if user_role == "Bệnh nhân":
             def _hist_label(v):
-                acc = v.get('accuracy', 0)
-                try:
-                    acc = float(acc)
-                except (TypeError, ValueError):
-                    acc = 0
+                ai_e = _lay_eval_moi_nhat_theo_bai_tap(
+                    my_evals, v.get('username'), v.get('exercise'), doctor_username="AI_Researcher"
+                )
+                acc = _lay_do_chinh_xac_hien_thi(v, ai_e)
                 verdict = "Đúng" if acc >= 80 else ("Gần đúng" if acc >= 60 else "Sai")
-                t_show = _format_vn_time(v.get('time'), default='N/A')
+                t_show = _lay_thoi_gian_upload_video(v)
                 return f"🕒 {t_show} - Bài: {v.get('exercise')} ({verdict}: {acc:.1f}%)"
             history_opts = [{"label": "--- Đang chờ kết quả mới (Ẩn lịch sử) ---", "val": None}] + [{"label": _hist_label(v), "val": v} for v in my_history_vids]
         else:
             history_opts = [{"label": "--- Chọn một phiên tập để xem ---", "val": None}] + [
-                {"label": f"🕒 {_format_vn_time(v.get('time'), default='N/A')} - {v.get('full_name')} - {v.get('exercise')}", "val": v}
+                {"label": f"🕒 {_lay_thoi_gian_upload_video(v)} - {v.get('full_name')} - {v.get('exercise')}", "val": v}
                 for v in my_history_vids
             ]
 
@@ -13697,70 +13902,9 @@ def hien_thi_dang_nhap_dang_ky():
     is_light = st.session_state.get('theme') == 'light'
     header_color = "#ffffff" if not is_light else "#1a1a2e"
     sub_color = "#ffffff" if not is_light else "#333333"
-    logo_src_login = get_school_logo_base64()
-    logo_ds_src_login = get_data_science_logo_base64()
-    
+    hien_thi_hang_logo_header()
     st.markdown(f"""
-    <style>
-    @keyframes logo-glow-pulse {{
-        0%, 100% {{ box-shadow: 0 0 18px rgba(0,198,255,0.45), 0 0 40px rgba(0,198,255,0.18); border-color: rgba(0,198,255,0.75); }}
-        50%       {{ box-shadow: 0 0 32px rgba(0,198,255,0.75), 0 0 65px rgba(0,198,255,0.30); border-color: rgba(0,230,255,0.95); }}
-    }}
-    @keyframes logo-glow-mint {{
-        0%, 100% {{ box-shadow: 0 0 18px rgba(0,212,170,0.45), 0 0 40px rgba(0,212,170,0.18); border-color: rgba(0,212,170,0.75); }}
-        50%       {{ box-shadow: 0 0 32px rgba(0,255,200,0.75), 0 0 65px rgba(0,255,200,0.30); border-color: rgba(0,255,200,0.95); }}
-    }}
-    .logo-container {{
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        gap: 28px;
-        margin: 0 auto 16px auto;
-        flex-wrap: nowrap;
-    }}
-    .logo-wrapper {{
-        width: 100px;
-        height: 100px;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-shrink: 0;
-    }}
-    .logo-wrapper img {{
-        width: 78px;
-        height: 78px;
-        object-fit: contain;
-        border-radius: 50%;
-    }}
-    @media (max-width: 480px) {{
-        .logo-container {{
-            gap: 12px;
-            margin-bottom: 12px;
-        }}
-        .logo-wrapper {{
-            width: 70px;
-            height: 70px;
-            border-width: 1.5px !important;
-        }}
-        .logo-wrapper img {{
-            width: 54px;
-            height: 54px;
-        }}
-    }}
-    </style>
     <div style="text-align: center; padding: 0.5rem 0 2rem 0;">
-        <div class="logo-container">
-            <div class="logo-wrapper" style="border:2.5px solid rgba(0,198,255,0.75);background:rgba(0,198,255,0.06);animation:logo-glow-pulse 3s ease-in-out infinite;">
-                <img src="{logo_src_login}" alt="Logo HUPH">
-            </div>
-            <div class="logo-wrapper" style="border:2.5px solid rgba(0,212,170,0.75);background:rgba(0,212,170,0.06);animation:logo-glow-mint 3s ease-in-out infinite;animation-delay:1s;">
-                <img src="{logo_ds_src_login}" alt="Logo Data Science">
-            </div>
-            <div class="logo-wrapper" style="border:2.5px solid rgba(0,198,255,0.75);background:rgba(0,198,255,0.06);animation:logo-glow-pulse 3s ease-in-out infinite;animation-delay:2s;">
-                <img src="https://benhandientu.moh.gov.vn/storage/uploads/2025/11/bvpntlogo-1763704605.jpg" alt="Logo BV PNT">
-            </div>
-        </div>
         <h1 class="app-title" style="color: {header_color}; font-family: 'Outfit', sans-serif !important; font-weight: 900; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); margin-bottom: 0.4rem; letter-spacing: -0.01em !important; word-spacing: normal !important; line-height: 1.15 !important;">GIÁM SÁT PHỤC HỒI CHỨC NĂNG BẰNG TRÍ TUỆ NHÂN TẠO 🏥</h1>
         <div style="width: 120px; height: 4px; background: linear-gradient(90deg, #00c6ff, #0072ff); margin: 0.4rem auto; border-radius: 2px;"></div>
         <p style="color: {sub_color}; font-family: 'Outfit', sans-serif !important; font-size: 1.3rem; font-style: italic; opacity: 0.9;">Hệ thống giám sát tập luyện Phục hồi chức năng thông minh cao cấp</p>
@@ -14464,13 +14608,22 @@ def hien_thi_danh_sach_video_fragment(user_role):
 
         # --- Tối ưu: xây dựng lookup dict O(1) thay vì O(n) linear scan trong vòng lặp ---
         ai_eval_lookup = {}
+        ai_eval_by_exercise = {}
         doc_eval_lookup = {}
+        doc_eval_by_exercise = {}
         for e in evals_db:
             key = _normalize_video_key(e.get('patient_username'), e.get('video_name'), e.get('exercise'))
+            pu, ex = e.get('patient_username'), e.get('exercise')
             if e.get('doctor_username') == "AI_Researcher":
                 ai_eval_lookup[key] = e
+                prev = ai_eval_by_exercise.get((pu, ex))
+                if not prev or (_parse_vn_datetime(e.get('time')) or datetime.min) >= (_parse_vn_datetime(prev.get('time')) or datetime.min):
+                    ai_eval_by_exercise[(pu, ex)] = e
             else:
                 doc_eval_lookup[key] = e
+                prev = doc_eval_by_exercise.get((pu, ex))
+                if not prev or (_parse_vn_datetime(e.get('time')) or datetime.min) >= (_parse_vn_datetime(prev.get('time')) or datetime.min):
+                    doc_eval_by_exercise[(pu, ex)] = e
 
         # --- BỘ LỌC DANH SÁCH VIDEO ---
         st.markdown("##### 🔍 BỘ LỌC DANH SÁCH")
@@ -14638,9 +14791,9 @@ def hien_thi_danh_sach_video_fragment(user_role):
                 
                 # Tra cứu O(1) từ dict đã build sẵn
                 ev_key = _normalize_video_key(v.get('username'), v.get('video_name'), v.get('exercise'))
-                v_has_ai = ev_key in ai_eval_lookup
-                doc_eval = doc_eval_lookup.get(ev_key)
-                ai_eval = ai_eval_lookup.get(ev_key)
+                ai_eval = ai_eval_lookup.get(ev_key) or ai_eval_by_exercise.get((v.get('username'), v.get('exercise')))
+                doc_eval = doc_eval_lookup.get(ev_key) or doc_eval_by_exercise.get((v.get('username'), v.get('exercise')))
+                v_has_ai = ai_eval is not None
 
                 display_status = v['status']
                 if doc_eval:
@@ -14649,8 +14802,8 @@ def hien_thi_danh_sach_video_fragment(user_role):
                 elif user_role == "Bác sĩ / KTV PHCN":
                     display_status = "Đang chờ bác sĩ đánh giá"
 
-                phan_tich_time = _lay_thoi_gian_phan_tich_hien_thi(v, ai_eval)
-                with st.expander(f"🎬 {v['full_name']} - {v['exercise']} (📤 {phan_tich_time}) - {display_status}"):
+                upload_time = _lay_thoi_gian_upload_video(v)
+                with st.expander(f"🎬 {v['full_name']} - {v['exercise']} (📤 {upload_time}) - {display_status}"):
                     # Tỷ lệ cột [1.3, 1.0] để nới rộng video hiển thị vừa vặn hơn
                     col_v1, col_v2 = st.columns([1.3, 1.0])
                     with col_v1:
@@ -14681,7 +14834,7 @@ def hien_thi_danh_sach_video_fragment(user_role):
                                 st.write("**Độ chính xác AI:** ⏳ Chờ NCV phân tích")
                             else:
                                 # Lấy accuracy mới nhất từ evals hoặc video và hiển thị chi tiết theo 3 giai đoạn
-                                ai_eval_record = ai_eval_lookup.get(ev_key)  # O(1) lookup
+                                ai_eval_record = ai_eval
                                 
                                 metrics_v = v.get('metrics', {}) if isinstance(v.get('metrics'), dict) else {}
                                 acc_g1 = metrics_v.get('metrics_g1', {}).get('do_chinh_xac') if isinstance(metrics_v.get('metrics_g1'), dict) else None
@@ -14704,7 +14857,7 @@ def hien_thi_danh_sach_video_fragment(user_role):
                                         unsafe_allow_html=True
                                     )
                                 else:
-                                    acc_val = ai_eval_record['ai_accuracy'] if ai_eval_record else v.get('accuracy', 0)
+                                    acc_val = _lay_do_chinh_xac_hien_thi(v, ai_eval_record)
                                     acc_text = f"{acc_val:.1f}%" if isinstance(acc_val, (int, float)) and acc_val > 0 else ("Chưa phân tích" if acc_val == 0 else f"{acc_val}%")
                                     st.write(f"**Độ chính xác AI:** {acc_text}")
                                 
@@ -15562,8 +15715,9 @@ def _render_main_tab_content(tab_titles, user_role):
 
 def main():
     # Kiểm tra trạng thái đăng nhập ngay đầu hàm main
-    if not st.session_state.logged_in:
-        # Nếu chưa đăng nhập, hiển thị trang đăng nhập toàn màn hình và dừng lại
+    if not st.session_state.get("logged_in") or not st.session_state.get("user_info"):
+        if st.session_state.get("logged_in") and not st.session_state.get("user_info"):
+            st.session_state.logged_in = False
         hien_thi_dang_nhap_dang_ky()
         return
 
@@ -15632,70 +15786,9 @@ def main():
     header_p_color = "#ffffff" if not is_light else "#333333"
     badge_bg = "rgba(0, 198, 255, 0.1)" if not is_light else "rgba(0, 114, 255, 0.08)"
     badge_border = "#00c6ff" if not is_light else "#0072ff"
-    logo_src_main = get_school_logo_base64()
-    logo_ds_src_main = get_data_science_logo_base64()
-    
+    hien_thi_hang_logo_header()
     st.markdown(f"""
-    <style>
-    @keyframes logo-glow-pulse {{
-        0%, 100% {{ box-shadow: 0 0 18px rgba(0,198,255,0.45), 0 0 40px rgba(0,198,255,0.18); border-color: rgba(0,198,255,0.75); }}
-        50%       {{ box-shadow: 0 0 32px rgba(0,198,255,0.75), 0 0 65px rgba(0,198,255,0.30); border-color: rgba(0,230,255,0.95); }}
-    }}
-    @keyframes logo-glow-mint {{
-        0%, 100% {{ box-shadow: 0 0 18px rgba(0,212,170,0.45), 0 0 40px rgba(0,212,170,0.18); border-color: rgba(0,212,170,0.75); }}
-        50%       {{ box-shadow: 0 0 32px rgba(0,255,200,0.75), 0 0 65px rgba(0,255,200,0.30); border-color: rgba(0,255,200,0.95); }}
-    }}
-    .logo-container {{
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        gap: 28px;
-        margin: 0 auto 12px auto;
-        flex-wrap: nowrap;
-    }}
-    .logo-wrapper {{
-        width: 100px;
-        height: 100px;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-shrink: 0;
-    }}
-    .logo-wrapper img {{
-        width: 78px;
-        height: 78px;
-        object-fit: contain;
-        border-radius: 50%;
-    }}
-    @media (max-width: 480px) {{
-        .logo-container {{
-            gap: 12px;
-            margin-bottom: 12px;
-        }}
-        .logo-wrapper {{
-            width: 70px;
-            height: 70px;
-            border-width: 1.5px !important;
-        }}
-        .logo-wrapper img {{
-            width: 54px;
-            height: 54px;
-        }}
-    }}
-    </style>
     <div class="main-header">
-        <div class="logo-container">
-            <div class="logo-wrapper" style="border:2.5px solid rgba(0,198,255,0.75);background:rgba(0,198,255,0.06);animation:logo-glow-pulse 3s ease-in-out infinite;">
-                <img src="{logo_src_main}" alt="Logo HUPH">
-            </div>
-            <div class="logo-wrapper" style="border:2.5px solid rgba(0,212,170,0.75);background:rgba(0,212,170,0.06);animation:logo-glow-mint 3s ease-in-out infinite;animation-delay:1s;">
-                <img src="{logo_ds_src_main}" alt="Logo Data Science">
-            </div>
-            <div class="logo-wrapper" style="border:2.5px solid rgba(0,198,255,0.75);background:rgba(0,198,255,0.06);animation:logo-glow-pulse 3s ease-in-out infinite;animation-delay:2s;">
-                <img src="https://benhandientu.moh.gov.vn/storage/uploads/2025/11/bvpntlogo-1763704605.jpg" alt="Logo BV PNT">
-            </div>
-        </div>
         <h1 class="app-title" style="color: {header_h1_color}; font-family: 'Outfit', sans-serif !important; font-weight: 900; margin-bottom: 0.4rem; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); letter-spacing: -0.01em !important; word-spacing: normal !important; line-height: 1.15 !important;">GIÁM SÁT PHỤC HỒI CHỨC NĂNG BẰNG TRÍ TUỆ NHÂN TẠO 🏥</h1>
         <div style="width: 120px; height: 4px; background: linear-gradient(90deg, #00c6ff, #0072ff); margin: 0.4rem auto; border-radius: 2px;"></div>
         <p style="color: {header_p_color}; font-family: 'Outfit', sans-serif !important; font-style: italic; font-size: 1.25rem;">Hệ thống giám sát tập luyện Phục hồi chức năng thông minh cao cấp</p>
