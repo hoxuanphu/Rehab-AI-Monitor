@@ -7751,9 +7751,8 @@ def _interval_theo_doi_jobs():
     return timedelta(seconds=2) if _co_job_dang_chay() else None
 
 
-@st.fragment(run_every=_interval_theo_doi_jobs)
-def hien_thi_jobs_dang_chay_fragment(key_suffix=""):
-    """Panel theo dõi các video đang trích xuất khung xương — dùng chung cho mọi thiết bị/phiên."""
+def _noi_dung_jobs_dang_chay(key_suffix=""):
+    """Nội dung panel theo dõi job phân tích (gọi từ fragment)."""
     jobs = liet_ke_jobs_dang_chay()
     done_jobs = liet_ke_jobs_vua_xong()
     if not jobs and not done_jobs:
@@ -7816,6 +7815,17 @@ def hien_thi_jobs_dang_chay_fragment(key_suffix=""):
                 st.session_state.view_old_analysis = False
                 st.rerun(scope="app")
     st.markdown("---")
+
+
+def hien_thi_jobs_dang_chay_fragment(key_suffix=""):
+    """Panel theo dõi các video đang trích xuất khung xương — dùng chung cho mọi thiết bị/phiên."""
+    # run_every phải là số/timedelta/None (không truyền callable) — đánh giá mỗi lần rerun script.
+    @st.fragment(run_every=_interval_theo_doi_jobs())
+    def _frag():
+        _noi_dung_jobs_dang_chay(key_suffix)
+
+    _frag()
+
 
 def hien_thi_tien_trinh_background(video_path):
     """Hiển thị giao diện tiến trình chạy nền"""
@@ -8170,7 +8180,7 @@ def _interval_khu_vuc_phan_tich(video_path):
 def hien_thi_khu_vuc_phan_tich_chuyen_sau_fragment(v, key_suffix):
     video_path = v["video_path"]
 
-    @st.fragment(run_every=lambda: _interval_khu_vuc_phan_tich(video_path))
+    @st.fragment(run_every=_interval_khu_vuc_phan_tich(video_path))
     def _render_khu_vuc():
         _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path)
 
