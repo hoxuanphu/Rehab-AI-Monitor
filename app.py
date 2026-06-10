@@ -329,6 +329,13 @@ DS_LOGO_URL = (
     "assets/logo_data_science_sm.png"
 )
 
+# Font hỗ trợ tiếng Việt đầy đủ (Outfit thiếu dấu trên một số trình duyệt/HF Space)
+APP_FONT_IMPORT = (
+    "https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800"
+    "&display=swap"
+)
+APP_FONT_FAMILY = "'Be Vietnam Pro', 'Segoe UI', system-ui, sans-serif"
+
 
 def _duong_dan_logo_asset(*names):
     """Tìm file logo trong assets/ (local hoặc HF Space)."""
@@ -370,7 +377,7 @@ def _html_header_chinh(title_color, subtitle_color, *, show_badge=False, is_ligh
     """HTML header liền khối — tránh st.markdown thoát HTML khi có dòng trống giữa các thẻ."""
     logos = _html_hang_logo_header()
     title_block = (
-        f'<h1 class="app-title" style="color: {title_color}; font-family: \'Outfit\', sans-serif !important; '
+        f'<h1 class="app-title" style="color: {title_color}; font-family: {APP_FONT_FAMILY} !important; '
         f'font-weight: 900; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); margin-bottom: 0.4rem; '
         f'letter-spacing: -0.01em !important; word-spacing: normal !important; line-height: 1.15 !important;">'
         f'GIÁM SÁT PHỤC HỒI CHỨC NĂNG BẰNG TRÍ TUỆ NHÂN TẠO 🏥</h1>'
@@ -379,7 +386,7 @@ def _html_header_chinh(title_color, subtitle_color, *, show_badge=False, is_ligh
     )
     subtitle_size = "1.25rem" if show_badge else "1.3rem"
     subtitle_block = (
-        f'<p style="color: {subtitle_color}; font-family: \'Outfit\', sans-serif !important; '
+        f'<p style="color: {subtitle_color}; font-family: {APP_FONT_FAMILY} !important; '
         f'font-size: {subtitle_size}; font-style: italic; opacity: 0.9;">'
         f'Hệ thống giám sát tập luyện Phục hồi chức năng thông minh cao cấp</p>'
     )
@@ -392,10 +399,10 @@ def _html_header_chinh(title_color, subtitle_color, *, show_badge=False, is_ligh
             f'<div class="research-badge" style="margin-top: 0.4rem;">'
             f'<span style="background: {badge_bg}; color: {title_color}; padding: 6px 18px; '
             f'border-radius: 20px; border: 1px solid {badge_border}; font-size: 0.9rem; font-weight: bold; '
-            f'font-family: \'Outfit\', sans-serif !important;">'
+            f'font-family: {APP_FONT_FAMILY} !important;">'
             f'📚 ĐỀ TÀI NGHIÊN CỨU KHOA HỌC CẤP TRƯỜNG - NĂM HỌC 2025-2026</span></div>'
             f'<p style="font-size: 0.9rem; color: {footer_color}; margin-top: 0.3rem; '
-            f'font-family: \'Outfit\', sans-serif !important;">'
+            f'font-family: {APP_FONT_FAMILY} !important;">'
             f'Bệnh viện Đa khoa Phạm Ngọc Thạch - Trường Đại học Y tế Công cộng</p>'
         )
     style_attr = f' style="{extra_style}"' if extra_style else ""
@@ -403,12 +410,13 @@ def _html_header_chinh(title_color, subtitle_color, *, show_badge=False, is_ligh
 
 
 def _hien_thi_header_chinh(title_color, subtitle_color, *, show_badge=False, is_light=False, extra_style=""):
-    st.html(_html_header_chinh(title_color, subtitle_color, show_badge=show_badge, is_light=is_light, extra_style=extra_style))
+    # st.markdown (không dùng st.html) để kế thừa font/CSS trang và không che nội dung tab bên dưới
+    st.markdown(_html_header_chinh(title_color, subtitle_color, show_badge=show_badge, is_light=is_light, extra_style=extra_style), unsafe_allow_html=True)
 
 
 def hien_thi_hang_logo_header():
     """Giữ tương thích — logo đã gộp vào main-header; gọi riêng chỉ khi cần hàng logo."""
-    st.html(_html_hang_logo_header())
+    st.markdown(_html_hang_logo_header(), unsafe_allow_html=True)
 
 
 def _chuan_hoa_ten_video(name):
@@ -3516,8 +3524,10 @@ st.markdown("""
 <style>
     /* === TẢI FONT BIỂU TƯỢNG TRỰC TIẾP TỪ GOOGLE === */
     @import url('https://fonts.googleapis.com/icon?family=Material+Icons');
-    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Montserrat:wght@400;500;600;700&display=swap');
-
+    @import url('https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap');
+    html, body, .stApp, [data-testid="stMarkdownContainer"] {
+        font-family: 'Be Vietnam Pro', 'Segoe UI', system-ui, sans-serif !important;
+    }
 
     /* Ngăn ngừa hiện tượng rung lắc trang (layout shifting) khi xuất hiện/mất thanh cuộn dọc */
     html {
@@ -10392,8 +10402,8 @@ metric_bg = "linear-gradient(135deg, #ffffff 0%, #f1f3f5 100%)" if is_light else
 
 st.markdown(f"""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Montserrat:wght@400;500;600;700&display=swap');
-    * {{ font-family: 'Outfit', 'Montserrat', sans-serif !important; }}
+    @import url('{APP_FONT_IMPORT}');
+    * {{ font-family: {APP_FONT_FAMILY} !important; }}
     .stApp {{ background: {app_bg}; }}
     
     @keyframes header-logo-glow {{
@@ -15281,7 +15291,6 @@ def _lay_meta_tab_bac_si(selected_video):
     return has_ai, has_output
 
 
-@st.fragment
 def _render_main_tab_content(tab_titles, user_role):
         if st.session_state.get('trigger_tab_switch'):
             if st.session_state.trigger_tab_switch in tab_titles:
@@ -16300,10 +16309,12 @@ def main():
     else: # Nghiên cứu viên
         tab_titles = ["🏠 TRANG CHỦ", "📊 KẾT QUẢ ĐÁNH GIÁ", "🔬 PHÂN TÍCH & TRÍCH XUẤT DỮ LIỆU", "📚 THÔNG TIN TỔNG HỢP", "👥 HỒ SƠ ĐỀ TÀI & ĐỘI NGŨ CHUYÊN GIA", "💬 PHẢN HỒI"]
         
-    # Khởi tạo hoặc khôi phục active_tab
+    # Khởi tạo hoặc khôi phục active_tab (đồng bộ widget sau reload — tránh trang trống)
     if 'active_tab' not in st.session_state or st.session_state.active_tab not in tab_titles:
         st.session_state.active_tab = tab_titles[0]
+    if st.session_state.get("active_tab_widget") not in tab_titles:
         st.session_state.pop("active_tab_widget", None)
+        st.session_state.active_tab = tab_titles[0]
 
     if user_role == "Nghiên cứu viên":
         hien_thi_jobs_dang_chay_fragment(key_suffix="main_top")
