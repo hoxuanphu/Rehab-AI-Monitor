@@ -2944,6 +2944,42 @@ HF_JSON_CONFIG_FILES = [
 ]
 
 
+def _json_dst_mtime(f_name):
+    dst = os.path.join(DB_DIR, f_name)
+    try:
+        return os.path.getmtime(dst) if os.path.exists(dst) and os.path.getsize(dst) > 2 else 0
+    except Exception:
+        return 0
+
+
+def _xoa_cache_sau_dong_bo_json(files):
+    """Chỉ xóa cache JSON khi file thực sự thay đổi sau đồng bộ HF."""
+    try:
+        _load_data_cached.clear()
+        if any(f == "video_list.json" for f in files):
+            _load_video_list_core.clear()
+            _video_nghien_cuu_cached.clear()
+        if "doctor_evaluations.json" in files:
+            _evals_dedup_cached.clear()
+    except Exception:
+        pass
+
+
+def dong_bo_hf_json_nhe_tab(files):
+    """Chỉ tải JSON từ HF khi file local chưa có — tránh chậm mỗi lần chuyển tab."""
+    if not (HF_TOKEN and HF_DATASET_ID) or not files:
+        return False
+    missing = [f for f in files if _json_dst_mtime(f) <= 0]
+    if not missing:
+        return False
+    before = {f: _json_dst_mtime(f) for f in missing}
+    dong_bo_json_cau_hinh_tu_hf(force_files=frozenset(missing))
+    after = {f: _json_dst_mtime(f) for f in missing}
+    if before != after:
+        _xoa_cache_sau_dong_bo_json(missing)
+    return True
+
+
 def dong_bo_json_cau_hinh_tu_hf(force_files=None):
     """Tải đồng bộ JSON cấu hình từ HF Dataset (video_list.json có thể < 5KB)."""
     force_set = set(force_files or [])
@@ -6348,28 +6384,27 @@ def hien_thi_tab_phan_tich_va_video_ncv():
     """Gộp tab Phân tích và Video cho Nghiên cứu viên"""
     st.markdown("## 🔬 PHÂN TÍCH CHUYÊN SÂU & DỮ LIỆU KHUNG XƯƠNG")
 
-    if HF_TOKEN and HF_DATASET_ID:
-        dong_bo_json_cau_hinh_tu_hf(force_files=frozenset({"video_list.json"}))
-        try:
-            _load_video_list_core.clear()
-            _video_nghien_cuu_cached.clear()
-        except Exception:
-            pass
+    dong_bo_hf_json_nhe_tab(["video_list.json"])
 
     v_cur = st.session_state.get("current_eval_video") or _tim_video_phan_tich_moi_nhat()
     if v_cur:
         st.session_state.current_eval_video = v_cur
-        if (
+        v_key = _slot_nghien_cuu_key(v_cur.get("username"), v_cur.get("exercise"))
+        da_nap = st.session_state.get("_ncv_analysis_loaded_key") == v_key
+        can_nap = (
             not st.session_state.get("reanalyze_triggered")
+            and not da_nap
             and (
                 not st.session_state.get("has_data")
                 or st.session_state.get("angle_df") is None
             )
-        ):
+        )
+        if can_nap:
             with st.spinner(
                 f"📥 Đang nạp kết quả gần nhất: {v_cur.get('full_name')} — {v_cur.get('exercise')}..."
             ):
-                tu_dong_nap_ket_qua_phan_tich_gan_nhat(v_cur, force=True)
+                if tu_dong_nap_ket_qua_phan_tich_gan_nhat(v_cur, force=False):
+                    st.session_state["_ncv_analysis_loaded_key"] = v_key
     if v_cur and v_cur.get("username"):
         hien_thi_ket_qua_gan_nhat_va_lich_su(
             v_cur.get("username"),
@@ -8453,6 +8488,7 @@ def khoi_dong_phan_tich_lai_video(v, auto_start=True):
     st.session_state.angle_df = None
     st.session_state.processed_video_path = None
     st.session_state.current_df_csv_path = None
+    st.session_state.pop("_ncv_analysis_loaded_key", None)
 
     if not auto_start or not video_path:
         return True
@@ -8712,6 +8748,7 @@ def _noi_dung_jobs_dang_chay(key_suffix=""):
                 st.session_state.current_eval_video = vid
                 st.session_state.reanalyze_triggered = True
                 st.session_state.view_old_analysis = False
+                st.session_state.pop("_ncv_analysis_loaded_key", None)
                 st.rerun(scope="app")
     st.markdown("---")
 
@@ -9108,6 +9145,7 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
             st.session_state.reanalyze_triggered = True
             st.session_state.view_old_analysis = False
             st.session_state.has_data = False
+            st.session_state.pop("_ncv_analysis_loaded_key", None)
             ncv_gd = st.session_state.get('ncv_giai_doan', PHASE_UI_LABELS["g2"])
             bat_dau_phan_tich_background(
                 video_path=video_path,
@@ -12803,14 +12841,9 @@ def hien_thi_form_danh_gia_bac_si():
 def hien_thi_ket_qua_cho_benh_nhan(target_username=None):
     st.markdown("## 📊 KẾT QUẢ ĐÁNH GIÁ TỔNG HỢP")
 
-    if HF_TOKEN and HF_DATASET_ID:
-        dong_bo_json_cau_hinh_tu_hf(force_files=frozenset({"doctor_evaluations.json"}))
-        try:
-            _evals_dedup_cached.clear()
-        except Exception:
-            pass
+    dong_bo_hf_json_nhe_tab(["doctor_evaluations.json"])
 
-    evals = _dedup_evaluations(load_data(EVALUATIONS_FILE))
+    evals = _evals_dedup_cached(_mtimes_video_eval()[1])
     user_role = st.session_state.user_info.get('role')
     
     if target_username:
@@ -15903,6 +15936,7 @@ def _lay_meta_tab_bac_si(selected_video):
     return has_ai, has_output
 
 
+@st.fragment
 def _render_main_tab_content(tab_titles, user_role):
         _tab_target = st.session_state.pop('trigger_tab_switch', None)
         if _tab_target and _tab_target in tab_titles:
@@ -16917,17 +16951,13 @@ def main():
         st.markdown("**🏥 Trường Đại học Y tế Công cộng**")
         st.markdown("**👩‍⚕️ Chủ nhiệm đề tài:** Đinh Lê Quỳnh Phương")
     
-    # Định nghĩa các tab dựa trên vai trò
-    # Tải dữ liệu NCKH để kiểm tra điều kiện hiển thị tab
-    res_data_list = load_data(RESEARCH_DATA_FILE)
-    if not isinstance(res_data_list, list): res_data_list = []
-
-    # Tự động chọn video đầu tiên nếu chưa chọn để tăng tốc độ hiển thị kết quả lập tức cho Bác sĩ & NCV
+    # Tự động chọn video đầu tiên một lần — tránh load lại danh sách mỗi lần chuyển tab
     if user_role in ["Bác sĩ / KTV PHCN", "Nghiên cứu viên"]:
-        if not st.session_state.get('current_eval_video'):
+        if not st.session_state.get('current_eval_video') and not st.session_state.get('_default_video_picked'):
             all_vids = load_danh_sach_video_nghien_cuu()
             if all_vids:
                 st.session_state.current_eval_video = all_vids[0]
+            st.session_state._default_video_picked = True
 
     if user_role == "Quản trị viên":
         tab_titles = ["🏠 TRANG CHỦ", "🛠️ QUẢN TRỊ VIÊN", "📚 THÔNG TIN TỔNG HỢP", "👥 HỒ SƠ ĐỀ TÀI & ĐỘI NGŨ CHUYÊN GIA", "💬 PHẢN HỒI"]
