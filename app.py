@@ -1740,23 +1740,48 @@ def _danh_sach_video_phan_tich_sap_xep():
     return analyzed
 
 
+def _slot_video_phan_tich(v):
+    if not v:
+        return None
+    return _slot_nghien_cuu_key(v.get("username"), v.get("exercise"))
+
+
+def _session_phan_tich_khop_video(v):
+    """Session đang nạp đúng BN+bài tập — tránh hiển thị biểu đồ/frames của người khác."""
+    if not v:
+        return False
+    if st.session_state.get("_ncv_analysis_loaded_key") != _slot_video_phan_tich(v):
+        return False
+    return bool(
+        st.session_state.get("has_data")
+        and st.session_state.get("stats")
+        and st.session_state.get("angle_df") is not None
+    )
+
+
+def _xoa_session_phan_tich():
+    """Xóa cache phân tích trong session khi chuyển sang video/BN khác."""
+    for k in (
+        "has_data", "stats", "angle_df", "processed_video_path",
+        "current_df_csv_path", "all_frames_data_path", "frames_zip",
+        "_ncv_analysis_loaded_key", "all_frames_paths", "all_frames_data",
+        "video_ready", "frames_ready", "frames_loaded", "temp_frames_dir",
+    ):
+        st.session_state.pop(k, None)
+    _xoa_cache_hien_thi_ket_qua()
+
+
+def _gan_khoa_session_phan_tich(v):
+    key = _slot_video_phan_tich(v)
+    if key:
+        st.session_state["_ncv_analysis_loaded_key"] = key
+
+
 def tu_dong_nap_ket_qua_phan_tich_gan_nhat(v=None, force=False):
     """Tự động nạp kết quả phân tích gần nhất: metrics, CSV/JSON biểu đồ, video, frames."""
     cur = st.session_state.get("current_eval_video") or {}
-    if (
-        not force
-        and st.session_state.get("has_data")
-        and st.session_state.get("stats")
-        and st.session_state.get("angle_df") is not None
-        and (
-            not v
-            or _slot_nghien_cuu_key(cur.get("username"), cur.get("exercise"))
-            == _slot_nghien_cuu_key(
-                (_lam_moi_ban_ghi_video_tu_db(v) or v).get("username"),
-                (_lam_moi_ban_ghi_video_tu_db(v) or v).get("exercise"),
-            )
-        )
-    ):
+    target = (_lam_moi_ban_ghi_video_tu_db(v) or v) if v else cur
+    if not force and _session_phan_tich_khop_video(target):
         return True
 
     preferred = v or cur or None
@@ -1771,7 +1796,10 @@ def tu_dong_nap_ket_qua_phan_tich_gan_nhat(v=None, force=False):
         st.session_state.angle_df = pre_df
         if pre_src:
             st.session_state.current_df_csv_path = pre_src
-    return bool(ok and st.session_state.get("stats") and st.session_state.get("angle_df") is not None)
+    if ok and st.session_state.get("stats") and st.session_state.get("angle_df") is not None:
+        _gan_khoa_session_phan_tich(found_v)
+        return True
+    return False
 
 
 def _xoa_cache_hien_thi_ket_qua():
@@ -1834,6 +1862,7 @@ def khoi_phuc_ket_qua_cu(v, tai_csv=True, tai_day_du=False):
             ensure_local_file(fz)
         if proc:
             check_and_extract_frames_zip(proc)
+    _gan_khoa_session_phan_tich(v)
     return True
 
 
@@ -6389,22 +6418,19 @@ def hien_thi_tab_phan_tich_va_video_ncv():
     v_cur = st.session_state.get("current_eval_video") or _tim_video_phan_tich_moi_nhat()
     if v_cur:
         st.session_state.current_eval_video = v_cur
-        v_key = _slot_nghien_cuu_key(v_cur.get("username"), v_cur.get("exercise"))
-        da_nap = st.session_state.get("_ncv_analysis_loaded_key") == v_key
-        can_nap = (
+        if (
             not st.session_state.get("reanalyze_triggered")
-            and not da_nap
-            and (
-                not st.session_state.get("has_data")
-                or st.session_state.get("angle_df") is None
-            )
-        )
-        if can_nap:
+            and not _session_phan_tich_khop_video(v_cur)
+        ):
             with st.spinner(
-                f"📥 Đang nạp kết quả gần nhất: {v_cur.get('full_name')} — {v_cur.get('exercise')}..."
+                f"📥 Đang nạp kết quả: {v_cur.get('full_name')} — {v_cur.get('exercise')}..."
             ):
-                if tu_dong_nap_ket_qua_phan_tich_gan_nhat(v_cur, force=False):
-                    st.session_state["_ncv_analysis_loaded_key"] = v_key
+                tu_dong_nap_ket_qua_phan_tich_gan_nhat(v_cur, force=False)
+    if v_cur:
+        st.info(
+            f"📌 Đang xem phân tích: **{v_cur.get('full_name', 'N/A')}** — "
+            f"**{v_cur.get('exercise', 'N/A')}**"
+        )
     if v_cur and v_cur.get("username"):
         hien_thi_ket_qua_gan_nhat_va_lich_su(
             v_cur.get("username"),
@@ -11513,25 +11539,17 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
                     analyzed = [v for v in video_list if v.get("metrics")]
                     st.session_state.current_eval_video = (analyzed or video_list)[-1]
 
-        # TỰ ĐỘNG LOAD DỮ LIỆU NẾU ĐANG CHỌN VIDEO TỪ DANH SÁCH
-        if not st.session_state.get('has_data') or not st.session_state.get('stats'):
-            if st.session_state.get('current_eval_video'):
-                v = st.session_state.current_eval_video
-                
-                # Nếu video ĐÃ CÓ metrics
-                if 'metrics' in v and v['metrics']:
-                    if not st.session_state.get('reanalyze_triggered', False):
-                        need_load = (
-                            not st.session_state.get('has_data')
-                            or not st.session_state.get('stats')
-                            or st.session_state.get('angle_df') is None
-                        )
-                        if need_load:
-                            with st.spinner(
-                                f"📥 Đang tải kết quả gần nhất: {v.get('full_name')} — {v.get('exercise')}..."
-                            ):
-                                if tu_dong_nap_ket_qua_phan_tich_gan_nhat(v, force=True):
-                                    st.rerun(scope="fragment")
+        # TỰ ĐỘNG LOAD DỮ LIỆU — đúng BN/bài tập đang chọn (không dùng cache video khác)
+        if st.session_state.get('current_eval_video'):
+            v = st.session_state.current_eval_video
+            if 'metrics' in v and v['metrics']:
+                if not st.session_state.get('reanalyze_triggered', False):
+                    if not _session_phan_tich_khop_video(v):
+                        with st.spinner(
+                            f"📥 Đang tải kết quả: {v.get('full_name')} — {v.get('exercise')}..."
+                        ):
+                            if tu_dong_nap_ket_qua_phan_tich_gan_nhat(v, force=False):
+                                st.rerun(scope="fragment")
 
                 
                 # Nếu người dùng chủ động nhấn chạy lại phân tích -> Hiện tùy chọn quay lại kết quả cũ
@@ -13933,12 +13951,11 @@ def hien_thi_frames_day_du(key_suffix=""):
     is_gay_ex = any(kw in str(exercise_name).lower() or kw in str(st.session_state.get('current_eval_video', {}).get('exercise', '')).lower() for kw in ["gậy", "gay", "pulley", "stick"])
 
     v_frames = st.session_state.get("current_eval_video") or _tim_video_phan_tich_moi_nhat()
-    if v_frames and (
-        not st.session_state.get("all_frames_data_path")
-        or st.session_state.get("angle_df") is None
-    ):
-        with st.spinner("📥 Đang tải video và khung xương gần nhất..."):
-            tu_dong_nap_ket_qua_phan_tich_gan_nhat(v_frames, force=True)
+    if v_frames and not _session_phan_tich_khop_video(v_frames):
+        with st.spinner(
+            f"📥 Đang tải khung xương: {v_frames.get('full_name')} — {v_frames.get('exercise')}..."
+        ):
+            tu_dong_nap_ket_qua_phan_tich_gan_nhat(v_frames, force=False)
 
     all_frames_data_path = get_local_frame_path(st.session_state.get('all_frames_data_path'))
     if not all_frames_data_path:
@@ -15833,14 +15850,13 @@ def hien_thi_danh_sach_video_fragment(user_role):
                             eval_btn_label = "📝 Đánh giá của chuyên môn PHCN" if user_role == "Bác sĩ / KTV PHCN" else "📝 Phân tích và trích xuất khung xương AI"
                             if st.button(eval_btn_label, key=f"eval_btn_{idx}", width="stretch"):
                                 st.session_state.current_eval_video = v
-                                st.session_state.has_data = False
-                                st.session_state.stats = None
+                                _xoa_session_phan_tich()
+                                st.session_state.reanalyze_triggered = False
                                 vp = v.get("video_path")
                                 if user_role == "Nghiên cứu viên":
                                     # KHÔNG tự khởi chạy phân tích mới — chỉ tải kết quả GẦN NHẤT đã lưu
                                     # (biểu đồ + video khung xương + ảnh frame) rồi chuyển tab.
                                     # Phân tích mới chỉ chạy khi người dùng chủ động bấm nút trong tab Phân tích.
-                                    st.session_state.reanalyze_triggered = False
                                     if vp and video_dang_phan_tich(vp):
                                         st.session_state.view_old_analysis = False
                                         st.toast("🔄 Video đang phân tích — mở tab theo dõi tiến độ...", icon="⏳")
