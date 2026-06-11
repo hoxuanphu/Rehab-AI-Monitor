@@ -1638,6 +1638,7 @@ def hien_thi_nut_tai_lai_va_phan_tich_moi(v_re, key_suffix=""):
                 st.success(f"✅ Đã cập nhật: {', '.join(chi_tiet) if chi_tiet else 'dữ liệu phân tích'}!")
             else:
                 st.error("❌ Không tìm thấy kết quả cũ cho video này.")
+                thong_bao_loi_tai_hf()
             st.rerun(scope="app")
     with c2:
         if st.button(
@@ -2250,6 +2251,94 @@ HF_TOKEN = os.environ.get("HF_TOKEN", "").strip() or None
 HF_SPACE_ID = (os.environ.get("HF_SPACE_ID") or os.environ.get("SPACE_ID", "")).strip() or None
 HF_DATASET_ID = (os.environ.get("HF_DATASET_ID", "").strip() or None) or (f"{HF_SPACE_ID}-data" if HF_SPACE_ID else "quynhphuong1209/Rehab-AI-Monitor-2026-data")
 
+_hf_dataset_access_cache = {"ok": None, "msg": None, "fp": None}
+_hf_last_download_error = None
+
+
+def _hf_min_size_for_path(path):
+    """Ngưỡng kích thước tối thiểu theo loại file — CSV/JSON nhỏ vẫn hợp lệ."""
+    if not path:
+        return 5 * 1024
+    low = str(path).lower()
+    if low.endswith(".csv"):
+        return 80
+    if low.endswith(".json"):
+        return 2
+    return 5 * 1024
+
+
+def _hf_token_fingerprint():
+    return hashlib.md5(f"{HF_TOKEN or ''}:{HF_DATASET_ID or ''}".encode()).hexdigest()[:12]
+
+
+def _lam_sach_cache_khi_doi_hf_token():
+    """Xóa cờ auto-restore khi HF_TOKEN / HF_DATASET_ID thay đổi để cho phép tải lại dữ liệu cũ."""
+    fp = _hf_token_fingerprint()
+    if st.session_state.get("_hf_fp") == fp:
+        return
+    for k in list(st.session_state.keys()):
+        if k.startswith("_auto_restored_"):
+            st.session_state.pop(k, None)
+    st.session_state["_hf_fp"] = fp
+    global _hf_dataset_access_cache
+    _hf_dataset_access_cache = {"ok": None, "msg": None, "fp": None}
+
+
+def kiem_tra_quyen_hf_dataset(force=False):
+    """Kiểm tra token hiện tại có đọc được Dataset lưu trữ dữ liệu cũ hay không."""
+    global _hf_dataset_access_cache
+    fp = _hf_token_fingerprint()
+    if (
+        not force
+        and _hf_dataset_access_cache.get("fp") == fp
+        and _hf_dataset_access_cache.get("ok") is not None
+    ):
+        return _hf_dataset_access_cache["ok"], _hf_dataset_access_cache.get("msg")
+
+    if not HF_TOKEN:
+        msg = "Chưa cấu hình HF_TOKEN trong Space Secrets."
+        _hf_dataset_access_cache = {"ok": False, "msg": msg, "fp": fp}
+        return False, msg
+    if not HF_DATASET_ID:
+        msg = "Chưa cấu hình HF_DATASET_ID."
+        _hf_dataset_access_cache = {"ok": False, "msg": msg, "fp": fp}
+        return False, msg
+
+    try:
+        from huggingface_hub import HfApi
+        api = HfApi(token=HF_TOKEN)
+        api.repo_info(repo_id=HF_DATASET_ID, repo_type="dataset")
+        _hf_dataset_access_cache = {"ok": True, "msg": None, "fp": fp}
+        return True, None
+    except Exception as e:
+        err = str(e).lower()
+        if any(x in err for x in ("401", "403", "unauthorized", "forbidden", "permission", "credentials")):
+            msg = (
+                f"Token không có quyền đọc Dataset `{HF_DATASET_ID}`. "
+                "Hãy dùng token Write của tài khoản sở hữu Dataset (quynhphuong1209), "
+                "hoặc thêm tài khoản mới làm collaborator."
+            )
+        elif "404" in err or "not found" in err:
+            msg = (
+                f"Không tìm thấy Dataset `{HF_DATASET_ID}`. "
+                "Kiểm tra biến HF_DATASET_ID — dữ liệu cũ nằm tại "
+                "`quynhphuong1209/Rehab-AI-Monitor-2026-data`."
+            )
+        else:
+            msg = f"Không kết nối được Dataset: {e}"
+        _hf_dataset_access_cache = {"ok": False, "msg": msg, "fp": fp}
+        return False, msg
+
+
+def thong_bao_loi_tai_hf():
+    """Thông báo lỗi thân thiện khi không tải được file từ Hugging Face Dataset."""
+    ok, msg = kiem_tra_quyen_hf_dataset()
+    if not ok and msg:
+        st.error(f"🔐 **Lỗi đồng bộ Cloud:** {msg}")
+        return
+    if _hf_last_download_error:
+        st.warning(f"☁️ **Không tải được file phân tích từ Cloud:** {_hf_last_download_error}")
+
 def khoi_tao_dong_bo_hf():
     """Tải tất cả dữ liệu từ Hugging Face Dataset về đĩa khi khởi động (chạy trong background thread - an toàn với hf-mount)"""
     if not HF_TOKEN or not HF_DATASET_ID:
@@ -2337,10 +2426,14 @@ def push_file_to_hf_async(local_path):
 
     threading.Thread(target=_run_upload, daemon=True).start()
 
-def _hf_download_dataset_file(rel_path, quiet=False, min_size=5 * 1024):
+def _hf_download_dataset_file(rel_path, quiet=False, min_size=None):
     """Tải một file từ HF Dataset về DATA_DIR. Trả về đường dẫn local nếu thành công."""
+    global _hf_last_download_error
     if not (HF_TOKEN and HF_DATASET_ID and rel_path):
+        _hf_last_download_error = "Chưa cấu hình HF_TOKEN hoặc HF_DATASET_ID."
         return None
+    if min_size is None:
+        min_size = _hf_min_size_for_path(rel_path)
     try:
         from huggingface_hub import hf_hub_download
         local_fp = hf_hub_download(
@@ -2351,17 +2444,28 @@ def _hf_download_dataset_file(rel_path, quiet=False, min_size=5 * 1024):
             local_dir=DATA_DIR,
         )
         if local_fp and os.path.exists(local_fp) and os.path.getsize(local_fp) >= min_size:
+            _hf_last_download_error = None
             return local_fp
         target = os.path.normpath(os.path.join(DATA_DIR, rel_path.replace("\\", "/")))
         if os.path.exists(target) and os.path.getsize(target) >= min_size:
+            _hf_last_download_error = None
             return target
+        _hf_last_download_error = f"File `{rel_path}` tải về nhưng kích thước không hợp lệ."
     except Exception as e:
         err = str(e).lower()
         if "404" in err or "not found" in err or "entry not found" in err:
+            _hf_last_download_error = f"Chưa có trên Dataset: `{rel_path}`"
             if not quiet:
                 print(f"[HF Sync] Chua co tren Dataset: {rel_path}")
-        elif not quiet:
-            print(f"[HF Sync] Khong tai duoc {rel_path}: {e}")
+        elif any(x in err for x in ("401", "403", "unauthorized", "forbidden", "permission", "credentials")):
+            _, msg = kiem_tra_quyen_hf_dataset(force=True)
+            _hf_last_download_error = msg or str(e)
+            if not quiet:
+                print(f"[HF Sync] Token khong du quyen tai {rel_path}: {e}")
+        else:
+            _hf_last_download_error = str(e)
+            if not quiet:
+                print(f"[HF Sync] Khong tai duoc {rel_path}: {e}")
     return None
 
 
@@ -2382,14 +2486,17 @@ def ensure_local_file(file_path, quiet=False, try_fallbacks=True):
                 pass
 
     if not (HF_TOKEN and HF_DATASET_ID):
+        global _hf_last_download_error
+        _hf_last_download_error = "Chưa cấu hình HF_TOKEN — không thể tải dữ liệu cũ từ Cloud."
         return False
 
     for fp in paths:
         rel_path = get_clean_rel_path(fp)
-        got = _hf_download_dataset_file(rel_path, quiet=True)
-        if got and is_local_file_ready(got):
+        min_sz = _hf_min_size_for_path(rel_path)
+        got = _hf_download_dataset_file(rel_path, quiet=True, min_size=min_sz)
+        if got and is_local_file_ready(got, min_size=min_sz):
             return True
-        if is_local_file_ready(fp):
+        if is_local_file_ready(fp, min_size=min_sz):
             return True
 
     if not quiet:
@@ -3612,6 +3719,8 @@ if 'processed_video_path' not in st.session_state:
     st.session_state.processed_video_path = None
 if 'theme' not in st.session_state:
     st.session_state.theme = 'dark'
+
+_lam_sach_cache_khi_doi_hf_token()
 
 # KIỂM TRA ĐĂNG NHẬP GOOGLE (Hỗ trợ Streamlit Cloud Identity)
 if not st.session_state.get('logged_in'):
@@ -11133,7 +11242,12 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
                     bt = _bt_new
         if tk is None or df is None:
             st.warning("⚠️ Dữ liệu phân tích chi tiết không khả dụng hoặc chưa được tải.")
-            st.info("💡 Vui lòng đảm bảo Nghiên cứu viên đã hoàn tất việc trích xuất khung xương cho video này.")
+            thong_bao_loi_tai_hf()
+            st.info(
+                "💡 Nếu đã phân tích trước đó: bấm **Tải lại kết quả đã lưu**. "
+                "Sau khi đổi **HF_TOKEN**, cần token Write của tài khoản Dataset và "
+                "`HF_DATASET_ID=quynhphuong1209/Rehab-AI-Monitor-2026-data`."
+            )
             if user_role == "Nghiên cứu viên":
                 st.markdown("<br>", unsafe_allow_html=True)
                 hien_thi_nut_tai_lai_va_phan_tich_moi(v_re, key_suffix=f"missing_{key_suffix}")
@@ -16402,11 +16516,19 @@ def main():
         
         # 3. Trạng thái đồng bộ Hugging Face Dataset (Đặc biệt quan trọng trên Space)
         if HF_SPACE_ID or os.path.exists("/data"):
-            if HF_TOKEN:
-                st.markdown("""
+            hf_ok, hf_msg = kiem_tra_quyen_hf_dataset()
+            if hf_ok:
+                st.markdown(f"""
                 <div style="background: rgba(46, 204, 113, 0.15); padding: 10px; border-radius: 8px; border: 1px solid rgba(46, 204, 113, 0.4); text-align: center; margin-top: 5px; margin-bottom: 15px;">
                     <span style="color: #2ecc71; font-weight: bold; font-size: 0.85rem;">💚 Cloud Sync: ĐÃ KÍCH HOẠT</span>
-                    <p style="color: #aaa; font-size: 0.75rem; margin: 5px 0 0 0;">Dữ liệu bệnh nhân được lưu trữ an toàn lâu dài.</p>
+                    <p style="color: #aaa; font-size: 0.75rem; margin: 5px 0 0 0;">Dataset: <b>{HF_DATASET_ID}</b></p>
+                </div>
+                """, unsafe_allow_html=True)
+            elif HF_TOKEN:
+                st.markdown(f"""
+                <div style="background: rgba(241, 196, 15, 0.15); padding: 12px; border-radius: 8px; border: 1px solid rgba(241, 196, 15, 0.4); text-align: center; margin-top: 5px; margin-bottom: 15px;">
+                    <span style="color: #f1c40f; font-weight: bold; font-size: 0.85rem;">⚠️ Cloud Sync: TOKEN LỖI</span>
+                    <p style="color: #ddd; font-size: 0.75rem; margin: 5px 0 0 0;">{hf_msg or 'Token không đọc được Dataset.'}</p>
                 </div>
                 """, unsafe_allow_html=True)
             else:
