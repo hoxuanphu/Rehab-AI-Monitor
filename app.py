@@ -3288,8 +3288,8 @@ def nap_ket_qua_ai_vao_session(ai_eval):
     return False
 
 
-def hien_thi_ket_qua_gan_nhat_va_lich_su(username, video_name=None, key_suffix=""):
-    """Hiển thị kết quả gần nhất + dropdown xem lại các lần phân tích trước."""
+def hien_thi_ket_qua_gan_nhat_va_lich_su(username, video_name=None, key_suffix="", chi_nhan_xet=False):
+    """Hiển thị kết quả gần nhất. Nếu chi_nhan_xet=True chỉ tóm tắt nhận xét, không tải phân tích."""
     evals = _dedup_evaluations(load_data(EVALUATIONS_FILE))
     doc_history = [
         e for e in evals
@@ -3327,11 +3327,35 @@ def hien_thi_ket_qua_gan_nhat_va_lich_su(username, video_name=None, key_suffix="
         return
 
     latest = ai_history[0]
-    acc = latest.get("ai_accuracy", 0)
     verdict = latest.get("doctor_result", "N/A")
     t_latest = _format_vn_time(latest.get("time"), default="N/A")
     ex_latest = latest.get("exercise", "N/A")
+    ai_comment = (latest.get("comments") or "")[:200]
+    if len(latest.get("comments") or "") > 200:
+        ai_comment += "..."
 
+    if chi_nhan_xet:
+        st.markdown(f"""
+        <div style="background: linear-gradient(135deg, rgba(0,198,255,0.12) 0%, rgba(0,114,255,0.08) 100%);
+            border: 1px solid rgba(0,198,255,0.35); border-left: 5px solid #00c6ff; border-radius: 14px;
+            padding: 18px 20px; margin-bottom: 16px;">
+            <p style="margin:0 0 6px 0; font-size:0.8rem; color:#888; text-transform:uppercase; letter-spacing:1px;">
+                🤖 Nhận xét NCV / AI gần nhất
+            </p>
+            <p style="margin:0; font-size:1.05rem; color:#fff; font-weight:600;">
+                🕒 {t_latest} — {ex_latest}
+            </p>
+            <p style="margin:6px 0 0; font-size:0.95rem; color:#00c6ff;">
+                Kết quả: <b>{verdict}</b>
+            </p>
+            <p style="margin:6px 0 0; font-size:0.88rem; color:#ccc;">
+                {ai_comment}
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+        return
+
+    acc = latest.get("ai_accuracy", 0)
     st.markdown(f"""
     <div style="background: linear-gradient(135deg, rgba(0,198,255,0.12) 0%, rgba(0,114,255,0.08) 100%);
         border: 1px solid rgba(0,198,255,0.35); border-left: 5px solid #00c6ff; border-radius: 14px;
@@ -12800,8 +12824,6 @@ def hien_thi_ket_qua_cho_benh_nhan(target_username=None):
             my_evals = evals
             username = None 
     
-    has_ai_eval = any(e.get('doctor_username') == "AI_Researcher" for e in my_evals)
-    
     # 1. CHỈ HIỂN THỊ VIDEO GỐC BN ĐÃ CÓ NHẬN XÉT BÁC SĨ/KTV (8 video nghiên cứu)
     all_vids = load_danh_sach_video_nghien_cuu()
     if user_role == "Bệnh nhân":
@@ -12851,11 +12873,11 @@ def hien_thi_ket_qua_cho_benh_nhan(target_username=None):
             if matched:
                 st.session_state.current_eval_video = matched
 
-    hien_thi_tab_ket_qua_da_chon(my_history_vids, my_evals, has_ai_eval, user_role, is_fresh_session)
+    hien_thi_tab_ket_qua_da_chon(my_history_vids, my_evals, user_role, is_fresh_session)
 
 
 @st.fragment
-def hien_thi_tab_ket_qua_da_chon(my_history_vids, my_evals, has_ai_eval, user_role, is_fresh_session=False):
+def hien_thi_tab_ket_qua_da_chon(my_history_vids, my_evals, user_role, is_fresh_session=False):
     """Fragment: chọn phiên tập + tab kết quả — chỉ reload vùng này (nhanh cho bệnh nhân)."""
     selected_v = None
 
@@ -12868,6 +12890,7 @@ def hien_thi_tab_ket_qua_da_chon(my_history_vids, my_evals, has_ai_eval, user_ro
         hien_thi_ket_qua_gan_nhat_va_lich_su(
             p_username_hist,
             key_suffix=f"pat_hist_{user_role}",
+            chi_nhan_xet=True,
         )
 
     if my_history_vids:
@@ -12896,10 +12919,16 @@ def hien_thi_tab_ket_qua_da_chon(my_history_vids, my_evals, has_ai_eval, user_ro
                 ai_e = _lay_eval_moi_nhat_theo_bai_tap(
                     my_evals, v.get('username'), v.get('exercise'), doctor_username="AI_Researcher"
                 )
-                acc = _lay_do_chinh_xac_hien_thi(v, ai_e)
-                verdict = "Đúng" if acc >= 80 else ("Gần đúng" if acc >= 60 else "Sai")
+                doc_e = _lay_eval_moi_nhat_theo_bai_tap(
+                    my_evals, v.get('username'), v.get('exercise')
+                )
                 t_show = _lay_thoi_gian_phan_tich_on_dinh(v, ai_e) or "Chưa phân tích"
-                return f"🕒 {t_show} - Bài: {v.get('exercise')} ({verdict}: {acc:.1f}%)"
+                parts = [f"🕒 {t_show} - Bài: {v.get('exercise')}"]
+                if ai_e and ai_e.get("doctor_result"):
+                    parts.append(f"AI: {ai_e.get('doctor_result')}")
+                if doc_e and doc_e.get("doctor_result"):
+                    parts.append(f"BS: {doc_e.get('doctor_result')}")
+                return " · ".join(parts)
             history_opts = [{"label": "--- Đang chờ kết quả mới (Ẩn lịch sử) ---", "val": None}] + [{"label": _hist_label(v), "val": v} for v in my_history_vids]
         else:
             history_opts = [{"label": "--- Chọn một phiên tập để xem ---", "val": None}] + [
@@ -12941,381 +12970,104 @@ def hien_thi_tab_ket_qua_da_chon(my_history_vids, my_evals, has_ai_eval, user_ro
                 st.session_state.uploader_id = st.session_state.get('uploader_id', 0) + 1
                 st.rerun(scope="app")
 
-    if selected_v:
-        nap_phien_benh_nhan_vao_session(selected_v)
-
     if not selected_v:
         return
 
-    show_extra_tabs = has_ai_eval and user_role != "Quản trị viên"
-    tab_labels = ["📝 NHẬN XÉT CỦA BÁC SĨ & AI"]
-    if show_extra_tabs:
-        tab_labels += ["📊 BIỂU ĐỒ PHÂN TÍCH", "🎬 VIDEO & HÌNH ẢNH"]
+    hien_thi_noi_dung_ket_qua(selected_v, my_evals)
 
-    tabs = st.tabs(tab_labels)
+def _hien_thi_khoi_nhan_xet_danh_gia(eval_data, accent_color, accent_bg, accent_border, default_source):
+    """Hiển thị một khối nhận xét đánh giá (chỉ văn bản, không biểu đồ)."""
+    if not eval_data:
+        return
+    is_light = st.session_state.theme == "light"
+    card_bg = "rgba(255,255,255,1)" if is_light else "rgba(0,0,0,0.2)"
+    text_muted = "#666" if is_light else "#aaa"
+    text_main = "#222" if is_light else "#eee"
+    source_name = eval_data.get("doctor_name") or eval_data.get("doctor_username") or default_source
+    eval_time = _format_vn_time(eval_data.get("time"), default="N/A")
+    exercise = eval_data.get("exercise", "N/A")
+    result = eval_data.get("doctor_result", "N/A")
+    comments = (eval_data.get("comments") or "").strip() or "Không có nhận xét."
+    plan = (eval_data.get("plan") or "").strip()
+    errors = [err for err in eval_data.get("errors", []) if "WARNING" not in str(err).upper()]
 
-    with tabs[0]:
-        hien_thi_noi_dung_ket_qua(selected_v, my_evals)
+    st.markdown(f"""
+    <div style="background:{card_bg}; border:1px solid {accent_border}; border-left:5px solid {accent_color};
+                border-radius:14px; padding:18px 20px; margin-bottom:12px;">
+        <p style="margin:0 0 8px 0; color:{text_muted}; font-size:0.82rem;">
+            🕒 {eval_time} · Bài tập: <b style="color:{text_main};">{exercise}</b>
+        </p>
+        <p style="margin:0 0 12px 0; color:{text_muted}; font-size:0.82rem;">
+            Nguồn: <span style="color:{accent_color}; font-weight:700;">{source_name}</span>
+        </p>
+        <p style="margin:0 0 10px 0; font-size:0.78rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px;">
+            Kết quả đánh giá
+        </p>
+        <p style="margin:0 0 14px 0; font-size:1.15rem; color:{accent_color}; font-weight:800;">
+            {result}
+        </p>
+        <p style="margin:0 0 6px 0; font-size:0.78rem; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px;">
+            Nhận xét
+        </p>
+        <p style="margin:0; font-size:0.95rem; color:{text_main}; white-space:pre-line; line-height:1.6;">
+            {comments}
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
 
-    if show_extra_tabs:
-        with tabs[1]:
-            st.markdown("### 📈 CHI TIẾT PHÂN TÍCH AI")
-            hien_thi_tab_phan_tich(key_suffix="pat_eval")
-        with tabs[2]:
-            st.markdown("### 🎬 VIDEO & HÌNH ẢNH KHUNG XƯƠNG CỦA BẠN")
-            hien_thi_frames_day_du(key_suffix="pat_results")
+    if plan:
+        st.markdown(f"**Kế hoạch / Chỉ định:**\n\n{plan}")
+    if errors:
+        st.markdown(f"**Lỗi kỹ thuật ghi nhận:** {', '.join(errors)}")
+
 
 def hien_thi_noi_dung_ket_qua(selected_v, my_evals):
-    """Hàm phụ hiển thị các nhận xét và kết quả NCKH (Dùng chung cho cả Tab và View trực tiếp)"""
-    def _acc_color(v):
-        if v is None: return "#888"
-        if v >= 80: return "#00e676"
-        if v >= 60: return "#ffd700"
-        return "#ff5252"
-
-    def _acc_label(v):
-        if v is None: return "N/A"
-        if v >= 80: return "✅ Đạt"
-        if v >= 60: return "⚠️ Gần đạt"
-        return "❌ Cần tập thêm"
-
-    if selected_v:
-        ai_eval, doc_eval = _lay_danh_gia_cho_video(selected_v, my_evals)
-        v_evals = []
-        if ai_eval:
-            v_evals.append(ai_eval)
-        if doc_eval and doc_eval is not ai_eval:
-            v_evals.append(doc_eval)
-
-        if ai_eval or doc_eval:
-            st.markdown("#### 📋 TÓM TẮT ĐÁNH GIÁ")
-            c_ai, c_doc = st.columns(2)
-            with c_ai:
-                if ai_eval:
-                    acc_show = ai_eval.get("ai_accuracy")
-                    if acc_show is None:
-                        acc_show = _lay_do_chinh_xac_hien_thi(selected_v, ai_eval)
-                    acc_txt = f"{float(acc_show):.1f}%" if acc_show is not None else "N/A"
-                    st.markdown(f"""
-                    <div style="background:rgba(0,206,209,0.08); border:1px solid rgba(0,206,209,0.35);
-                                border-radius:12px; padding:14px;">
-                        <p style="margin:0 0 6px 0; color:#00CED1; font-weight:700;">🤖 NCV / Phân tích AI</p>
-                        <p style="margin:0; color:#fff; font-size:1.05rem;">
-                            <b>{ai_eval.get('doctor_result', 'N/A')}</b> · {acc_txt}
-                        </p>
-                        <p style="margin:6px 0 0; color:#aaa; font-size:0.82rem;">
-                            🕒 {_format_vn_time(ai_eval.get('time'), default='N/A')}
-                        </p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                else:
-                    st.info("🤖 **NCV/AI:** Chưa có báo cáo phân tích cho bài tập này.")
-            with c_doc:
-                if doc_eval:
-                    doc_name = doc_eval.get("doctor_name") or doc_eval.get("doctor_username") or "Bác sĩ / KTV"
-                    st.markdown(f"""
-                    <div style="background:rgba(255,215,0,0.08); border:1px solid rgba(255,215,0,0.35);
-                                border-radius:12px; padding:14px;">
-                        <p style="margin:0 0 6px 0; color:#ffd700; font-weight:700;">👨‍⚕️ Bác sĩ / KTV PHCN</p>
-                        <p style="margin:0; color:#fff; font-size:1.05rem;">
-                            <b>{doc_eval.get('doctor_result', 'N/A')}</b>
-                        </p>
-                        <p style="margin:6px 0 0; color:#aaa; font-size:0.82rem;">
-                            👤 {doc_name} · 🕒 {_format_vn_time(doc_eval.get('time'), default='N/A')}
-                        </p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                else:
-                    st.info("👨‍⚕️ **Bác sĩ:** Chưa có đánh giá lâm sàng cho bài tập này.")
-            st.markdown("---")
-            st.markdown("#### 📑 CHI TIẾT ĐÁNH GIÁ")
-
-        if not v_evals:
-            metrics = selected_v.get("metrics") if isinstance(selected_v.get("metrics"), dict) else None
-            if metrics:
-                st.warning(
-                    "⚠️ Chưa tìm thấy bản ghi đánh giá trong `doctor_evaluations.json`, "
-                    "nhưng video đã có kết quả phân tích AI. Bấm **Tải lại kết quả đã lưu** "
-                    "hoặc xem tab **Biểu đồ phân tích**."
-                )
-            else:
-                st.info("Không có nhận xét nào cho video này.")
-        for e in v_evals:
-            is_ai = e.get('doctor_username') == "AI_Researcher"
-            is_gay_ex = any(kw in str(e.get('exercise', '')).lower() for kw in ["gậy", "gay", "pulley", "stick"])
-            title_color = "#00CED1" if is_ai else "#ffd700"
-            icon = "🤖" if is_ai else "👨‍⚕️"
-            
-            eval_time_formatted = _format_vn_time(e.get('time'), default='N/A')
-
-            with st.expander(f"{icon} Đánh giá ngày {eval_time_formatted} - Bài tập: {e.get('exercise', 'N/A')}", expanded=True):
-                is_light = st.session_state.theme == 'light'
-                eval_card_bg = "rgba(255, 255, 255, 1)" if is_light else "rgba(0,0,0,0.2)"
-                eval_card_border = "#eee" if is_light else f"{title_color}44"
-                eval_text_color = "#333" if is_light else "#888"
-
-                c1, c2 = st.columns([1, 2.5])
-                with c1:
-                    if is_ai:
-                        # Lấy accuracy từng giai đoạn
-                        _ag1 = e.get('ai_accuracy_g1')
-                        _ag2 = e.get('ai_accuracy_g2')
-                        _ag3 = e.get('ai_accuracy_g3')
-                        # Parse fallback từ comments
-                        if _ag1 is None or _ag2 is None or _ag3 is None:
-                            import re as _re
-                            _raw = e.get('comments', '')
-                            def _pa(txt, pat):
-                                m = _re.search(pat + r'.*?(\d+\.?\d*)%', txt)
-                                return float(m.group(1)) if m else None
-                            _ag1 = _ag1 if _ag1 is not None else _pa(_raw, r'GĐ 1|GD1')
-                            _ag2 = _ag2 if _ag2 is not None else _pa(_raw, r'GĐ 2|GD2')
-                            _ag3 = _ag3 if _ag3 is not None else _pa(_raw, r'GĐ 3|GD3')
-
-                        def _c(v):
-                            if v is None: return "#888"
-                            return "#00e676" if v >= 80 else ("#ffd700" if v >= 60 else "#ff5252")
-
-                        def _lbl(v):
-                            if v is None: return "—"
-                            return "✅ Đạt" if v >= 80 else ("⚠️ Gần đạt" if v >= 60 else "❌ Cần tập")
-
-                        _verdict_color = {"Đúng": "#00e676", "Gần đúng": "#ffd700", "Sai": "#ff5252"}.get(e.get('doctor_result', ''), title_color)
-
-                        _divider_color = "#eee" if is_light else "#2a2a2a"
-                        _ag1_str = f"{_ag1:.1f}%" if _ag1 is not None else "N/A"
-                        _ag2_str = f"{_ag2:.1f}%" if _ag2 is not None else "N/A"
-                        _ag3_str = f"{_ag3:.1f}%" if _ag3 is not None else "N/A"
-
-                        if is_gay_ex:
-                            _overall_acc = lay_do_chinh_xac_ai_chuan(selected_v) or e.get('ai_accuracy') or _ag1 or 0.0
-                            _avg_clr = _c(_overall_acc)
-                            _overall = "Đúng" if _overall_acc >= 80 else ("Gần đúng" if _overall_acc >= 50 else "Sai")
-                            _overall_color = {"Đúng": "#00e676", "Gần đúng": "#ffd700", "Sai": "#ff5252"}[_overall]
-                            st.markdown(f"""
-                            <div style="text-align:center; background:{eval_card_bg}; padding:18px 12px;
-                                        border-radius:14px; border:1px solid {eval_card_border};
-                                        box-shadow:0 4px 15px rgba(0,0,0,0.1);">
-                                <p style="margin:0 0 4px 0; color:{eval_text_color}; font-size:0.72rem;
-                                          letter-spacing:1px; font-weight:600;">ĐỘ CHÍNH XÁC</p>
-                                <h1 style="margin:0; color:{_avg_clr}; font-size:2.2rem; font-weight:900;">
-                                    {_overall_acc:.1f}%
-                                </h1>
-                                <p style="margin:2px 0 0 0; font-size:0.7rem; color:{eval_text_color};">
-                                    Đánh giá tư thế tương đương
-                                </p>
-                                <hr style="margin:10px 0; border:0; border-top:1px solid {_divider_color};">
-                                <p style="margin:0 0 2px 0; font-size:0.7rem; color:{eval_text_color};">KẾT LUẬN</p>
-                                <h3 style="margin:0; color:{_overall_color}; font-size:1.15rem; font-weight:800;">
-                                    {_overall}
-                                </h3>
-                            </div>
-                            """, unsafe_allow_html=True)
-                        else:
-                            # Tính trung bình có trọng số 3 giai đoạn
-                            # GĐ1(khởi đầu): 25% | GĐ2(hồi phục): 40% | GĐ3(chuẩn xác): 35%
-                            _vals = [(v, w) for v, w in [(_ag1, 0.25), (_ag2, 0.40), (_ag3, 0.35)] if v is not None]
-                            if _vals:
-                                _total_w = sum(w for _, w in _vals)
-                                _avg_acc = sum(v * w for v, w in _vals) / _total_w
-                            else:
-                                _avg_acc = None
-                            _avg_str = f"{_avg_acc:.1f}%" if _avg_acc is not None else "N/A"
-                            _avg_clr = _c(_avg_acc) if _avg_acc is not None else "#888"
-
-                            # Kết luận tổng thể dựa trên trung bình 3 giai đoạn
-                            if _avg_acc is not None:
-                                _overall = "Đúng" if _avg_acc >= 80 else ("Gần đúng" if _avg_acc >= 60 else "Sai")
-                                _overall_color = {"Đúng": "#00e676", "Gần đúng": "#ffd700", "Sai": "#ff5252"}[_overall]
-                            else:
-                                _overall = e.get('doctor_result', 'N/A')
-                                _overall_color = _verdict_color
-
-                            st.markdown(f"""
-                            <div style="text-align:center; background:{eval_card_bg}; padding:18px 12px;
-                                        border-radius:14px; border:1px solid {eval_card_border};
-                                        box-shadow:0 4px 15px rgba(0,0,0,0.1);">
-                                <p style="margin:0 0 4px 0; color:{eval_text_color}; font-size:0.72rem;
-                                          letter-spacing:1px; font-weight:600;">ĐỘ CHÍNH XÁC TỔNG HỢP</p>
-                                <h1 style="margin:0; color:{_avg_clr}; font-size:2.2rem; font-weight:900;">
-                                    {_avg_str}
-                                </h1>
-                                <p style="margin:2px 0 0 0; font-size:0.7rem; color:{eval_text_color};">
-                                    Trung bình có trọng số 3 giai đoạn
-                                </p>
-                                <hr style="margin:10px 0; border:0; border-top:1px solid {_divider_color};">
-                                <p style="margin:0 0 2px 0; font-size:0.7rem; color:{eval_text_color};">KẾT LUẬN TỔNG THỂ</p>
-                                <h3 style="margin:0; color:{_overall_color}; font-size:1.15rem; font-weight:800;">
-                                    {_overall}
-                                </h3>
-                            </div>
-                            """, unsafe_allow_html=True)
-
-                            st.markdown(f"""
-                            <div style="margin-top:8px; font-size:0.8rem; line-height:1.9;">
-                                <span style="color:#00e676;">🌱 GĐ1 (25%):</span>
-                                <b style="color:{_c(_ag1)};">{_ag1_str}</b>
-                                <span style="color:#aaa; font-size:0.7rem;">{_lbl(_ag1)}</span><br>
-                                <span style="color:#ffd700;">📈 GĐ2 (40%):</span>
-                                <b style="color:{_c(_ag2)};">{_ag2_str}</b>
-                                <span style="color:#aaa; font-size:0.7rem;">{_lbl(_ag2)}</span><br>
-                                <span style="color:#00c6ff;">🎯 GĐ3 (35%):</span>
-                                <b style="color:{_c(_ag3)};">{_ag3_str}</b>
-                                <span style="color:#aaa; font-size:0.7rem;">{_lbl(_ag3)}</span>
-                            </div>
-                            """, unsafe_allow_html=True)
-                    else:
-                        st.markdown(f"""
-                        <div style="text-align: center; background: {eval_card_bg}; padding: 15px; border-radius: 12px; border: 1px solid {eval_card_border}; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
-                            <p style="margin:0; color:{eval_text_color}; font-size:0.8rem;">KẾT QUẢ ĐÁNH GIÁ</p>
-                            <h2 style="margin:0; color:{title_color}; padding: 10px 0;">{e.get('doctor_result', 'N/A')}</h2>
-                        </div>
-                        """, unsafe_allow_html=True)
-                with c2:
-                    source_name = e.get('doctor_name')
-                    if not source_name or source_name == "Hệ thống AI" and not is_ai:
-                        source_name = "Hệ thống AI" if is_ai else "Bác sĩ, KTV"
-                        
-                    st.markdown(f"**Nguồn:** <span style='color: {title_color}; font-weight: bold;'>{source_name}</span>", unsafe_allow_html=True)
-                    
-                    errors = [err for err in e.get('errors', []) if "WARNING" not in err.upper()]
-                    if not is_ai and errors:
-                        st.markdown(f"**Lỗi sai:** {', '.join(errors)}")
-                    
-                    if is_ai:
-                        if is_gay_ex:
-                            acc_overall = lay_do_chinh_xac_ai_chuan(selected_v) or e.get('ai_accuracy') or e.get('ai_accuracy_g1') or 0.0
-                            clr = _acc_color(acc_overall)
-                            lbl = _acc_label(acc_overall)
-                            
-                            st.markdown(f"""
-                            <div style="background:rgba(0,198,255,0.06); border:1.5px solid #00c6ff; border-radius:14px;
-                                        padding:14px 18px; margin-bottom:12px;">
-                                <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
-                                    <span style="font-size:1.5rem;">🏒</span>
-                                    <div>
-                                        <h3 style="margin:0; color:#00c6ff; font-size:1.1rem; font-weight:800; letter-spacing:0.5px;">
-                                            BÀI TẬP VỚI GẬY
-                                        </h3>
-                                        <span style="color:#aaa; font-size:0.82rem;">Đánh giá tư thế tương đương</span>
-                                    </div>
-                                    <div style="margin-left:auto; text-align:right;">
-                                        <span style="font-size:1.6rem; font-weight:900; color:{clr};">{acc_overall:.1f}%</span><br>
-                                        <span style="font-size:0.8rem; color:{clr};">{lbl}</span>
-                                    </div>
-                                </div>
-                                <p style='margin:4px 0 0 0; font-size:0.85rem; color:#ccc; white-space: pre-line;'>{e.get('comments', '')}</p>
-                                <p style='margin:10px 0 0 0; font-size:0.85rem; color:#ccc; font-weight: bold; white-space: pre-line;'>{e.get('plan', '')}</p>
-                            </div>
-                            """, unsafe_allow_html=True)
-                        else:
-                            # ===== HIỂN THỊ 3 GIAI ĐOẠN RIÊNG BIỆT - TIÊU ĐỀ TO =====
-                            acc_g1 = e.get('ai_accuracy_g1')
-                            acc_g2 = e.get('ai_accuracy_g2')
-                            acc_g3 = e.get('ai_accuracy_g3')
-                            
-                            # Parse từ comments nếu không có field riêng
-                            raw_comments = e.get('comments', '')
-                            if acc_g1 is None or acc_g2 is None or acc_g3 is None:
-                                import re
-                                def _parse_acc(text, label):
-                                    m = re.search(label + r'.*?(\d+\.?\d*)%', text)
-                                    return float(m.group(1)) if m else None
-                                acc_g1 = acc_g1 or _parse_acc(raw_comments, r'GĐ 1|GD1|Giai đoạn 1')
-                                acc_g2 = acc_g2 or _parse_acc(raw_comments, r'GĐ 2|GD2|Giai đoạn 2')
-                                acc_g3 = acc_g3 or _parse_acc(raw_comments, r'GĐ 3|GD3|Giai đoạn 3')
-
-                            # Tách phần kế hoạch từ plan
-                            plan_raw = e.get('plan', '')
-                            plan_lines = [l.strip() for l in plan_raw.split('\n') if l.strip() and l.strip().startswith('-')]
-
-                            gd_configs = [
-                                {"idx": 1, "label": "GIAI ĐOẠN 1", "sub": f"Khởi đầu · Sai số ±{PHASE_ERROR['g1']}°", "icon": "🌱",
-                                 "acc": acc_g1, "bg": "rgba(0,230,118,0.06)", "border": "#00e676"},
-                                {"idx": 2, "label": "GIAI ĐOẠN 2", "sub": f"Hồi phục · Sai số ±{PHASE_ERROR['g2']}°", "icon": "📈",
-                                 "acc": acc_g2, "bg": "rgba(255,215,0,0.06)", "border": "#ffd700"},
-                                {"idx": 3, "label": "GIAI ĐOẠN 3", "sub": f"Chuẩn xác · Sai số ±{PHASE_ERROR['g3']}°", "icon": "🎯",
-                                 "acc": acc_g3, "bg": "rgba(0,198,255,0.06)", "border": "#00c6ff"},
-                            ]
-
-                            for gd in gd_configs:
-                                v_acc = gd["acc"]
-                                clr = _acc_color(v_acc)
-                                lbl = _acc_label(v_acc)
-                                acc_str = f"{v_acc:.1f}%" if v_acc is not None else "N/A"
-                                # Tìm dòng kế hoạch tương ứng
-                                plan_gd = next((l for l in plan_lines if f"GĐ{gd['idx']}" in l or f"GD{gd['idx']}" in l), "")
-                                plan_detail = plan_gd.split("-", 2)[-1].strip() if plan_gd else ""
-                                st.markdown(f"""
-                                <div style="background:{gd['bg']}; border:1.5px solid {gd['border']}; border-radius:14px;
-                                            padding:14px 18px; margin-bottom:12px;">
-                                    <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
-                                        <span style="font-size:1.5rem;">{gd['icon']}</span>
-                                        <div>
-                                            <h3 style="margin:0; color:{gd['border']}; font-size:1.1rem; font-weight:800; letter-spacing:0.5px;">
-                                                {gd['label']}
-                                            </h3>
-                                            <span style="color:#aaa; font-size:0.82rem;">{gd['sub']}</span>
-                                        </div>
-                                        <div style="margin-left:auto; text-align:right;">
-                                            <span style="font-size:1.6rem; font-weight:900; color:{clr};">{acc_str}</span><br>
-                                            <span style="font-size:0.8rem; color:{clr};">{lbl}</span>
-                                        </div>
-                                    </div>
-                                    {"<p style='margin:4px 0 0 0; font-size:0.85rem; color:#ccc;'>💡 " + plan_detail + "</p>" if plan_detail else ""}
-                                </div>
-                                """, unsafe_allow_html=True)
-
-                            # AI đề xuất
-                            ai_suggest_line = next((l for l in raw_comments.split('\n') if 'AI đề xuất' in l or 'Phù hợp' in l), "")
-                            if ai_suggest_line:
-                                st.markdown(f"""
-                                <div style="background:rgba(0,114,255,0.07); border:1px solid rgba(0,198,255,0.3);
-                                            border-radius:10px; padding:10px 14px; margin-top:4px;">
-                                    <span style="font-size:0.9rem; color:#00c6ff;">🤖 {ai_suggest_line.strip()}</span>
-                                </div>
-                                """, unsafe_allow_html=True)
-                    else:
-                        st.markdown(f"**Nhận xét cho BN:** {e.get('comments', 'Không có')}")
-                        if e.get("comments_ncv"):
-                            st.markdown(
-                                f"**💬 Nhận xét cho NCV:** "
-                                f"<span style='color:#ffd700;'>{e.get('comments_ncv')}</span>",
-                                unsafe_allow_html=True,
-                            )
-                        if e.get("errors"):
-                            st.markdown(f"**Lỗi kỹ thuật ghi nhận:** {', '.join(e.get('errors', []))}")
-                        st.markdown(f"**Kế hoạch / Chỉ định:** {e.get('plan', 'N/A')}")
-                    
-                    status_text = "Dữ liệu AI đã sẵn sàng" if is_ai else "Bác sĩ đã phê duyệt"
-                    st.markdown(f'<p style="color: {title_color}; font-size: 0.8rem; font-style: italic; margin-top:10px;">📩 {status_text}</p>', unsafe_allow_html=True)
-        
-        # CHỈ hiển thị NCKH của video được chọn
-        res_data = load_data(RESEARCH_DATA_FILE)
-        v_res = [r for r in res_data if r.get('video_code') == selected_v.get('video_name') or r.get('timestamp') == selected_v.get('time')]
-        if v_res:
-            st.markdown("---")
-            st.markdown("### 📑 KẾT QUẢ ĐÁNH GIÁ KỸ THUẬT (NCKH)")
-            for r in reversed(v_res):
-                exercises_str = ", ".join(r.get('exercises', []))
-                exercises_display = f" - Động tác: {exercises_str}" if exercises_str else ""
-                with st.expander(f"📅 Phiếu ngày {r.get('timestamp', 'N/A')}{exercises_display} - KQ: {r.get('general_result', 'N/A')}", expanded=False):
-                    rc1, rc2, rc3 = st.columns(3)
-                    with rc1:
-                        st.write(f"• Người PV: {r.get('interviewer')}")
-                        st.write(f"• Ngày PV: {r.get('interview_date')}")
-                    with rc2:
-                        st.write(f"• Chẩn đoán: {r.get('diagnosis')}")
-                        st.write(f"• Đau (VAS): {r.get('pain_level')}")
-                    with rc3:
-                        st.write(f"• Kết quả: {r.get('general_result')}")
-                        if r.get('errors'):
-                            st.write(f"• Lỗi sai: {', '.join(r.get('errors'))}")
-                        if r.get('plan'):
-                            st.write(f"• Chỉ định: {r.get('plan')}")
-                        st.info(f"**Nhận xét:** {r.get('specialist_comment')}")
-    else:
+    """Tab Kết quả đánh giá: chỉ nhận xét NCV/AI và Bác sĩ, tách riêng."""
+    if not selected_v:
         st.info("👆 Hãy chọn một phiên tập từ danh sách bên trên để xem nhận xét chi tiết.")
+        return
+
+    ai_eval, doc_eval = _lay_danh_gia_cho_video(selected_v, my_evals)
+    exercise = selected_v.get("exercise", "N/A")
+    st.markdown(f"#### 📋 Phiên tập: **{exercise}**")
+    st.markdown("---")
+
+    st.markdown("### 🤖 Nhận xét NCV / Phân tích AI")
+    if ai_eval:
+        _hien_thi_khoi_nhan_xet_danh_gia(
+            ai_eval,
+            accent_color="#00CED1",
+            accent_bg="rgba(0,206,209,0.08)",
+            accent_border="rgba(0,206,209,0.35)",
+            default_source="Nghiên cứu viên / Hệ thống AI",
+        )
+    else:
+        st.info("Chưa có nhận xét phân tích AI cho bài tập này.")
+
+    st.markdown("---")
+    st.markdown("### 👨‍⚕️ Nhận xét Bác sĩ / KTV PHCN")
+    if doc_eval:
+        if doc_eval.get("comments_ncv"):
+            st.markdown(
+                f"**💬 Ghi chú nội bộ cho NCV:** "
+                f"<span style='color:#ffd700;'>{doc_eval.get('comments_ncv')}</span>",
+                unsafe_allow_html=True,
+            )
+        _hien_thi_khoi_nhan_xet_danh_gia(
+            doc_eval,
+            accent_color="#ffd700",
+            accent_bg="rgba(255,215,0,0.08)",
+            accent_border="rgba(255,215,0,0.35)",
+            default_source="Bác sĩ / KTV PHCN",
+        )
+    else:
+        st.info("Chưa có đánh giá lâm sàng từ Bác sĩ / KTV cho bài tập này.")
+
+    if not ai_eval and not doc_eval:
+        st.warning(
+            "Chưa tìm thấy nhận xét đánh giá cho phiên tập này. "
+            "Vui lòng quay lại sau khi NCV hoặc Bác sĩ hoàn tất đánh giá."
+        )
 
 
 def hien_thi_tab_khai_bao_trieu_chung():
