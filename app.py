@@ -3545,10 +3545,18 @@ def thuc_hien_khoi_tao_he_thong_mot_lan():
 
     threading.Thread(target=_auto_transcode_all_hevc, daemon=True).start()
 
-    try:
-        _chay_khoi_phuc_phan_tich_sau_deploy()
-    except Exception as boot_resume_err:
-        print(f"[Resume] Loi khoi phuc dong bo luc boot: {boot_resume_err}")
+    # FIX 500 trên HF Space: KHÔNG chạy đồng bộ khi boot.
+    # Trước đây _chay_khoi_phuc_phan_tich_sau_deploy() chạy ngay trong lần render đầu tiên:
+    # list_repo_files + tải video/checkpoint từ Dataset + khởi động MediaPipe đều BLOCK request đầu,
+    # khiến HF edge trả về "500 Sorry, there is an error on our side" dù Space vẫn "Running".
+    def _khoi_phuc_nen_sau_boot():
+        time.sleep(15)  # Nhường CPU/IO cho lần render đầu tiên hoàn tất
+        try:
+            _chay_khoi_phuc_phan_tich_sau_deploy()
+        except Exception as boot_resume_err:
+            print(f"[Resume] Loi khoi phuc dong bo luc boot: {boot_resume_err}")
+
+    threading.Thread(target=_khoi_phuc_nen_sau_boot, daemon=True).start()
 
     def _resume_and_watch_analysis_jobs():
         """Theo dõi job bị crash/OOM sau khi Space đã chạy."""
@@ -8720,6 +8728,16 @@ def khoi_phuc_job_phan_tich_sau_deploy(cold_start=False):
         vp = job.get("video_path")
         if not vp:
             continue
+        # Bỏ qua job "ma" quá hạn (heartbeat > 2h): tránh vòng lặp tự chạy lại
+        # MediaPipe Heavy chiếm trọn CPU làm Space treo/500 vĩnh viễn sau crash.
+        try:
+            _hb = float(job.get("heartbeat") or job.get("start_time") or 0)
+            if _hb and (time.time() - _hb) > PROGRESS_STALE_SECONDS:
+                print(f"[Resume] Bo qua job qua han 2h: {job.get('video_name')}")
+                clear_analysis_progress(vp)
+                continue
+        except Exception:
+            pass
         if vp in _running_threads and _running_threads[vp].is_alive():
             continue
         if not cold_start and not job_phan_tich_bi_gian_doan(vp):

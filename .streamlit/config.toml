@@ -1,3 +1,20 @@
 [server]
 maxUploadSize = 10000
 enableStaticServing = true
+# Tắt theo dõi thay đổi file (chỉ cần khi dev) — giảm CPU nền & tăng tốc rerun trên Cloud
+fileWatcherType = "none"
+runOnSave = false
+headless = true
+# Nén dữ liệu websocket — giảm dung lượng truyền khi F5, trang nặng CSS/biểu đồ tải nhanh hơn
+enableWebsocketCompression = true
+
+[browser]
+# Bỏ gửi thống kê sử dụng — bớt 1 request mạng mỗi lần tải trang
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"
+
+[runner]
+# Ngắt ngay script cũ khi có tương tác/F5 mới — phản hồi tức thì
+fastReruns = true
