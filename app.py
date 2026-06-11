@@ -1553,20 +1553,30 @@ def _render_video_html5_iframe(sources_html, comp_key, height=300, footer_html="
     )
 
 
-def _try_render_cloud_video_stream(video_path, key_hint=""):
-    """Stream ngay từ HF Dataset nếu có — trả về True khi đã render player."""
+def _is_hf_runtime():
+    """Chạy trên Hugging Face Space (/data persistent volume)."""
+    return bool(HF_SPACE_ID or os.environ.get("SPACE_ID") or os.path.exists("/data"))
+
+
+def _try_render_cloud_video_stream(video_path, key_hint="", optimistic=False):
+    """Stream ngay từ HF Dataset — optimistic=True bỏ qua HEAD (một số CDN chặn HEAD)."""
     url_f, url_raw = _hf_dataset_resolve_urls(video_path)
     if not url_raw:
         return False
     h264_ok = bool(url_f and check_cloud_file_exists(url_f))
     raw_ok = check_cloud_file_exists(url_raw)
     if not h264_ok and not raw_ok:
-        return False
+        if not optimistic:
+            return False
+        h264_ok = bool(url_f)
+        raw_ok = bool(url_raw)
     sources = []
-    if h264_ok:
+    if h264_ok and url_f:
         sources.append(f'<source src="{url_f}" type="video/mp4">')
-    if raw_ok:
+    if raw_ok and url_raw:
         sources.append(f'<source src="{url_raw}" type="video/mp4">')
+    if not sources:
+        return False
     url_hash = hashlib.md5(f"{video_path}|{key_hint}".encode()).hexdigest()[:8]
     _render_video_html5_iframe(
         "\n  ".join(sources),
@@ -1627,8 +1637,8 @@ def _render_video_static_iframe(target_path, video_key=None):
         return False
 
 
-def _render_video_streamlit_native(target_path):
-    """Phát video qua st.video — chỉ file nhỏ; file lớn dùng iframe để tránh spinner lâu."""
+def _render_video_streamlit_native(target_path, allow_large=False):
+    """Phát video qua st.video — HF Space cần st.video (static/ iframe hay bị đen)."""
     if not target_path or not os.path.exists(target_path):
         return False
     try:
@@ -1636,7 +1646,7 @@ def _render_video_streamlit_native(target_path):
         size = os.path.getsize(target_path)
         if size < 5 * 1024 or not _check_video_valid_cached(target_path, mtime, size):
             return False
-        if size > 6 * 1024 * 1024:
+        if size > 6 * 1024 * 1024 and not (allow_large or _is_hf_runtime()):
             return False
         st.video(target_path, format="video/mp4")
         return True
@@ -2144,12 +2154,17 @@ def render_video(video_path, check_h264=True):
             st.error(f'⚠️ Lỗi hiển thị video: {e}')
         return
 
-    # Ưu tiên stream Cloud ngay — trình duyệt Range Request, không chờ tải hết file
+    ensure_playable_video(video_path)
+    _prefetch_video_quiet(video_path)
+
+    # HF Space: ưu tiên stream Cloud (Range Request) trước khi đọc file local nặng
+    if _is_hf_runtime() and HF_TOKEN and HF_DATASET_ID:
+        if _try_render_cloud_video_stream(video_path, key_hint="hf_first", optimistic=True):
+            return
+
     local_ready = find_ready_local_video(video_path)
     if not local_ready:
-        ensure_playable_video(video_path)
-        _prefetch_video_quiet(video_path)
-        if _try_render_cloud_video_stream(video_path):
+        if _try_render_cloud_video_stream(video_path, optimistic=True):
             return
 
     final_h264 = get_final_h264_path(video_path)
@@ -2235,19 +2250,19 @@ def render_video(video_path, check_h264=True):
                     st.rerun()
                 return
 
-        if _render_video_streamlit_native(target_path):
+        if _try_render_cloud_video_stream(video_path, key_hint="local_fallback", optimistic=True):
             return
-        if _render_video_static_iframe(target_path):
+        if _render_video_streamlit_native(target_path, allow_large=True):
             return
-        if _try_render_cloud_video_stream(video_path, key_hint="local_fallback"):
+        if not _is_hf_runtime() and _render_video_static_iframe(target_path):
             return
-        st.error("❌ Không thể phát video local. Thử tải lại trang (F5).")
+        st.warning(
+            "⚠️ Không phát được video trực tiếp. Bấm **📥 Tải video Tất cả (H.264)** bên dưới "
+            "hoặc thử F5 sau vài giây."
+        )
         return
 
-
-    ensure_playable_video(video_path)
-    _prefetch_video_quiet(video_path)
-    if _try_render_cloud_video_stream(video_path, key_hint="fallback"):
+    if _try_render_cloud_video_stream(video_path, key_hint="fallback", optimistic=True):
         return
 
     st.warning("⚠️ File video đang được xử lý dưới nền hoặc không khả dụng.")
