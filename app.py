@@ -15630,20 +15630,27 @@ def _lay_meta_tab_bac_si(selected_video):
 
 
 def _render_main_tab_content(tab_titles, user_role):
-        if st.session_state.get('trigger_tab_switch'):
-            if st.session_state.trigger_tab_switch in tab_titles:
-                st.session_state.active_tab = st.session_state.trigger_tab_switch
-                st.session_state.pop("active_tab_widget", None)
-            st.session_state.trigger_tab_switch = None
+        _tab_target = st.session_state.pop('trigger_tab_switch', None)
+        if _tab_target and _tab_target in tab_titles:
+            st.session_state.active_tab = _tab_target
+            # Ghi đè TRỰC TIẾP trạng thái widget trước khi render — pop key + default mới
+            # KHÔNG đổi được highlight vì default chỉ áp dụng ở lần tạo widget đầu tiên.
+            st.session_state["active_tab_widget"] = _tab_target
+
+        # default chỉ truyền khi widget chưa có trạng thái (lần render đầu / sau F5),
+        # tránh cảnh báo "widget created with a default value but also had its value set via Session State".
+        _seg_kwargs = {}
+        if "active_tab_widget" not in st.session_state:
+            _seg_kwargs["default"] = st.session_state.active_tab
 
         # Hiển thị Menu segmented control dạng Tab Bar
         selected_tab = st.segmented_control(
             label="Menu điều hướng",
             options=tab_titles,
             selection_mode="single",
-            default=st.session_state.active_tab,
             key="active_tab_widget",
-            label_visibility="collapsed"
+            label_visibility="collapsed",
+            **_seg_kwargs,
         )
     
         if selected_tab:
