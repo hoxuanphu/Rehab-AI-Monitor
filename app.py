@@ -3450,20 +3450,30 @@ def nap_ket_qua_ai_vao_session(ai_eval):
     return False
 
 
-def hien_thi_ket_qua_gan_nhat_va_lich_su(username, video_name=None, key_suffix="", chi_nhan_xet=False):
-    """Hiển thị kết quả gần nhất. Nếu chi_nhan_xet=True chỉ tóm tắt nhận xét, không tải phân tích."""
+def hien_thi_ket_qua_gan_nhat_va_lich_su(
+    username,
+    video_name=None,
+    exercise=None,
+    selected_v=None,
+    key_suffix="",
+    chi_nhan_xet=False,
+):
+    """Hiển thị kết quả gần nhất theo đúng BN + bài tập đang xem."""
+    if not username and not selected_v:
+        return
     evals = _dedup_evaluations(load_data(EVALUATIONS_FILE))
-    doc_history = [
-        e for e in evals
-        if e.get("patient_username") == username
-        and e.get("doctor_username") != "AI_Researcher"
-    ]
-    doc_history.sort(
-        key=lambda e: _parse_vn_datetime(e.get("time")) or datetime.min,
-        reverse=True,
-    )
-    if doc_history:
-        latest_doc = doc_history[0]
+    if selected_v is None:
+        selected_v = {
+            "username": username,
+            "patient_username": username,
+            "video_name": video_name,
+            "exercise": exercise,
+        }
+    pu = selected_v.get("username") or selected_v.get("patient_username") or username
+    ex_cur = selected_v.get("exercise") or exercise
+    ai_eval, doc_eval = _lay_danh_gia_cho_video(selected_v, evals)
+    if doc_eval:
+        latest_doc = doc_eval
         t_doc = _format_vn_time(latest_doc.get("time"), default="N/A")
         st.markdown(f"""
         <div style="background: linear-gradient(135deg, rgba(255,215,0,0.12) 0%, rgba(255,165,0,0.08) 100%);
@@ -3484,7 +3494,10 @@ def hien_thi_ket_qua_gan_nhat_va_lich_su(username, video_name=None, key_suffix="
         </div>
         """, unsafe_allow_html=True)
 
-    ai_history = lay_danh_gia_ai_benh_nhan(username, video_name)
+    vn_cur = selected_v.get("video_name") or video_name
+    ai_history = lay_danh_gia_ai_benh_nhan(pu, vn_cur, exercise=ex_cur)
+    if ai_eval and (not ai_history or ai_history[0] is not ai_eval):
+        ai_history = [ai_eval] + [e for e in ai_history if e is not ai_eval]
     if not ai_history:
         return
 
@@ -6517,14 +6530,27 @@ def hien_thi_tab_phan_tich_va_video_ncv():
     )
     if v_cur:
         st.session_state.current_eval_video = v_cur
+        slot_cur = _slot_video_phan_tich(v_cur)
         if (
-            not st.session_state.get("reanalyze_triggered")
-            and not _session_phan_tich_khop_video(v_cur)
+            slot_cur
+            and st.session_state.get("_ncv_analysis_loaded_key")
+            and st.session_state.get("_ncv_analysis_loaded_key") != slot_cur
         ):
+            _xoa_session_phan_tich()
+        need_load = (
+            not st.session_state.get("reanalyze_triggered")
+            and v_cur.get("metrics")
+            and (
+                not _session_phan_tich_khop_video(v_cur)
+                or st.session_state.get("angle_df") is None
+            )
+        )
+        if need_load:
             with st.spinner(
                 f"📥 Đang nạp kết quả: {v_cur.get('full_name')} — {v_cur.get('exercise')}..."
             ):
-                tu_dong_nap_ket_qua_phan_tich_gan_nhat(v_cur, force=False)
+                if tu_dong_nap_ket_qua_phan_tich_gan_nhat(v_cur, force=True):
+                    st.rerun()
         v_cur = _lam_moi_ban_ghi_video_tu_db(st.session_state.get("current_eval_video") or v_cur)
     if v_cur:
         st.info(
@@ -6535,6 +6561,8 @@ def hien_thi_tab_phan_tich_va_video_ncv():
         hien_thi_ket_qua_gan_nhat_va_lich_su(
             v_cur.get("username"),
             v_cur.get("video_name"),
+            exercise=v_cur.get("exercise"),
+            selected_v=v_cur,
             key_suffix="ncv_combined",
             chi_nhan_xet=True,
         )
@@ -11565,13 +11593,27 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
             st.session_state.current_eval_video = v
             has_metrics = bool(v.get("metrics"))
 
+            slot_v = _slot_video_phan_tich(v)
+            if (
+                slot_v
+                and st.session_state.get("_ncv_analysis_loaded_key")
+                and st.session_state.get("_ncv_analysis_loaded_key") != slot_v
+            ):
+                _xoa_session_phan_tich()
             if not st.session_state.get('reanalyze_triggered', False):
-                if has_metrics and not _session_phan_tich_khop_video(v):
+                need_chart_load = has_metrics and (
+                    not _session_phan_tich_khop_video(v)
+                    or st.session_state.get("angle_df") is None
+                )
+                if need_chart_load:
                     with st.spinner(
                         f"📥 Đang tải kết quả: {v.get('full_name')} — {v.get('exercise')}..."
                     ):
-                        if tu_dong_nap_ket_qua_phan_tich_gan_nhat(v, force=False):
-                            st.rerun(scope="fragment")
+                        loaded = tu_dong_nap_ket_qua_phan_tich_gan_nhat(v, force=True)
+                        if not loaded or st.session_state.get("angle_df") is None:
+                            loaded = khoi_phuc_ket_qua_cu(v, tai_day_du=True)
+                        if loaded and st.session_state.get("angle_df") is not None:
+                            st.rerun()
 
             if st.session_state.get('reanalyze_triggered', False):
                 st.info("💡 Bạn đang cấu hình lại để chạy phân tích AI mới. Kết quả phân tích cũ vẫn được bảo lưu an toàn.")
@@ -12968,8 +13010,12 @@ def hien_thi_tab_ket_qua_da_chon(my_history_vids, my_evals, user_role, is_fresh_
     elif my_evals:
         p_username_hist = my_evals[0].get("patient_username")
     if p_username_hist and user_role in ("Bệnh nhân", "Bác sĩ / KTV PHCN", "Nghiên cứu viên"):
+        v_ctx = st.session_state.get("current_eval_video") or (my_history_vids[0] if my_history_vids else None)
         hien_thi_ket_qua_gan_nhat_va_lich_su(
             p_username_hist,
+            video_name=v_ctx.get("video_name") if v_ctx else None,
+            exercise=v_ctx.get("exercise") if v_ctx else None,
+            selected_v=v_ctx,
             key_suffix=f"pat_hist_{user_role}",
             chi_nhan_xet=True,
         )
