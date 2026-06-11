@@ -1490,14 +1490,153 @@ def check_cloud_file_exists(url):
         return False
 
 
+def _hf_dataset_resolve_urls(video_path):
+    """URL stream HF Dataset — ưu tiên bản H.264 _f.mp4, hỗ trợ Range Request."""
+    if not (HF_TOKEN and HF_DATASET_ID and video_path):
+        return None, None
+    try:
+        import urllib.parse
+        rel = get_clean_rel_path(video_path)
+        rel_f = (
+            rel.replace(".mp4", "_f.mp4")
+            .replace(".mov", "_f.mp4")
+            .replace(".MOV", "_f.mp4")
+            .replace(".avi", "_f.mp4")
+            .replace(".mkv", "_f.mp4")
+        )
+        base = f"https://huggingface.co/datasets/{HF_DATASET_ID}/resolve/main"
+        token_q = f"?token={HF_TOKEN}"
+        url_f = f"{base}/{urllib.parse.quote(rel_f, safe='/')}{token_q}"
+        url_raw = f"{base}/{urllib.parse.quote(rel, safe='/')}{token_q}"
+        return url_f, url_raw
+    except Exception:
+        return None, None
+
+
+def _prefetch_video_quiet(video_path):
+    """Tải video về local dưới nền — không chặn UI phát stream."""
+    if not video_path:
+        return
+
+    def _bg():
+        try:
+            for p in video_fallback_paths(video_path):
+                ensure_local_file(p, quiet=True, try_fallbacks=True)
+        except Exception:
+            pass
+
+    threading.Thread(target=_bg, daemon=True).start()
+
+
+def _render_video_html5_iframe(sources_html, comp_key, height=300, footer_html=""):
+    """Phát video HTML5 — preload metadata để hiện khung hình nhanh."""
+    import streamlit.components.v1 as _stcomp
+    foot = footer_html or ""
+    _stcomp.html(
+        f"""
+<!DOCTYPE html><html><head>
+<style>
+  body{{margin:0;padding:0;background:transparent;overflow:hidden;}}
+  video{{width:100%;border-radius:8px;display:block;height:{height}px;background:#000;object-fit:contain;}}
+  .vf{{color:#aaa;font-size:0.72rem;margin-top:4px;text-align:right;font-family:sans-serif;}}
+</style>
+</head><body>
+<video controls preload="metadata" playsinline>
+  {sources_html}
+  Trình duyệt không hỗ trợ video HTML5.
+</video>
+{f'<div class="vf">{foot}</div>' if foot else ''}
+</body></html>
+""",
+        height=height + (18 if foot else 0),
+        key=comp_key,
+    )
+
+
+def _try_render_cloud_video_stream(video_path, key_hint=""):
+    """Stream ngay từ HF Dataset nếu có — trả về True khi đã render player."""
+    url_f, url_raw = _hf_dataset_resolve_urls(video_path)
+    if not url_raw:
+        return False
+    h264_ok = bool(url_f and check_cloud_file_exists(url_f))
+    raw_ok = check_cloud_file_exists(url_raw)
+    if not h264_ok and not raw_ok:
+        return False
+    sources = []
+    if h264_ok:
+        sources.append(f'<source src="{url_f}" type="video/mp4">')
+    if raw_ok:
+        sources.append(f'<source src="{url_raw}" type="video/mp4">')
+    url_hash = hashlib.md5(f"{video_path}|{key_hint}".encode()).hexdigest()[:8]
+    _render_video_html5_iframe(
+        "\n  ".join(sources),
+        f"cloud_fast_{url_hash}",
+        footer_html=f"☁️ Stream từ Cloud — {os.path.basename(video_path)}",
+    )
+    return True
+
+
+def _render_video_static_iframe(target_path, video_key=None):
+    """Phát file local qua static/ + iframe — không đọc hết file vào RAM."""
+    if not target_path or not os.path.exists(target_path):
+        return False
+    try:
+        import shutil
+
+        static_dir = os.path.join(".", "static")
+        os.makedirs(static_dir, exist_ok=True)
+        path_hash = hashlib.md5(target_path.encode()).hexdigest()[:10]
+        safe_name = f"stream_{path_hash}.mp4"
+        static_path = os.path.join(static_dir, safe_name)
+        video_key = video_key or f"st_vid_comp_{path_hash}"
+
+        if not os.path.exists(static_path):
+            try:
+                os.link(target_path, static_path)
+            except Exception:
+                shutil.copy2(target_path, static_path)
+        elif os.path.getsize(static_path) != os.path.getsize(target_path):
+            try:
+                os.remove(static_path)
+                os.link(target_path, static_path)
+            except Exception:
+                shutil.copy2(target_path, static_path)
+
+        iframe_height = 400
+        try:
+            cap_info = cv2.VideoCapture(target_path)
+            if cap_info.isOpened():
+                v_w = cap_info.get(cv2.CAP_PROP_FRAME_WIDTH)
+                v_h = cap_info.get(cv2.CAP_PROP_FRAME_HEIGHT)
+                cap_info.release()
+                if v_w > 0 and v_h > 0:
+                    iframe_height = int((v_h / v_w) * 640)
+                    iframe_height = max(200, min(iframe_height, 650))
+        except Exception:
+            pass
+
+        _render_video_html5_iframe(
+            f'<source src="static/{safe_name}" type="video/mp4">',
+            video_key,
+            height=iframe_height,
+            footer_html=f"📁 Local — {os.path.basename(target_path)}",
+        )
+        return True
+    except Exception as static_err:
+        print(f"[render_video] static iframe fail: {static_err}")
+        return False
+
+
 def _render_video_streamlit_native(target_path):
-    """Phát video qua st.video — ổn định trên HF Space (iframe static/ thường đen màn hình)."""
+    """Phát video qua st.video — chỉ file nhỏ; file lớn dùng iframe để tránh spinner lâu."""
     if not target_path or not os.path.exists(target_path):
         return False
     try:
         mtime = os.path.getmtime(target_path)
         size = os.path.getsize(target_path)
         if size < 5 * 1024 or not _check_video_valid_cached(target_path, mtime, size):
+            return False
+        if size > 6 * 1024 * 1024:
             return False
         st.video(target_path, format="video/mp4")
         return True
@@ -1506,8 +1645,8 @@ def _render_video_streamlit_native(target_path):
         return False
 
 
-def dam_bao_tai_video_phan_tich(processed_path):
-    """Tải video phân tích về local — ưu tiên H.264, fallback bản .mp4 gốc nếu _f chua co tren HF."""
+def dam_bao_tai_video_phan_tich(processed_path, allow_sync_transcode=False):
+    """Tải video phân tích về local — không transcode đồng bộ khi chỉ cần phát."""
     if not processed_path:
         return None
     ready = find_ready_local_video(processed_path)
@@ -1519,7 +1658,7 @@ def dam_bao_tai_video_phan_tich(processed_path):
     if ensure_local_file(processed_path, quiet=True, try_fallbacks=True):
         ready = find_ready_local_video(processed_path)
         if ready:
-            pb = resolve_playback_video_path(ready, sync_transcode=True)
+            pb = resolve_playback_video_path(ready, sync_transcode=allow_sync_transcode)
             if pb and is_local_file_ready(pb):
                 return pb
             return ready
@@ -2005,13 +2144,15 @@ def render_video(video_path, check_h264=True):
             st.error(f'⚠️ Lỗi hiển thị video: {e}')
         return
 
-    # Bước 1: Tải video từ HF nếu cần (_f.mp4 hoặc .mp4 gốc — không lỗi khi _f chua upload)
+    # Ưu tiên stream Cloud ngay — trình duyệt Range Request, không chờ tải hết file
+    local_ready = find_ready_local_video(video_path)
+    if not local_ready:
+        ensure_playable_video(video_path)
+        _prefetch_video_quiet(video_path)
+        if _try_render_cloud_video_stream(video_path):
+            return
+
     final_h264 = get_final_h264_path(video_path)
-    if check_h264 and not find_ready_local_video(video_path):
-        try:
-            ensure_local_file(video_path, quiet=True, try_fallbacks=True)
-        except Exception:
-            pass
     is_local_h264 = False
     if os.path.exists(final_h264) and os.path.getsize(final_h264) >= 5 * 1024:
         try:
@@ -2094,156 +2235,20 @@ def render_video(video_path, check_h264=True):
                     st.rerun()
                 return
 
-        # Ưu tiên st.video — iframe static/ trong components.html hay bị đen trên HF Space
         if _render_video_streamlit_native(target_path):
             return
-
-        # Fallback: static/ + iframe (môi trường local)
-        try:
-            import hashlib
-            import shutil
-            
-            # Tạo thư mục static/ nếu chưa có
-            static_dir = os.path.join(".", "static")
-            os.makedirs(static_dir, exist_ok=True)
-            
-            # Đặt tên file an toàn (ASCII) để tránh lỗi ký tự Unicode tiếng Việt
-            path_hash = hashlib.md5(target_path.encode()).hexdigest()[:10]
-            safe_name = f"stream_{path_hash}.mp4"
-            static_path = os.path.join(static_dir, safe_name)
-            video_key = f"st_vid_comp_{path_hash}"
-            
-            # Đồng bộ file từ /data hoặc local sang thư mục static bằng hard link (tốc độ ánh sáng, 0ms)
-            if not os.path.exists(static_path):
-                try:
-                    os.link(target_path, static_path)
-                except:
-                    shutil.copy2(target_path, static_path)
-            elif os.path.getsize(static_path) != os.path.getsize(target_path):
-                try:
-                    os.remove(static_path)
-                    os.link(target_path, static_path)
-                except:
-                    shutil.copy2(target_path, static_path)
-            
-            # Lấy kích thước video để cấu hình chiều cao iframe phù hợp
-            iframe_height = 400
-            try:
-                import cv2
-                cap_info = cv2.VideoCapture(target_path)
-                if cap_info.isOpened():
-                    v_w = cap_info.get(cv2.CAP_PROP_FRAME_WIDTH)
-                    v_h = cap_info.get(cv2.CAP_PROP_FRAME_HEIGHT)
-                    cap_info.release()
-                    if v_w > 0 and v_h > 0:
-                        iframe_height = int((v_h / v_w) * 640)
-                        # Giới hạn chiều cao an toàn để giao diện cân đối
-                        iframe_height = max(200, min(iframe_height, 650))
-            except:
-                pass
-
-            import streamlit.components.v1 as _stcomp
-            _stcomp.html(f"""
-<!DOCTYPE html><html><head>
-<style>
-  body{{margin:0;padding:0;background:transparent;overflow:hidden;}}
-  video{{width:100%;height:100%;border-radius:8px;display:block;background:#000;box-shadow:0 4px 15px rgba(0,0,0,0.3);object-fit:contain;}}
-</style>
-</head><body>
-<video id="vp" controls preload="auto" playsinline style="width:100%; height:calc({iframe_height}px - 10px);">
-  <source src="static/{safe_name}" type="video/mp4">
-  Trình duyệt không hỗ trợ video HTML5.
-</video>
-</body></html>
-""", height=iframe_height, key=video_key)
+        if _render_video_static_iframe(target_path):
             return
-        except Exception as _ve:
-            # Fallback dự phòng nếu static serving gặp trục trặc: phát qua bytes (không truyền key cho st.video để tránh lỗi)
-            try:
-                with open(target_path, 'rb') as _vf:
-                    _vbytes = _vf.read()
-                if _vbytes:
-                    st.video(_vbytes, format="video/mp4")
-                    return
-            except Exception as _ve2:
-                st.error(f"❌ Không thể phát video: {_ve2}")
-                return
-
-
-    # 2. TRƯỜNG HỢP 2: Không có sẵn cục bộ -> Stream trực tiếp từ Cloud
-    # Đồng thời kích hoạt tải/convert dưới nền
-    ensure_playable_video(video_path) # Chạy nền, không block UI
-    
-    if HF_TOKEN and HF_DATASET_ID:
-        try:
-            rel_path = get_clean_rel_path(video_path)
-            rel_path_f = rel_path.replace('.mp4', '_f.mp4').replace('.mov', '_f.mp4').replace('.MOV', '_f.mp4').replace('.avi', '_f.mp4').replace('.mkv', '_f.mp4')
-            
-            import urllib.parse
-            rel_path_encoded_raw = urllib.parse.quote(rel_path, safe='/')
-            cloud_url_raw = f"https://huggingface.co/datasets/{HF_DATASET_ID}/resolve/main/{rel_path_encoded_raw}?token={HF_TOKEN}"
-
-            # Chỉ dùng URL _f.mp4 trên cloud nếu local _f.mp4 đã tồn tại và hợp lệ
-            # (tức là đã được push lên cloud thành công sau khi transcode hoàn tất)
-            h264_local = get_final_h264_path(video_path)
-            h264_cloud_valid = False
-            if os.path.exists(h264_local) and os.path.getsize(h264_local) > 5 * 1024:
-                try:
-                    mtime_h = os.path.getmtime(h264_local)
-                    size_h = os.path.getsize(h264_local)
-                    h264_cloud_valid = _check_video_valid_cached(h264_local, mtime_h, size_h)
-                except:
-                    pass
-
-            # Tối ưu: Nếu chưa có file local, kiểm tra nhanh xem file _f.mp4 đã có sẵn trên Cloud chưa
-            rel_path_encoded_f = urllib.parse.quote(rel_path_f, safe='/')
-            cloud_url_f = f"https://huggingface.co/datasets/{HF_DATASET_ID}/resolve/main/{rel_path_encoded_f}?token={HF_TOKEN}"
-            if not h264_cloud_valid:
-                try:
-                    if check_cloud_file_exists(cloud_url_f):
-                        h264_cloud_valid = True
-                except:
-                    pass
-            
-            if not h264_cloud_valid:
-                is_mp4 = video_path.lower().endswith('.mp4')
-                if not is_mp4:
-                    st.warning("⚠️ Video gốc định dạng HEVC/MOV chưa được tối ưu hóa. Vui lòng bấm **PHÂN TÍCH VÀ TRÍCH XUẤT KHUNG XƯƠNG NGAY** bên cạnh để trích xuất và nén tự động sang MP4 H.264.")
-                    return
-
-            # Thông báo nếu đang transcode dưới nền
-            is_transcoding = '_transcoding_jobs' in globals() and h264_local in _transcoding_jobs
-            if is_transcoding or not h264_cloud_valid:
-                st.info("⏳ Hệ thống đang nén video sang H.264 dưới nền. Video đang phát thử từ Cloud (có thể không play được trên 1 số trình duyệt). Vui lòng đợi 2-5 phút rồi tải lại trang (F5).")
-
-            if h264_cloud_valid:
-                sources_html = f'<source src="{cloud_url_f}" type="video/mp4">\n  <source src="{cloud_url_raw}">'
-            else:
-                # _f.mp4 chưa valid trên cloud, chỉ stream raw
-                sources_html = f'<source src="{cloud_url_raw}">'
-
-            import streamlit.components.v1 as _stcomp
-            import hashlib
-            url_hash = hashlib.md5(video_path.encode()).hexdigest()[:8]
-            _stcomp.html(f"""
-<!DOCTYPE html><html><head>
-<style>
-  body{{margin:0;padding:0;background:transparent;overflow:hidden;}}
-  video{{width:100%;border-radius:8px;display:block;height:240px;background:#000;}}
-</style>
-</head><body>
-<video id="vp" controls preload="auto" playsinline onerror="this.outerHTML=\'<div style=\\'padding:20px;background:#442222;color:#ff8888;border-radius:8px;text-align:center;height:240px;display:flex;align-items:center;justify-content:center;\\'>⚠️ Lỗi phát video: Định dạng gốc chưa được nén xong (HEVC/H.265 không hỗ trợ trình duyệt).<br>Vui lòng đợi hệ thống nén xong rồi tải lại trang!</div>\'">
-  {sources_html}
-  Trình duyệt không hỗ trợ video HTML5.
-</video>
-<div style="color:#ffd700; font-size:0.72rem; margin-top:4px; text-align:right; font-family:sans-serif;">
-  ☁️ Đang stream trực tiếp từ Cloud&nbsp;&nbsp;|&nbsp;&nbsp;📹 {os.path.basename(video_path)}
-</div>
-</body></html>
-""", height=270, key=f"cloud_stream_vid_{url_hash}")
+        if _try_render_cloud_video_stream(video_path, key_hint="local_fallback"):
             return
-        except:
-            pass
+        st.error("❌ Không thể phát video local. Thử tải lại trang (F5).")
+        return
+
+
+    ensure_playable_video(video_path)
+    _prefetch_video_quiet(video_path)
+    if _try_render_cloud_video_stream(video_path, key_hint="fallback"):
+        return
 
     st.warning("⚠️ File video đang được xử lý dưới nền hoặc không khả dụng.")
 
@@ -3888,7 +3893,7 @@ def _dam_bao_video_san_sang_play(path):
         ensure_local_file(candidate, quiet=True, try_fallbacks=True)
     ready = find_ready_local_video(path)
     if ready:
-        pb = resolve_playback_video_path(ready, sync_transcode=True)
+        pb = resolve_playback_video_path(ready)
         return pb if pb and is_local_file_ready(pb) else ready
     return path
 
@@ -14102,16 +14107,22 @@ def hien_thi_frames_day_du(key_suffix=""):
     acc_g1 = metrics_g1.get('do_chinh_xac', 0.0) if isinstance(metrics_g1, dict) else 0.0
     acc_g2 = metrics_g2.get('do_chinh_xac', 0.0) if isinstance(metrics_g2, dict) else 0.0
     acc_g3 = metrics_g3.get('do_chinh_xac', 0.0) if isinstance(metrics_g3, dict) else 0.0
-    processed_video_path = get_local_frame_path(st.session_state.get('processed_video_path'))
+    raw_video_path = st.session_state.get('processed_video_path')
+    processed_video_path = get_local_frame_path(raw_video_path) or raw_video_path
     playback_video_path = None
     if processed_video_path:
-        if not is_local_file_ready(processed_video_path):
-            with st.spinner("📥 Đang tải video phân tích từ hệ thống..."):
-                playback_video_path = dam_bao_tai_video_phan_tich(processed_video_path)
+        local_ready = find_ready_local_video(processed_video_path)
+        if local_ready:
+            playback_video_path = (
+                resolve_playback_video_path(local_ready)
+                or local_ready
+            )
         else:
-            playback_video_path = dam_bao_tai_video_phan_tich(processed_video_path) or resolve_playback_video_path(processed_video_path)
+            playback_video_path = processed_video_path
+            ensure_playable_video(processed_video_path)
+            _prefetch_video_quiet(processed_video_path)
     frames_zip = get_local_frame_path(st.session_state.get('frames_zip'))
-    has_video = bool(playback_video_path and is_local_file_ready(playback_video_path))
+    has_video = bool(processed_video_path)
 
     # 0. HIỂN THỊ VIDEO ĐÃ PHÂN TÍCH
     st.markdown("### 🎬 VIDEO ĐÃ PHÂN TÍCH")
