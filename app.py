@@ -1551,6 +1551,7 @@ def nap_phien_benh_nhan_vao_session(selected_v):
         st.session_state.exercise['chuan']['sai_so'] = selected_v['sai_so']
     st.session_state.angle_df = None
     st.session_state.current_df_csv_path = selected_v.get('df_path')
+    st.session_state.pop("_ncv_analysis_loaded_key", None)
 
 
 def _lam_moi_ban_ghi_video_tu_db(v):
@@ -1577,7 +1578,7 @@ def _tim_video_phan_tich_moi_nhat():
     return analyzed[0] if analyzed else None
 
 
-def _tim_video_co_du_lieu_tai_duoc(preferred=None):
+def _tim_video_co_du_lieu_tai_duoc(preferred=None, only_preferred=False):
     """Thử lần lượt các video đã phân tích — chọn bản tải được CSV/JSON."""
     candidates = []
     seen_slots = set()
@@ -1586,6 +1587,14 @@ def _tim_video_co_du_lieu_tai_duoc(preferred=None):
         if p:
             candidates.append(p)
             seen_slots.add(_slot_nghien_cuu_key(p.get("username"), p.get("exercise")))
+    if only_preferred:
+        for v in candidates:
+            if not v or not v.get("metrics"):
+                continue
+            df, src = _nap_angle_df_tu_video(v)
+            if df is not None:
+                return v, df, src
+        return None, None, None
     for v in _danh_sach_video_phan_tich_sap_xep():
         sk = _slot_nghien_cuu_key(v.get("username"), v.get("exercise"))
         if sk not in seen_slots:
@@ -1785,10 +1794,17 @@ def tu_dong_nap_ket_qua_phan_tich_gan_nhat(v=None, force=False):
         return True
 
     preferred = v or cur or None
-    found_v, pre_df, pre_src = _tim_video_co_du_lieu_tai_duoc(preferred)
+    pref_slot = _slot_video_phan_tich(
+        _lam_moi_ban_ghi_video_tu_db(preferred) or preferred
+    ) if preferred else None
+    found_v, pre_df, pre_src = _tim_video_co_du_lieu_tai_duoc(
+        preferred, only_preferred=bool(preferred)
+    )
     if not found_v:
         found_v = _lam_moi_ban_ghi_video_tu_db(preferred) if preferred else _tim_video_phan_tich_moi_nhat()
     if not found_v or not found_v.get("metrics"):
+        return False
+    if pref_slot and _slot_video_phan_tich(found_v) != pref_slot:
         return False
 
     ok = khoi_phuc_ket_qua_cu(found_v, tai_day_du=True)
@@ -6415,7 +6431,9 @@ def hien_thi_tab_phan_tich_va_video_ncv():
 
     dong_bo_hf_json_nhe_tab(["video_list.json"])
 
-    v_cur = st.session_state.get("current_eval_video") or _tim_video_phan_tich_moi_nhat()
+    v_cur = _lam_moi_ban_ghi_video_tu_db(
+        st.session_state.get("current_eval_video") or _tim_video_phan_tich_moi_nhat()
+    )
     if v_cur:
         st.session_state.current_eval_video = v_cur
         if (
@@ -6426,16 +6444,18 @@ def hien_thi_tab_phan_tich_va_video_ncv():
                 f"📥 Đang nạp kết quả: {v_cur.get('full_name')} — {v_cur.get('exercise')}..."
             ):
                 tu_dong_nap_ket_qua_phan_tich_gan_nhat(v_cur, force=False)
+        v_cur = _lam_moi_ban_ghi_video_tu_db(st.session_state.get("current_eval_video") or v_cur)
     if v_cur:
         st.info(
             f"📌 Đang xem phân tích: **{v_cur.get('full_name', 'N/A')}** — "
-            f"**{v_cur.get('exercise', 'N/A')}**"
+            f"**{v_cur.get('exercise', 'N/A')}** · `{v_cur.get('video_name', '')}`"
         )
     if v_cur and v_cur.get("username"):
         hien_thi_ket_qua_gan_nhat_va_lich_su(
             v_cur.get("username"),
             v_cur.get("video_name"),
             key_suffix="ncv_combined",
+            chi_nhan_xet=True,
         )
         # (Đã bỏ hàng nút "Thao tác nhanh" thừa ở đây — subtab nằm ngay dưới,
         # nút Tải lại/Chạy mới hiển thị bên trong nội dung từng subtab.)
@@ -11541,56 +11561,49 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
 
         # TỰ ĐỘNG LOAD DỮ LIỆU — đúng BN/bài tập đang chọn (không dùng cache video khác)
         if st.session_state.get('current_eval_video'):
-            v = st.session_state.current_eval_video
-            if 'metrics' in v and v['metrics']:
-                if not st.session_state.get('reanalyze_triggered', False):
-                    if not _session_phan_tich_khop_video(v):
-                        with st.spinner(
-                            f"📥 Đang tải kết quả: {v.get('full_name')} — {v.get('exercise')}..."
-                        ):
-                            if tu_dong_nap_ket_qua_phan_tich_gan_nhat(v, force=False):
-                                st.rerun(scope="fragment")
+            v = _lam_moi_ban_ghi_video_tu_db(st.session_state.current_eval_video)
+            st.session_state.current_eval_video = v
+            has_metrics = bool(v.get("metrics"))
 
-                
-                # Nếu người dùng chủ động nhấn chạy lại phân tích -> Hiện tùy chọn quay lại kết quả cũ
-                if st.session_state.get('reanalyze_triggered', False):
-                    st.info("💡 Bạn đang cấu hình lại để chạy phân tích AI mới. Kết quả phân tích cũ vẫn được bảo lưu an toàn.")
-                    if st.button("⬅️ HỦY BỎ & XEM LẠI KẾT QUẢ ĐÃ LƯU", key=f"btn_cancel_reanalyze_{key_suffix}", width="stretch"):
-                        with st.spinner("📥 Đang tải biểu đồ, video và ảnh frame..."):
-                            khoi_phuc_ket_qua_cu(v, tai_day_du=True)
-                        st.toast("✅ Đã quay lại kết quả phân tích cũ!", icon="📊")
-                        st.rerun(scope="app")
-                    st.markdown("---")
+            if not st.session_state.get('reanalyze_triggered', False):
+                if has_metrics and not _session_phan_tich_khop_video(v):
+                    with st.spinner(
+                        f"📥 Đang tải kết quả: {v.get('full_name')} — {v.get('exercise')}..."
+                    ):
+                        if tu_dong_nap_ket_qua_phan_tich_gan_nhat(v, force=False):
+                            st.rerun(scope="fragment")
 
-                prog_data = read_progress(v['video_path'])
+            if st.session_state.get('reanalyze_triggered', False):
+                st.info("💡 Bạn đang cấu hình lại để chạy phân tích AI mới. Kết quả phân tích cũ vẫn được bảo lưu an toàn.")
+                if st.button("⬅️ HỦY BỎ & XEM LẠI KẾT QUẢ ĐÃ LƯU", key=f"btn_cancel_reanalyze_{key_suffix}", width="stretch"):
+                    with st.spinner("📥 Đang tải biểu đồ, video và ảnh frame..."):
+                        khoi_phuc_ket_qua_cu(v, tai_day_du=True)
+                    st.toast("✅ Đã quay lại kết quả phân tích cũ!", icon="📊")
+                    st.rerun(scope="app")
+                st.markdown("---")
+
+            if not has_metrics or st.session_state.get('reanalyze_triggered', False):
+                prog_data = read_progress(v.get('video_path'))
                 is_processing = (
                     not st.session_state.get("view_old_analysis", False)
                     and prog_data
                     and prog_data.get("status") == "processing"
                 )
-                # KHÔNG tự khởi chạy phân tích khi vào tab — phân tích mới chỉ chạy khi
-                # người dùng chủ động bấm "🚀 Chạy phân tích mới" / "🚀 CHẠY PHÂN TÍCH & TRÍCH XUẤT MỚI".
-                
-                # Nếu video CHƯA CÓ metrics hoặc NCV muốn chạy lại
                 if st.session_state.get('reanalyze_triggered') or is_processing:
                     st.info(
                         "🔬 **Chế độ phân tích mới** — MediaPipe 33 landmarks, đối chiếu YouTube (REF), "
                         "huấn luyện/nạp ML Classifier. **Bạn có thể chuyển sang tab khác** trong lúc chờ; "
                         "kết quả sẽ tự nạp khi hoàn tất."
                     )
-                else:
+                elif not has_metrics:
                     st.warning(f"⚠️ Video '{v.get('video_name')}' của BN {v.get('full_name')} chưa được phân tích.")
-                # Kiểm tra trạng thái tiến trình để ẩn video player khi đang phân tích
                 col_v1, col_v2 = st.columns([1.3, 1.0])
                 with col_v1:
                     if is_processing:
                         st.caption("🔬 Đang trích xuất khung xương ở bên phải. Bạn có thể xem video gốc bên dưới — tiến trình vẫn chạy bình thường.")
-                    hien_thi_video_goc_fragment(v['video_path'], key_suffix, v.get('video_name', ''))
+                    hien_thi_video_goc_fragment(v.get('video_path'), key_suffix, v.get('video_name', ''))
                 with col_v2:
                     hien_thi_khu_vuc_phan_tich_chuyen_sau_fragment(v, key_suffix)
-                return
-            else:
-                st.info("ℹ️ Chưa có video nào để phân tích. Vui lòng chọn một video ở trang chủ hoặc upload video mới.")
                 return
     
     # Lấy dữ liệu (Ưu tiên tham số truyền vào từ Doctor/Patient view)
@@ -11615,10 +11628,14 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
                     pass
     
     if tk is None or df is None:
-        v_re = st.session_state.get("current_eval_video") or _tim_video_phan_tich_moi_nhat()
+        v_re = _lam_moi_ban_ghi_video_tu_db(
+            st.session_state.get("current_eval_video") or _tim_video_phan_tich_moi_nhat()
+        )
         if v_re:
-            with st.spinner("📥 Đang tải kết quả phân tích gần nhất (biểu đồ, video, khung xương)..."):
-                if tu_dong_nap_ket_qua_phan_tich_gan_nhat(v_re, force=True):
+            with st.spinner(
+                f"📥 Đang tải kết quả: {v_re.get('full_name')} — {v_re.get('exercise')}..."
+            ):
+                if tu_dong_nap_ket_qua_phan_tich_gan_nhat(v_re, force=False):
                     tk = st.session_state.get("stats") or tk
                     df = st.session_state.get("angle_df") if df is None else df
                     _bt_new = st.session_state.get("exercise")
@@ -15849,7 +15866,7 @@ def hien_thi_danh_sach_video_fragment(user_role):
                             # Đổi nhãn nút theo vai trò
                             eval_btn_label = "📝 Đánh giá của chuyên môn PHCN" if user_role == "Bác sĩ / KTV PHCN" else "📝 Phân tích và trích xuất khung xương AI"
                             if st.button(eval_btn_label, key=f"eval_btn_{idx}", width="stretch"):
-                                st.session_state.current_eval_video = v
+                                st.session_state.current_eval_video = _lam_moi_ban_ghi_video_tu_db(v)
                                 _xoa_session_phan_tich()
                                 st.session_state.reanalyze_triggered = False
                                 vp = v.get("video_path")
