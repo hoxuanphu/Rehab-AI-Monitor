@@ -8707,6 +8707,10 @@ def check_and_populate_background_result(video_path):
                     }
             except Exception as e_sync:
                 print("Lỗi đồng bộ current_eval_video:", e_sync)
+
+            v_sync = st.session_state.get("current_eval_video")
+            if v_sync:
+                _gan_khoa_session_phan_tich(v_sync)
             
             # Xóa progress file sau khi đã nạp kết quả
             p_file = get_progress_file(video_path)
@@ -8737,21 +8741,6 @@ def finalize_background_analysis_if_ready(video_path):
         st.session_state[done_key] = True
         st.session_state.reanalyze_triggered = False
         st.session_state.view_old_analysis = True
-        return True
-    return False
-
-def finalize_and_refresh_analysis(video_path):
-    """
-    Nạp kết quả phân tích nền (nếu đã xong) và refresh TOÀN TRANG.
-    Dùng scope="app" để khi gọi từ trong @st.fragment vẫn rerun cả trang,
-    tránh lỗi kết quả không hiển thị (fragment rerun chỉ làm mới vùng nhỏ).
-    """
-    if video_path and finalize_background_analysis_if_ready(video_path):
-        st.toast(
-            "✅ Phân tích AI hoàn tất! Kết quả đã hiển thị — bạn có thể chuyển tab khác.",
-            icon="🎉",
-        )
-        st.rerun(scope="app")
         return True
     return False
 
@@ -8946,79 +8935,16 @@ def hien_thi_tien_trinh_background(video_path):
     return False
 
 def finalize_and_refresh_analysis(video_path):
-    """Xử lý kết quả phân tích thành công: cập nhật session_state rồi rerun toàn trang.
-    Hàm này được gọi từ các fragment khi status == 'success'.
-    """
-    prog_data = read_progress(video_path)
-    if not prog_data:
-        # Không có dữ liệu tiến độ — thử load từ video_list
-        try:
-            v_re = _tim_video_cho_progress(video_path)
-            if v_re and v_re.get('metrics'):
-                st.session_state.stats = v_re['metrics']
-                st.session_state.has_data = True
-                st.session_state.processed_video_path = v_re.get('processed_path', video_path)
-                st.session_state.uploaded_file_name = v_re.get('video_name', '')
-                st.session_state.all_frames_data_path = v_re.get('all_frames_data_path')
-                ex_base = next((BAI_TAP[k] for k in BAI_TAP if BAI_TAP[k]['ten'] == v_re.get('exercise', '')), BAI_TAP['codman'])
-                st.session_state.exercise = ex_base.copy()
-                if 'sai_so' in v_re:
-                    st.session_state.exercise['chuan'] = ex_base['chuan'].copy()
-                    st.session_state.exercise['chuan']['sai_so'] = v_re['sai_so']
-                if v_re.get('df_path') and os.path.exists(v_re['df_path']):
-                    st.session_state.angle_df = read_display_csv_fast(v_re['df_path'])
-                st.session_state.reanalyze_triggered = False
-                st.toast("✅ Phân tích hoàn tất! Đang hiển thị kết quả...", icon="🎉")
-                st.rerun(scope="fragment")
-        except Exception as e:
-            print(f"[finalize_and_refresh] Lỗi fallback: {e}")
+    """Nạp kết quả phân tích nền khi xong và refresh UI để hiện biểu đồ ngay."""
+    if not video_path:
         return
-
-    result = prog_data.get("result", {})
-    if not result:
-        # Progress file tồn tại nhưng không có result — xóa file và rerun
-        p_file = get_progress_file(video_path)
-        try:
-            if os.path.exists(p_file):
-                os.remove(p_file)
-        except: pass
-        st.rerun(scope="fragment")
-        return
-
-    # Lấy kết quả phân tích
-    stats = result.get("stats", {})
-    processed_path = result.get("processed_video_path", "")
-    df_path = result.get("df_path", "")
-    all_frames_data_path = result.get("all_frames_data_path", "")
-    exercise = result.get("exercise", {})
-    video_name = prog_data.get("video_name", "")
-
-    # Cập nhật session_state
-    st.session_state.stats = stats
-    st.session_state.has_data = True
-    st.session_state.processed_video_path = processed_path
-    st.session_state.all_frames_data_path = all_frames_data_path
-    st.session_state.uploaded_file_name = video_name
-    st.session_state.reanalyze_triggered = False
-    if exercise:
-        st.session_state.exercise = exercise
-
-    # Đọc DataFrame góc nếu có
-    if df_path and os.path.exists(df_path):
-        try:
-            st.session_state.angle_df = read_display_csv_fast(df_path)
-        except Exception as e:
-            print(f"[finalize_and_refresh] Lỗi đọc CSV: {e}")
-
-    # Xóa progress file để fragment không loop lại
-    p_file = get_progress_file(video_path)
-    try:
-        if os.path.exists(p_file):
-            os.remove(p_file)
-    except: pass
-
-    st.toast("✅ Phân tích hoàn tất! Đang hiển thị kết quả...", icon="🎉")
-    st.rerun(scope="fragment")
+    if finalize_background_analysis_if_ready(video_path):
+        v = _lam_moi_ban_ghi_video_tu_db(st.session_state.get("current_eval_video"))
+        if v:
+            st.session_state.current_eval_video = v
+            _gan_khoa_session_phan_tich(v)
+        st.toast("✅ Phân tích hoàn tất! Đang hiển thị kết quả...", icon="🎉")
+        st.rerun()
 
 @st.fragment(run_every=4)
 def hien_thi_tien_trinh_background_small(video_path):
@@ -9261,6 +9187,7 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
             st.session_state.view_old_analysis = False
             st.session_state.has_data = False
             st.session_state.pop("_ncv_analysis_loaded_key", None)
+            st.session_state.pop(f"_bg_done_{hashlib.md5(video_path.encode()).hexdigest()}", None)
             ncv_gd = st.session_state.get('ncv_giai_doan', PHASE_UI_LABELS["g2"])
             bat_dau_phan_tich_background(
                 video_path=video_path,
@@ -11607,12 +11534,16 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
     """Hiển thị tab phân tích với thiết kế chuyên nghiệp và nhận định lâm sàng"""
     user_role = st.session_state.user_info.get('role')
 
-    # Kiểm tra tiến trình background trước tiên nếu đang chọn một video.
-    # Chỉ nạp khi KHÔNG ở chế độ chạy lại (tránh ghi đè trạng thái cấu hình phân tích mới).
-    if st.session_state.get('current_eval_video') and not st.session_state.get('reanalyze_triggered', False):
+    # Luôn kiểm tra phân tích nền đã xong — kể cả đang chạy phân tích mới
+    if st.session_state.get('current_eval_video'):
         v_path = st.session_state.current_eval_video.get('video_path')
-        if v_path:
-            finalize_background_analysis_if_ready(v_path)
+        if v_path and finalize_background_analysis_if_ready(v_path):
+            v_done = _lam_moi_ban_ghi_video_tu_db(st.session_state.current_eval_video)
+            if v_done:
+                st.session_state.current_eval_video = v_done
+                _gan_khoa_session_phan_tich(v_done)
+            st.toast("✅ Phân tích xong! Đang hiển thị biểu đồ...", icon="🎉")
+            st.rerun(scope="fragment")
 
     # Nếu không có dữ liệu truyền vào -> Kiểm tra tải tự động (Dành cho NCV)
     if stats_ext is None and df_ext is None:
@@ -11648,18 +11579,26 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
                     _quay_lai_ket_qua_cu_da_luu(v)
                 st.markdown("---")
 
-            if not has_metrics or st.session_state.get('reanalyze_triggered', False):
-                prog_data = read_progress(v.get('video_path'))
-                is_processing = (
-                    not st.session_state.get("view_old_analysis", False)
-                    and prog_data
-                    and prog_data.get("status") == "processing"
-                )
+            prog_data = read_progress(v.get('video_path'))
+            is_processing = bool(
+                prog_data and prog_data.get("status") == "processing"
+            )
+            co_ket_qua_san_sang = bool(
+                st.session_state.get("has_data")
+                and st.session_state.get("angle_df") is not None
+                and not st.session_state.get("reanalyze_triggered")
+                and not is_processing
+            )
+            if not co_ket_qua_san_sang and (
+                not has_metrics
+                or st.session_state.get('reanalyze_triggered', False)
+                or is_processing
+            ):
                 if st.session_state.get('reanalyze_triggered') or is_processing:
                     st.info(
                         "🔬 **Chế độ phân tích mới** — MediaPipe 33 landmarks, đối chiếu YouTube (REF), "
                         "huấn luyện/nạp ML Classifier. **Bạn có thể chuyển sang tab khác** trong lúc chờ; "
-                        "kết quả sẽ tự nạp khi hoàn tất."
+                        "kết quả sẽ **tự hiển thị biểu đồ** khi hoàn tất."
                     )
                 elif not has_metrics:
                     st.warning(f"⚠️ Video '{v.get('video_name')}' của BN {v.get('full_name')} chưa được phân tích.")
