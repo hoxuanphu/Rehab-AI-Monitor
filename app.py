@@ -1794,6 +1794,10 @@ def tu_dong_nap_ket_qua_phan_tich_gan_nhat(v=None, force=False):
         return True
 
     preferred = v or cur or None
+    if preferred:
+        _dong_bo_video_list_day_du_tu_hf()
+        preferred, _ = tai_tep_phan_tich_tu_hf(preferred)
+        st.session_state.current_eval_video = preferred
     pref_slot = _slot_video_phan_tich(
         _lam_moi_ban_ghi_video_tu_db(preferred) or preferred
     ) if preferred else None
@@ -1895,7 +1899,10 @@ def hien_thi_nut_tai_lai_va_phan_tich_moi(v_re, key_suffix=""):
             type="primary",
             use_container_width=True,
         ):
-            with st.spinner("📥 Đang tải biểu đồ, video và ảnh frame..."):
+            with st.spinner("📥 Đang tải biểu đồ, video và ảnh frame từ Cloud..."):
+                _dong_bo_video_list_day_du_tu_hf(force=True)
+                v_re, _ = tai_tep_phan_tich_tu_hf(v_re)
+                st.session_state.current_eval_video = v_re
                 ok = khoi_phuc_ket_qua_cu(v_re, tai_day_du=True)
             if ok:
                 chi_tiet = []
@@ -2718,8 +2725,8 @@ def thong_bao_loi_tai_hf():
         st.warning(f"☁️ **Không tải được file phân tích từ Cloud:** {_hf_last_download_error}")
     elif ok:
         st.info(
-            "☁️ Cloud Sync đã kết nối nhưng file CSV/JSON của video này chưa có trên Dataset. "
-            "Hệ thống đang thử các video khác hoặc bạn bấm **Tải lại kết quả đã lưu**."
+            "☁️ Cloud Sync đã kết nối nhưng file CSV/JSON của **video đang chọn** chưa tải được từ Dataset. "
+            "Bấm **Tải lại kết quả đã lưu** để thử tải lại từ Cloud, hoặc chạy **Phân tích mới** nếu file chưa từng upload lên Dataset."
         )
 
 def khoi_tao_dong_bo_hf():
@@ -3008,6 +3015,44 @@ def _xoa_cache_sau_dong_bo_json(files):
             _evals_dedup_cached.clear()
     except Exception:
         pass
+
+
+def _dong_bo_video_list_day_du_tu_hf(force=False):
+    """Làm mới video_list.json từ HF — lấy df_path / metrics đầy đủ cho 8 video đã phân tích."""
+    if not (HF_TOKEN and HF_DATASET_ID):
+        return False
+    if not force and st.session_state.get("_video_list_full_sync"):
+        return True
+    dong_bo_json_cau_hinh_tu_hf(force_files=frozenset({"video_list.json"}))
+    _xoa_cache_sau_dong_bo_json(["video_list.json"])
+    st.session_state["_video_list_full_sync"] = True
+    return True
+
+
+def tai_tep_phan_tich_tu_hf(v):
+    """Tải CSV/JSON/video/frames phân tích từ HF Dataset cho đúng video đang chọn."""
+    if not v:
+        return v, False
+    v = _lam_moi_ban_ghi_video_tu_db(v)
+    if not v.get("df_path") and not v.get("all_frames_data_path"):
+        _dong_bo_video_list_day_du_tu_hf(force=True)
+        v = _lam_moi_ban_ghi_video_tu_db(v)
+    paths = []
+    for key in ("df_path", "all_frames_data_path", "processed_path", "frames_zip", "frames_zip_path"):
+        p = v.get(key)
+        if p:
+            paths.append(p)
+    for p in _duong_dan_csv_candidates(v) + _duong_dan_frames_json_candidates(v):
+        paths.append(p)
+    seen, got = set(), False
+    for p in paths:
+        rel = get_clean_rel_path(p)
+        if not rel or rel in seen:
+            continue
+        seen.add(rel)
+        if ensure_local_file(p, quiet=True):
+            got = True
+    return _lam_moi_ban_ghi_video_tu_db(v), got
 
 
 def dong_bo_hf_json_nhe_tab(files):
@@ -6429,7 +6474,7 @@ def hien_thi_tab_phan_tich_va_video_ncv():
     """Gộp tab Phân tích và Video cho Nghiên cứu viên"""
     st.markdown("## 🔬 PHÂN TÍCH CHUYÊN SÂU & DỮ LIỆU KHUNG XƯƠNG")
 
-    dong_bo_hf_json_nhe_tab(["video_list.json"])
+    _dong_bo_video_list_day_du_tu_hf()
 
     v_cur = _lam_moi_ban_ghi_video_tu_db(
         st.session_state.get("current_eval_video") or _tim_video_phan_tich_moi_nhat()
@@ -11645,15 +11690,23 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
         if tk is None or df is None:
             st.warning("⚠️ Dữ liệu phân tích chi tiết không khả dụng hoặc chưa được tải.")
             thong_bao_loi_tai_hf()
-            v_dbg = v_re or _tim_video_phan_tich_moi_nhat()
+            v_dbg = _lam_moi_ban_ghi_video_tu_db(
+                v_re or st.session_state.get("current_eval_video") or _tim_video_phan_tich_moi_nhat()
+            )
             if v_dbg:
+                csv_cands = _duong_dan_csv_candidates(v_dbg)
+                json_cands = _duong_dan_frames_json_candidates(v_dbg)
+                csv_try = v_dbg.get("df_path") or (csv_cands[0] if csv_cands else "chưa có")
+                json_try = v_dbg.get("all_frames_data_path") or (json_cands[0] if json_cands else "chưa có")
                 st.caption(
-                    f"Video đang thử: **{v_dbg.get('full_name')}** — {v_dbg.get('exercise')} | "
-                    f"CSV: `{v_dbg.get('df_path') or 'chưa có'}`"
+                    f"Video đang tải: **{v_dbg.get('full_name')}** — {v_dbg.get('exercise')} | "
+                    f"CSV: `{csv_try}` | JSON: `{json_try}`"
                 )
+                if _hf_last_download_error:
+                    st.caption(f"Chi tiết Cloud: {_hf_last_download_error}")
             st.info(
-                "💡 Bấm **Tải lại kết quả đã lưu** — hệ thống sẽ thử tất cả 8 video đã phân tích "
-                "(CSV hoặc JSON khung xương trên Dataset)."
+                "💡 Bấm **Tải lại kết quả đã lưu** — hệ thống sẽ làm mới `video_list.json` "
+                "và tải CSV/JSON khung xương của **đúng video đang chọn** từ Dataset."
             )
             if user_role == "Nghiên cứu viên":
                 st.markdown("<br>", unsafe_allow_html=True)
