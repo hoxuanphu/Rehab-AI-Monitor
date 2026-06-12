@@ -123,9 +123,33 @@ def video_fallback_paths(file_path):
     candidates = []
     if norm.endswith('_f.mp4'):
         candidates = [norm, norm.replace('_f.mp4', '.mp4')]
+    elif norm.endswith('_ffmp.mp4'):
+        base_mp4 = norm.replace('_ffmp.mp4', '.mp4')
+        candidates = [norm, base_mp4]
     else:
         h264 = get_final_h264_path(norm)
         candidates = [h264, norm] if h264 != norm else [norm]
+    seen, out = set(), []
+    for p in candidates:
+        if p and p not in seen:
+            seen.add(p)
+            out.append(p)
+    return out
+
+
+def video_raw_only_paths(file_path):
+    """Chỉ video gốc BN upload — không fallback sang processed/_f.mp4."""
+    if not file_path:
+        return []
+    try:
+        norm = get_local_frame_path(file_path) or file_path
+    except Exception:
+        norm = file_path
+    candidates = [norm]
+    if norm.endswith('_ffmp.mp4'):
+        candidates.append(norm.replace('_ffmp.mp4', '.mp4'))
+    elif norm.endswith('_f.mp4') and 'processed_results' not in norm.replace("\\", "/"):
+        candidates.append(norm.replace('_f.mp4', '.mp4'))
     seen, out = set(), []
     for p in candidates:
         if p and p not in seen:
@@ -1490,13 +1514,20 @@ def check_cloud_file_exists(url):
         return False
 
 
-def _hf_dataset_resolve_urls(video_path):
-    """URL stream HF Dataset — ưu tiên bản H.264 _f.mp4, hỗ trợ Range Request."""
+def _hf_dataset_resolve_urls(video_path, prefer_raw=False):
+    """URL stream HF Dataset — processed ưu tiên _f.mp4; raw chỉ dùng file upload gốc."""
     if not (HF_TOKEN and HF_DATASET_ID and video_path):
         return None, None
     try:
         import urllib.parse
         rel = get_clean_rel_path(video_path)
+        base = f"https://huggingface.co/datasets/{HF_DATASET_ID}/resolve/main"
+        token_q = f"?token={HF_TOKEN}"
+        url_raw = f"{base}/{urllib.parse.quote(rel, safe='/')}{token_q}"
+        if prefer_raw or "patient_uploads" in rel.replace("\\", "/"):
+            return None, url_raw
+        if rel.endswith("_ffmp.mp4") or rel.endswith("_f.mp4"):
+            return None, url_raw
         rel_f = (
             rel.replace(".mp4", "_f.mp4")
             .replace(".mov", "_f.mp4")
@@ -1504,10 +1535,7 @@ def _hf_dataset_resolve_urls(video_path):
             .replace(".avi", "_f.mp4")
             .replace(".mkv", "_f.mp4")
         )
-        base = f"https://huggingface.co/datasets/{HF_DATASET_ID}/resolve/main"
-        token_q = f"?token={HF_TOKEN}"
         url_f = f"{base}/{urllib.parse.quote(rel_f, safe='/')}{token_q}"
-        url_raw = f"{base}/{urllib.parse.quote(rel, safe='/')}{token_q}"
         return url_f, url_raw
     except Exception:
         return None, None
@@ -1558,30 +1586,41 @@ def _is_hf_runtime():
     return bool(HF_SPACE_ID or os.environ.get("SPACE_ID") or os.path.exists("/data"))
 
 
-def _try_render_cloud_video_stream(video_path, key_hint="", optimistic=False):
+def _try_render_cloud_video_stream(video_path, key_hint="", optimistic=False, prefer_raw=False):
     """Stream ngay từ HF Dataset — optimistic=True bỏ qua HEAD (một số CDN chặn HEAD)."""
-    url_f, url_raw = _hf_dataset_resolve_urls(video_path)
-    if not url_raw:
+    url_f, url_raw = _hf_dataset_resolve_urls(video_path, prefer_raw=prefer_raw)
+    if not url_raw and not url_f:
         return False
     h264_ok = bool(url_f and check_cloud_file_exists(url_f))
-    raw_ok = check_cloud_file_exists(url_raw)
+    raw_ok = check_cloud_file_exists(url_raw) if url_raw else False
     if not h264_ok and not raw_ok:
         if not optimistic:
             return False
         h264_ok = bool(url_f)
         raw_ok = bool(url_raw)
     sources = []
-    if h264_ok and url_f:
-        sources.append(f'<source src="{url_f}" type="video/mp4">')
-    if raw_ok and url_raw:
-        sources.append(f'<source src="{url_raw}" type="video/mp4">')
+    if prefer_raw:
+        seen_urls = set()
+        for candidate in video_raw_only_paths(video_path):
+            _, cand_raw = _hf_dataset_resolve_urls(candidate, prefer_raw=True)
+            if cand_raw and cand_raw not in seen_urls:
+                seen_urls.add(cand_raw)
+                sources.append(f'<source src="{cand_raw}" type="video/mp4">')
+        if not sources and raw_ok and url_raw:
+            sources.append(f'<source src="{url_raw}" type="video/mp4">')
+    else:
+        if h264_ok and url_f:
+            sources.append(f'<source src="{url_f}" type="video/mp4">')
+        if raw_ok and url_raw:
+            sources.append(f'<source src="{url_raw}" type="video/mp4">')
     if not sources:
         return False
-    url_hash = hashlib.md5(f"{video_path}|{key_hint}".encode()).hexdigest()[:8]
+    label = "📤 Video gốc BN" if prefer_raw else "☁️ Stream từ Cloud"
+    url_hash = hashlib.md5(f"{video_path}|{key_hint}|{prefer_raw}".encode()).hexdigest()[:8]
     _render_video_html5_iframe(
         "\n  ".join(sources),
         f"cloud_fast_{url_hash}",
-        footer_html=f"☁️ Stream từ Cloud — {os.path.basename(video_path)}",
+        footer_html=f"{label} — {os.path.basename(video_path)}",
     )
     return True
 
@@ -2116,20 +2155,21 @@ def hien_thi_nut_tai_lai_va_phan_tich_moi(v_re, key_suffix=""):
             st.rerun(scope="app")
 
 
-def render_video(video_path, check_h264=True):
+def render_video(video_path, check_h264=True, prefer_raw=False):
     """Hiển thị video: ưu tiên HTTP Range Request server (local) để phát ngay lập tức.
-    Tự động đảm bảo H.264 trước khi phát, hỗ trợ stream trực tiếp từ Cloud nếu chưa tải về local."""
+    prefer_raw=True: phát video gốc BN upload (danh sách video), không dùng processed/_f.mp4."""
     if not video_path:
         st.error("❌ File video không tồn tại hoặc đường dẫn trống.")
         return
 
     # Hiển thị thông báo nếu hệ thống đang tối ưu hóa định dạng ở nền
-    try:
-        final_h264 = get_final_h264_path(video_path)
-        if '_transcoding_jobs' in globals() and final_h264 in _transcoding_jobs:
-            st.info("🔄 Hệ thống đang nén và tối ưu hóa định dạng video H.264 dưới nền để phát mượt mà trên trình duyệt. Vui lòng chờ 1-2 phút và tải lại trang...")
-    except:
-        pass
+    if not prefer_raw:
+        try:
+            final_h264 = get_final_h264_path(video_path)
+            if '_transcoding_jobs' in globals() and final_h264 in _transcoding_jobs:
+                st.info("🔄 Hệ thống đang nén và tối ưu hóa định dạng video H.264 dưới nền để phát mượt mà trên trình duyệt. Vui lòng chờ 1-2 phút và tải lại trang...")
+        except:
+            pass
 
     # URL trực tiếp (YouTube, HF, ...)
     if isinstance(video_path, str) and (video_path.startswith('http://') or video_path.startswith('https://')):
@@ -2154,20 +2194,28 @@ def render_video(video_path, check_h264=True):
             st.error(f'⚠️ Lỗi hiển thị video: {e}')
         return
 
-    ensure_playable_video(video_path)
+    if not prefer_raw:
+        ensure_playable_video(video_path)
     _prefetch_video_quiet(video_path)
 
     # HF Space: ưu tiên stream Cloud (Range Request) trước khi đọc file local nặng
     if _is_hf_runtime() and HF_TOKEN and HF_DATASET_ID:
-        if _try_render_cloud_video_stream(video_path, key_hint="hf_first", optimistic=True):
+        if _try_render_cloud_video_stream(video_path, key_hint="hf_first", optimistic=True, prefer_raw=prefer_raw):
             return
 
-    local_ready = find_ready_local_video(video_path)
+    local_ready = None
+    if prefer_raw:
+        for p in video_raw_only_paths(video_path):
+            if is_local_file_ready(p):
+                local_ready = p
+                break
+    else:
+        local_ready = find_ready_local_video(video_path)
     if not local_ready:
-        if _try_render_cloud_video_stream(video_path, optimistic=True):
+        if _try_render_cloud_video_stream(video_path, optimistic=True, prefer_raw=prefer_raw):
             return
 
-    final_h264 = get_final_h264_path(video_path)
+    final_h264 = get_final_h264_path(video_path) if not prefer_raw else video_path
     is_local_h264 = False
     if os.path.exists(final_h264) and os.path.getsize(final_h264) >= 5 * 1024:
         try:
@@ -2188,17 +2236,25 @@ def render_video(video_path, check_h264=True):
 
     # Xác định đường dẫn thực tế phát (sau khi đã thử fallback _f / .mp4)
     target_path = None
-    ready_any = find_ready_local_video(video_path)
-    if ready_any:
-        h264_ready = get_final_h264_path(ready_any)
-        if is_local_file_ready(h264_ready):
-            target_path = h264_ready
-        else:
-            target_path = ensure_playable_video(ready_any) or ready_any
-    elif is_local_h264:
-        target_path = final_h264
-    elif is_local_raw:
-        target_path = ensure_playable_video(video_path)
+    if prefer_raw:
+        for p in video_raw_only_paths(video_path):
+            if is_local_file_ready(p):
+                target_path = p
+                break
+        if not target_path and is_local_raw:
+            target_path = video_path
+    else:
+        ready_any = find_ready_local_video(video_path)
+        if ready_any:
+            h264_ready = get_final_h264_path(ready_any)
+            if is_local_file_ready(h264_ready):
+                target_path = h264_ready
+            else:
+                target_path = ensure_playable_video(ready_any) or ready_any
+        elif is_local_h264:
+            target_path = final_h264
+        elif is_local_raw:
+            target_path = ensure_playable_video(video_path)
 
     # 1. TRƯỜNG HỢP 1: Có sẵn file cục bộ (local)
     if target_path:
@@ -2250,19 +2306,20 @@ def render_video(video_path, check_h264=True):
                     st.rerun()
                 return
 
-        if _try_render_cloud_video_stream(video_path, key_hint="local_fallback", optimistic=True):
+        if _try_render_cloud_video_stream(video_path, key_hint="local_fallback", optimistic=True, prefer_raw=prefer_raw):
             return
         if _render_video_streamlit_native(target_path, allow_large=True):
             return
         if not _is_hf_runtime() and _render_video_static_iframe(target_path):
             return
         st.warning(
-            "⚠️ Không phát được video trực tiếp. Bấm **📥 Tải video Tất cả (H.264)** bên dưới "
-            "hoặc thử F5 sau vài giây."
+            "⚠️ Không phát được video trực tiếp. "
+            + ("Thử F5 hoặc kiểm tra file upload trên Dataset." if prefer_raw else
+               "Bấm **📥 Tải video Tất cả (H.264)** bên dưới hoặc thử F5 sau vài giây.")
         )
         return
 
-    if _try_render_cloud_video_stream(video_path, key_hint="fallback", optimistic=True):
+    if _try_render_cloud_video_stream(video_path, key_hint="fallback", optimistic=True, prefer_raw=prefer_raw):
         return
 
     st.warning("⚠️ File video đang được xử lý dưới nền hoặc không khả dụng.")
@@ -3896,10 +3953,24 @@ def _lay_duong_dan_video_hien_thi(v):
     )
 
 
-def _dam_bao_video_san_sang_play(path):
+def _lay_duong_dan_video_tho(v):
+    """Video gốc BN đã upload — dùng trong danh sách video (không hiển thị bản processed)."""
+    raw = v.get("video_path")
+    if not raw:
+        return None
+    return get_local_frame_path(raw) or raw
+
+
+def _dam_bao_video_san_sang_play(path, prefer_raw=False):
     """Tự động tải video từ Cloud/local — không cần nút thủ công."""
     if not path:
         return None
+    if prefer_raw:
+        for candidate in video_raw_only_paths(path):
+            ensure_local_file(candidate, quiet=True, try_fallbacks=True)
+            if is_local_file_ready(candidate):
+                return candidate
+        return path
     ready = find_ready_local_video(path)
     if ready:
         pb = resolve_playback_video_path(ready)
@@ -4964,6 +5035,43 @@ st.markdown("""
         color: white !important;
     }
 
+    /* Chặn flash trắng khi bấm / focus nút */
+    .stButton button:active,
+    .stButton button:focus,
+    .stButton button:focus-visible,
+    .stDownloadButton button:active,
+    .stDownloadButton button:focus,
+    .stDownloadButton button:focus-visible,
+    [data-testid="stBaseButton-primary"]:active,
+    [data-testid="stBaseButton-primary"]:focus,
+    [data-testid="stBaseButton-primary"]:focus-visible,
+    [data-testid="stFormSubmitButton"] button:active,
+    [data-testid="stFormSubmitButton"] button:focus,
+    [data-testid="stFormSubmitButton"] button:focus-visible {
+        background: linear-gradient(135deg, #004494 0%, #0099cc 100%) !important;
+        color: #ffffff !important;
+        outline: none !important;
+        box-shadow: 0 2px 8px rgba(0, 198, 255, 0.35) !important;
+        transform: none !important;
+    }
+    .stButton button[kind="secondary"]:active,
+    .stButton button[kind="secondary"]:focus,
+    .stButton button[kind="secondary"]:focus-visible,
+    [data-testid="stBaseButton-secondary"]:active,
+    [data-testid="stBaseButton-secondary"]:focus,
+    [data-testid="stBaseButton-secondary"]:focus-visible {
+        background: rgba(255, 255, 255, 0.16) !important;
+        color: #ffffff !important;
+        border-color: rgba(0, 198, 255, 0.45) !important;
+        outline: none !important;
+    }
+    .stButton button:active p,
+    .stButton button:focus p,
+    .stDownloadButton button:active p,
+    .stDownloadButton button:focus p {
+        color: #ffffff !important;
+    }
+
     /* Nút secondary — tách khỏi primary để bấm đúng vai trò */
     .stButton button[kind="secondary"],
     [data-testid="stBaseButton-secondary"] {
@@ -5310,6 +5418,14 @@ if st.session_state.get('theme') == 'dark':
             filter: none !important;
             transition: none !important;
             pointer-events: auto !important;
+            background-color: transparent !important;
+        }
+        .stApp[data-test-script-state="running"] .stButton button,
+        .stApp[data-test-script-state="running"] [data-testid="stBaseButton-primary"],
+        .stApp[data-test-script-state="running"] [data-testid="stBaseButton-secondary"] {
+            background: linear-gradient(135deg, #0072ff 0%, #00c6ff 100%) !important;
+            color: #ffffff !important;
+            opacity: 1 !important;
         }
         /* Ẩn spinner chạy vòng tròn ở góc trên phải */
         [data-testid="stStatusWidget"] { display: none !important; }
@@ -5342,6 +5458,20 @@ if st.session_state.get('theme') == 'dark':
             background-color: #1a1a2e !important;
             color: #00c6ff !important;
             font-weight: bold !important;
+        }
+        .stExpander summary:active,
+        .stExpander summary:focus,
+        details summary:active,
+        details summary:focus {
+            background-color: #1a1a2e !important;
+            color: #00c6ff !important;
+            outline: none !important;
+        }
+        [data-testid="stAlert"],
+        [data-testid="stNotification"] {
+            background-color: rgba(22, 33, 62, 0.95) !important;
+            color: #e8e8e8 !important;
+            border: 1px solid rgba(0, 198, 255, 0.25) !important;
         }
         
         /* Ép màu Sidebar triệt để */
@@ -5547,6 +5677,16 @@ if st.session_state.get('theme') == 'dark':
             background-color: rgba(255, 255, 255, 0.1) !important;
             color: #ffffff !important;
             border-color: rgba(255, 255, 255, 0.2) !important;
+        }
+        .st-key-active_tab_widget button:active,
+        .st-key-active_tab_widget button:focus,
+        div[data-testid="stSegmentedControl"] button:active,
+        div[data-testid="stSegmentedControl"] button:focus,
+        div[data-testid="stButtonGroup"] button:active,
+        div[data-testid="stButtonGroup"] button:focus {
+            background-color: rgba(255, 255, 255, 0.12) !important;
+            color: #ffffff !important;
+            outline: none !important;
         }
         .st-key-active_tab_widget [aria-pressed="true"],
         .st-key-active_tab_widget [aria-checked="true"],
@@ -15761,8 +15901,8 @@ def hien_thi_danh_sach_video_fragment(user_role):
                 with col_list1:
                     processed_path = v.get('processed_path')
                     raw_path = v.get('video_path')
-                    active_display_path = _lay_duong_dan_video_hien_thi(v)
-                    final_h264 = get_final_h264_path(active_display_path) if active_display_path else ""
+                    active_display_path = _lay_duong_dan_video_tho(v)
+                    final_h264 = get_final_h264_path(raw_path) if raw_path else ""
 
                     def is_valid_local_file(path):
                         if path and os.path.exists(path):
@@ -15797,20 +15937,20 @@ def hien_thi_danh_sach_video_fragment(user_role):
                             show_vid_key = f"show_video_{v.get('username')}_{v.get('video_name')}_{idx}"
                             if st.session_state.get(show_vid_key):
                                 if active_display_path:
-                                    with st.spinner("📥 Đang tải video..."):
-                                        play_path = _dam_bao_video_san_sang_play(active_display_path)
+                                    with st.spinner("📥 Đang tải video gốc..."):
+                                        play_path = _dam_bao_video_san_sang_play(active_display_path, prefer_raw=True)
                                         if play_path:
-                                            render_video(play_path, check_h264=(v.get('status') == "Đã phân tích"))
+                                            render_video(play_path, check_h264=False, prefer_raw=True)
                                         else:
-                                            st.error("❌ Không tìm thấy file video. Vui lòng thử lại sau vài giây.")
+                                            st.error("❌ Không tìm thấy file video gốc. Vui lòng thử lại sau vài giây.")
                                 else:
-                                    st.error("❌ Chưa có đường dẫn video cho mục này.")
+                                    st.error("❌ Chưa có đường dẫn video upload cho mục này.")
                                 if st.button("⏸️ Ẩn video", key=f"hide_vid_btn_{idx}", use_container_width=True):
                                     st.session_state[show_vid_key] = False
                                     st.rerun(scope="fragment")
                             else:
-                                st.info("ℹ️ Nhấp vào nút bên dưới để xem video (hệ thống tự tải từ Cloud nếu cần).")
-                                if st.button("▶️ Xem video", key=f"play_vid_btn_{idx}", type="primary", use_container_width=True):
+                                st.info("ℹ️ Nhấp bên dưới để xem **video gốc** bệnh nhân đã upload (không phải bản trích xuất AI).")
+                                if st.button("▶️ Xem video gốc", key=f"play_vid_btn_{idx}", type="primary", use_container_width=True):
                                     st.session_state[show_vid_key] = True
                                     st.rerun(scope="fragment")
                         with col_v2:
