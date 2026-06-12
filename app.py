@@ -3236,8 +3236,11 @@ def _dong_bo_video_list_day_du_tu_hf(force=False):
         return False
     if not force and st.session_state.get("_video_list_full_sync"):
         return True
-    dong_bo_json_cau_hinh_tu_hf(force_files=frozenset({"video_list.json"}))
-    _xoa_cache_sau_dong_bo_json(["video_list.json"])
+    dst = os.path.join(DB_DIR, "video_list.json")
+    local_ok = os.path.exists(dst) and os.path.getsize(dst) > 2
+    if force or not local_ok:
+        dong_bo_json_cau_hinh_tu_hf(force_files=frozenset({"video_list.json"}))
+        _xoa_cache_sau_dong_bo_json(["video_list.json"])
     st.session_state["_video_list_full_sync"] = True
     return True
 
@@ -6882,8 +6885,7 @@ def hien_thi_tab_phan_tich_va_video_ncv():
             with st.spinner(
                 f"📥 Đang nạp kết quả: {v_cur.get('full_name')} — {v_cur.get('exercise')}..."
             ):
-                if tu_dong_nap_ket_qua_phan_tich_gan_nhat(v_cur, force=True):
-                    st.rerun()
+                tu_dong_nap_ket_qua_phan_tich_gan_nhat(v_cur, force=True)
         v_cur = _lam_moi_ban_ghi_video_tu_db(st.session_state.get("current_eval_video") or v_cur)
     if v_cur:
         st.info(
@@ -9310,9 +9312,16 @@ def finalize_and_refresh_analysis(video_path):
         st.toast("✅ Phân tích hoàn tất! Đang hiển thị kết quả...", icon="🎉")
         st.rerun()
 
-@st.fragment(run_every=4)
 def hien_thi_tien_trinh_background_small(video_path):
     """Hiển thị tiến trình chạy nền nhỏ gọn bên trong cột phải (không reload toàn trang)"""
+    @st.fragment(run_every=_interval_tien_trinh_background(video_path))
+    def _frag():
+        _noi_dung_tien_trinh_background_small(video_path)
+
+    _frag()
+
+
+def _noi_dung_tien_trinh_background_small(video_path):
     prog = read_progress(video_path)
     if not prog:
         st.write("Đang khởi động...")
@@ -9376,9 +9385,16 @@ def hien_thi_tien_trinh_background_small(video_path):
                 pass
             st.rerun()
 
-@st.fragment(run_every=4)
 def hien_thi_tien_trinh_background_home_fragment(video_path):
     """Hiển thị giao diện tiến trình chạy nền ở màn hình trang chủ (không reload toàn trang)"""
+    @st.fragment(run_every=_interval_tien_trinh_background(video_path))
+    def _frag():
+        _noi_dung_tien_trinh_background_home(video_path)
+
+    _frag()
+
+
+def _noi_dung_tien_trinh_background_home(video_path):
     prog = read_progress(video_path)
     if not prog:
         st.write("Đang khởi động...")
@@ -9484,6 +9500,14 @@ def _interval_khu_vuc_phan_tich(video_path):
     prog = read_progress(video_path) if video_path else None
     if prog and prog.get("status") in ("processing", "success"):
         return timedelta(seconds=2)
+    return None
+
+
+def _interval_tien_trinh_background(video_path):
+    """Chỉ auto-refresh tiến trình khi đang chạy hoặc vừa xong — tránh rerun 4s vô ích."""
+    prog = read_progress(video_path) if video_path else None
+    if prog and prog.get("status") in ("processing", "success"):
+        return timedelta(seconds=4)
     return None
 
 
