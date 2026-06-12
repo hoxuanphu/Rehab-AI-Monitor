@@ -4111,6 +4111,52 @@ def _dam_bao_video_san_sang_play(path, prefer_raw=False, video_record=None):
     return path
 
 
+def _video_mo_duoc_opencv(path):
+    if not path or not is_local_file_ready(path):
+        return False
+    try:
+        cap = cv2.VideoCapture(path)
+        ok = cap.isOpened()
+        if ok:
+            ok = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0) > 0 or cap.read()[0]
+        cap.release()
+        return bool(ok)
+    except Exception:
+        return False
+
+
+def _dam_bao_video_cho_phan_tich(video_path, username=None, video_name=None):
+    """Tải + xác thực file video trước khi MediaPipe/OpenCV phân tích."""
+    vrec = {
+        "username": username,
+        "video_name": video_name,
+        "video_path": video_path,
+    }
+    search_paths = []
+    canon = _lay_duong_dan_video_tho(vrec)
+    if canon:
+        search_paths.append(canon)
+    if video_path:
+        for p in video_raw_only_paths(video_path):
+            if p not in search_paths:
+                search_paths.append(p)
+        for p in video_fallback_paths(video_path):
+            if p not in search_paths and not _is_scratch_video_path(p):
+                search_paths.append(p)
+    for candidate in search_paths:
+        if _is_scratch_video_path(candidate):
+            continue
+        ensure_local_file(candidate, quiet=True, try_fallbacks=False)
+        if _video_mo_duoc_opencv(candidate):
+            return candidate
+        h264 = get_final_h264_path(_strip_to_original_upload(candidate))
+        if h264 and not _is_scratch_video_path(h264) and h264 != candidate:
+            ensure_local_file(h264, quiet=True, try_fallbacks=False)
+            if _video_mo_duoc_opencv(h264):
+                return h264
+    return None
+
+
 def _la_ban_ghi_video_mo_co(v):
     """Bản ghi khôi phục tạm — ẩn khỏi danh sách chính."""
     if v.get("full_name") == "Bệnh nhân (khôi phục)":
@@ -7908,7 +7954,10 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
         st.error(f"⚠️ Lỗi nạp chuẩn: {e}")
 
     cap = cv2.VideoCapture(duong_dan_video)
-    if not cap.isOpened(): raise Exception("Video Error")
+    if not cap.isOpened():
+        raise Exception(
+            f"Video Error — không mở được file: {os.path.basename(duong_dan_video or '')}"
+        )
     
     fps = int(cap.get(cv2.CAP_PROP_FPS)) or 30
     fps_export = max(10, fps // 2) # BẬT LẠI LÀM CHẬM 0.5X (SLOW MOTION)
@@ -9399,12 +9448,23 @@ def hien_thi_tien_trinh_background_home_fragment(video_path):
             st.rerun()
 
 @st.fragment
-def hien_thi_video_goc_fragment(video_path, key_suffix, video_name=""):
+def hien_thi_video_goc_fragment(video_or_v, key_suffix, video_name=""):
     """Hiển thị/ẩn video gốc trong fragment riêng -> bấm nút không làm rerun cả trang,
     nhờ vậy phần trích xuất khung xương bên cạnh KHÔNG bị tải lại từ đầu."""
+    if isinstance(video_or_v, dict):
+        vrec = video_or_v
+        video_path = _lay_duong_dan_video_tho(vrec)
+        video_name = vrec.get("video_name") or video_name
+    else:
+        vrec = {"video_path": video_or_v, "video_name": video_name}
+        video_path = video_or_v
     show_key = f"show_src_video_{key_suffix}"
     if st.session_state.get(show_key):
-        render_video(video_path, check_h264=False)
+        play_path = _dam_bao_video_san_sang_play(video_path, prefer_raw=True, video_record=vrec)
+        if play_path and not _is_scratch_video_path(play_path):
+            render_video(play_path, check_h264=False, prefer_raw=True)
+        else:
+            st.warning("⚠️ Chưa tải được video gốc từ Cloud. Tiến trình phân tích vẫn chạy nếu server đã có file.")
         if st.button("🙈 Ẩn video gốc", key=f"btn_hide_src_video_{key_suffix}", use_container_width=True):
             st.session_state[show_key] = False
             st.rerun(scope="fragment")
@@ -9471,12 +9531,8 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
     if is_error:
         st.error(f"❌ Phân tích thất bại: {err_msg}")
         if st.button("🔄 THỬ LẠI PHÂN TÍCH", width="stretch", type="primary", key=f"btn_retry_bg_{key_suffix}"):
-            p_file = get_progress_file(video_path)
-            try:
-                if os.path.exists(p_file):
-                    os.remove(p_file)
-            except:
-                pass
+            clear_analysis_progress(video_path)
+            khoi_dong_phan_tich_lai_video(v, auto_start=True)
             st.rerun(scope="fragment")
     elif is_processing and not (st.session_state.get("view_old_analysis") and st.session_state.get("has_data")):
         st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
@@ -10093,7 +10149,23 @@ def bat_dau_phan_tich_background(
                     last_write_time[0] = now
                     last_prog_percent[0] = percent
                 
-            # Bước C: Chạy phân tích AI trích xuất xương
+            # Bước C: Xác thực file video mở được bằng OpenCV (tránh "Video Error" do file tạm/hỏng)
+            resolved_analysis = _dam_bao_video_cho_phan_tich(
+                analysis_input_path, username=username, video_name=video_name
+            )
+            if not resolved_analysis:
+                write_progress(
+                    progress_video_path, "error", username=username, video_name=video_name,
+                    progress=0.0, elapsed=time.time() - start_t, start_time=start_t,
+                    error_msg=(
+                        "Không mở được video để phân tích — file upload có thể hỏng hoặc chưa có trên Cloud. "
+                        "Thử F5, hoặc upload lại video gốc."
+                    ),
+                )
+                return
+            analysis_input_path = resolved_analysis
+
+            # Bước D: Chạy phân tích AI trích xuất xương
             output_path, ref_name_detected, _, angle_data, total_frames, valid_frames, temp_folder, zip_data, frame_paths, _, all_frames_data, all_warnings = xu_ly_video_day_du(
                 analysis_input_path, bt_chuan_ncv, bg_progress_callback,
                 model_type=model_type, min_confidence=confidence,
@@ -11935,7 +12007,7 @@ def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_
                 with col_v1:
                     if is_processing:
                         st.caption("🔬 Đang trích xuất khung xương ở bên phải. Bạn có thể xem video gốc bên dưới — tiến trình vẫn chạy bình thường.")
-                    hien_thi_video_goc_fragment(v.get('video_path'), key_suffix, v.get('video_name', ''))
+                    hien_thi_video_goc_fragment(v, key_suffix, v.get('video_name', ''))
                 with col_v2:
                     hien_thi_khu_vuc_phan_tich_chuyen_sau_fragment(v, key_suffix)
                 return
