@@ -4675,12 +4675,10 @@ def _inject_base_css_once():
     st.markdown("""
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;600;700;800&display=swap" onload="this.onload=null;this.rel='stylesheet'">
-<link rel="preload" as="style" href="https://fonts.googleapis.com/icon?family=Material+Icons&display=swap" onload="this.onload=null;this.rel='stylesheet'">
-<noscript>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;600;700;800&display=swap">
 <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons&display=swap">
-</noscript>
+<link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons+Sharp&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined&display=swap">
 <style>
     html, body, .stApp, [data-testid="stMarkdownContainer"] {
         font-family: 'Be Vietnam Pro', 'Segoe UI', system-ui, sans-serif !important;
