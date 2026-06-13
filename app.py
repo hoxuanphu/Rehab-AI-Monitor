@@ -4668,10 +4668,7 @@ def chuyen_tab_bang_js(ten_tab):
 # CSS CUSTOM - GIAO DIỆN HIỆN ĐẠI
 # ============================================
 def _inject_base_css_once():
-    """Chỉ gửi khối CSS nền một lần mỗi phiên — giảm payload khi rerun."""
-    if st.session_state.get("_base_css_injected"):
-        return
-    st.session_state._base_css_injected = True
+    """Inject CSS nền mỗi lần rerun — Streamlit rebuild DOM nên cần inject lại mỗi lần."""
     st.markdown("""
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -5404,12 +5401,9 @@ _inject_base_css_once()
 
 # === CSS CHO CHẾ ĐỘ TỐI (DARK MODE FORCED) ===
 # Ép giao diện luôn tối kể cả khi Chrome/Hệ thống đang ở chế độ Sáng
-# Guard: chỉ inject lại khi theme vừa thay đổi (tiết kiệm ~50KB payload mỗi rerun)
+# Inject mỗi rerun — DOM được rebuild nên cần inject lại
 _current_theme = st.session_state.get('theme', 'dark')
-_last_injected_theme = st.session_state.get('_theme_css_injected', '')
-if _current_theme != _last_injected_theme:
-    st.session_state['_theme_css_injected'] = _current_theme
-if st.session_state.get('theme') == 'dark' and _current_theme != _last_injected_theme:
+if st.session_state.get('theme', 'dark') == 'dark':
     st.markdown("""
     <style>
         /* Khai báo hệ màu tối cho toàn bộ trình duyệt - Đã loại bỏ color-scheme để k ảnh hưởng Chrome */
