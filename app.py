@@ -4675,8 +4675,12 @@ def _inject_base_css_once():
     st.markdown("""
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap">
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;600;700;800&display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<link rel="preload" as="style" href="https://fonts.googleapis.com/icon?family=Material+Icons&display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;600;700;800&display=swap">
 <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons&display=swap">
+</noscript>
 <style>
     html, body, .stApp, [data-testid="stMarkdownContainer"] {
         font-family: 'Be Vietnam Pro', 'Segoe UI', system-ui, sans-serif !important;
@@ -5397,7 +5401,12 @@ _inject_base_css_once()
 
 # === CSS CHO CHẾ ĐỘ TỐI (DARK MODE FORCED) ===
 # Ép giao diện luôn tối kể cả khi Chrome/Hệ thống đang ở chế độ Sáng
-if st.session_state.get('theme') == 'dark':
+# Guard: chỉ inject lại khi theme vừa thay đổi (tiết kiệm ~50KB payload mỗi rerun)
+_current_theme = st.session_state.get('theme', 'dark')
+_last_injected_theme = st.session_state.get('_theme_css_injected', '')
+if _current_theme != _last_injected_theme:
+    st.session_state['_theme_css_injected'] = _current_theme
+if st.session_state.get('theme') == 'dark' and _current_theme != _last_injected_theme:
     st.markdown("""
     <style>
         /* Khai báo hệ màu tối cho toàn bộ trình duyệt - Đã loại bỏ color-scheme để k ảnh hưởng Chrome */
@@ -5928,7 +5937,7 @@ if st.session_state.get('theme') == 'dark':
     """, unsafe_allow_html=True)
 
 # === CSS CHO CHẾ ĐỘ SÁNG (LIGHT MODE OVERRIDE) ===
-if st.session_state.get('theme') == 'light':
+if st.session_state.get('theme') == 'light' and _current_theme != _last_injected_theme:
     st.markdown("""
     <style>
         .stApp { background: #f8f9fa !important; color: #333 !important; }
