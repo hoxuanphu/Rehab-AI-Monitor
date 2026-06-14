@@ -18,3 +18,7 @@ toolbarMode = "minimal"
 [runner]
 # Ngắt ngay script cũ khi có tương tác/F5 mới — phản hồi tức thì
 fastReruns = true
+
+[theme]
+# Nền tối mặc định — tránh khoảng trắng/đen khi F5 trước khi CSS tùy chỉnh nạp xong
+base = "dark"

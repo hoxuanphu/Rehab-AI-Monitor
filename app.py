@@ -1641,34 +1641,52 @@ def _render_video_html5_iframe(sources_html, comp_key, height=300, footer_html="
     import streamlit.components.v1 as _stcomp
     foot = footer_html or ""
     vid_id = (comp_key or "vp").replace(" ", "_")
+    msg_id = vid_id + "_msg"
     _stcomp.html(
         f"""
 <!DOCTYPE html><html><head>
 <style>
   body{{margin:0;padding:0;background:transparent;overflow:hidden;}}
-  video{{width:100%;border-radius:8px;display:block;height:{height}px;background:#000;object-fit:contain;}}
+  video{{width:100%;border-radius:8px;display:block;height:{height}px;background:#111;object-fit:contain;}}
   .vf{{color:#aaa;font-size:0.72rem;margin-top:4px;text-align:right;font-family:sans-serif;}}
+  #_{msg_id}{{display:none;width:100%;height:{height}px;background:#1a1a2e;border-radius:8px;
+    align-items:center;justify-content:center;flex-direction:column;color:#aaa;font-family:sans-serif;font-size:0.85rem;text-align:center;}}
 </style>
 </head><body>
 <video id="{vid_id}" controls preload="auto" playsinline>
   {sources_html}
   Trình duyệt không hỗ trợ video HTML5.
 </video>
+<div id="_{msg_id}" style="display:none;width:100%;height:{height}px;background:#1a1a2e;border-radius:8px;
+  display:none;align-items:center;justify-content:center;flex-direction:column;color:#aaa;font-family:sans-serif;font-size:0.85rem;text-align:center;">
+  <div style="font-size:2rem;margin-bottom:8px;">🎬</div>
+  <div>Video đang tải từ Cloud...</div>
+  <div style="font-size:0.75rem;margin-top:4px;color:#666;">Bấm 🔄 trên trang để thử lại nếu không hiện</div>
+</div>
 <script>
 (function() {{
   var v = document.getElementById("{vid_id}");
+  var msg = document.getElementById("_{msg_id}");
   if (!v) return;
   var idx = 0;
   var sources = v.querySelectorAll("source");
+  function showFallback() {{
+    if (msg) {{ v.style.display="none"; msg.style.display="flex"; }}
+  }}
   function tryNext() {{
     idx += 1;
     if (idx < sources.length) {{
       v.src = sources[idx].src;
       v.load();
       v.play().catch(function(){{}});
+    }} else {{
+      showFallback();
     }}
   }}
   v.addEventListener("error", tryNext);
+  setTimeout(function() {{
+    if (v.readyState === 0 && v.networkState === 3) showFallback();
+  }}, 8000);
 }})();
 </script>
 {f'<div class="vf">{foot}</div>' if foot else ''}
@@ -12600,7 +12618,7 @@ def _hien_thi_tab_phan_tich_noi_dung(key_suffix="", stats_ext=None, df_ext=None,
                         v, key_suffix=f"split_{key_suffix}"
                     )
                     st.markdown("---")
-                if is_processing:
+                if is_processing and not da_co_du_lieu:
                     _hien_thi_hang_video_va_tien_do(v, key_suffix, is_processing=True)
                     st.markdown("---")
                 if not da_co_du_lieu:
@@ -13462,6 +13480,15 @@ def _hien_thi_tab_phan_tich_noi_dung(key_suffix="", stats_ext=None, df_ext=None,
                                     st.rerun()
                                 else:
                                     st.error("❌ Lỗi tạo file ZIP. Thử lại sau.")
+
+    # Thanh tiến độ phân tích mới bên dưới kết quả cũ — chỉ hiện khi đang chạy background
+    try:
+        if is_processing and da_co_du_lieu and v:
+            st.markdown("---")
+            st.markdown("#### 🔄 Tiến độ phân tích mới")
+            hien_thi_khu_vuc_phan_tich_chuyen_sau_fragment(v, key_suffix + "_below")
+    except Exception:
+        pass
 
 def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_ext=None):
     """Hiển thị tab biểu đồ — polling tiến trình do panel bên phải đảm nhiệm."""
@@ -15066,6 +15093,40 @@ def _noi_dung_frames_day_du(key_suffix=""):
     if total_frames == 0:
         st.warning("⚠️ Dữ liệu khung hình trống. Vui lòng phân tích lại video.")
         return
+
+    # Kiểm tra sớm: nếu frame images không có local và ZIP cũng chưa có → tải từ HF Dataset
+    _proc_fp = get_local_frame_path(st.session_state.get("processed_video_path") or "")
+    _fz_sess = get_local_frame_path(st.session_state.get("frames_zip") or "")
+    _zip_from_proc = (_proc_fp.replace(".mp4", "_frames.zip") if _proc_fp else "")
+    _zip_local = (_zip_from_proc if (_zip_from_proc and os.path.exists(_zip_from_proc))
+                  else (_fz_sess if (_fz_sess and os.path.exists(_fz_sess)) else ""))
+    _first_frame_path = get_local_frame_path((all_frames_data[0] if all_frames_data else {}).get("path", ""))
+    _frames_ready = (
+        (_first_frame_path and os.path.exists(_first_frame_path) and os.path.getsize(_first_frame_path) >= 5 * 1024)
+        or bool(_zip_local)
+        or (_proc_fp and os.path.exists(_proc_fp))
+    )
+    if not _frames_ready:
+        _zip_to_dl = _zip_from_proc or _fz_sess
+        with st.spinner("📥 Đang tải ảnh frames từ Cloud..."):
+            if _zip_to_dl:
+                ensure_local_file(_zip_to_dl)
+            if _proc_fp:
+                ensure_local_file(_proc_fp, try_fallbacks=True)
+                check_and_extract_frames_zip(_proc_fp)
+        _zip_now = (_zip_from_proc if (_zip_from_proc and os.path.exists(_zip_from_proc))
+                    else (_fz_sess if (_fz_sess and os.path.exists(_fz_sess)) else ""))
+        if (_zip_now
+                or (_first_frame_path and os.path.exists(_first_frame_path) and os.path.getsize(_first_frame_path) >= 5 * 1024)
+                or (_proc_fp and os.path.exists(_proc_fp))):
+            st.rerun()
+        else:
+            st.info("⏳ Ảnh frames chưa có trên Cloud. Bấm **Tải lại kết quả đã lưu** hoặc phân tích lại video.")
+            if st.session_state.get("current_eval_video"):
+                hien_thi_nut_tai_lai_va_phan_tich_moi(
+                    st.session_state.current_eval_video, key_suffix=f"noframes_{key_suffix}"
+                )
+            return
 
     pass_count = sum(1 for f in all_frames_data if f.get('dung'))
     nearly_count = sum(1 for f in all_frames_data if f.get('gan_dung') and not f.get('dung'))
