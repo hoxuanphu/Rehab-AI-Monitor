@@ -2242,7 +2242,7 @@ def _quay_lai_ket_qua_cu_da_luu(v, rerun=False):
     if ok and st.session_state.get("angle_df") is not None:
         st.toast("✅ Đã quay lại kết quả phân tích cũ!", icon="📊")
         st.session_state._pending_chart_refresh = True
-        # Không gọi st.rerun() ở đây — bấm nút đã trigger rerun; gọi thêm dễ gây màn trắng trên HF.
+        _lam_moi_giao_dien_sau_nut()
         return True
     if ok and st.session_state.get("stats"):
         st.warning(
@@ -2280,6 +2280,7 @@ def hien_thi_nut_tai_lai_va_phan_tich_moi(v_re, key_suffix=""):
                 if st.session_state.get("all_frames_data_path") or st.session_state.get("frames_zip"):
                     chi_tiet.append("ảnh frame")
                 st.success(f"✅ Đã cập nhật: {', '.join(chi_tiet) if chi_tiet else 'dữ liệu phân tích'}!")
+                _lam_moi_giao_dien_sau_nut()
             else:
                 st.error("❌ Không tìm thấy kết quả cũ cho video này.")
                 thong_bao_loi_tai_hf()
@@ -2292,6 +2293,7 @@ def hien_thi_nut_tai_lai_va_phan_tich_moi(v_re, key_suffix=""):
         ):
             if khoi_dong_phan_tich_lai_video(v_re, auto_start=True):
                 st.toast("🚀 Đã khởi chạy phân tích mới — theo dõi tiến độ bên dưới!", icon="⚡")
+                _lam_moi_giao_dien_sau_nut()
             else:
                 st.error("❌ Không khởi chạy được — kiểm tra đường dẫn video.")
 
@@ -4641,6 +4643,11 @@ def _xoa_widget_dang_nhap_sau_rerun():
 
 def _rerun_toan_bo_app():
     """Rerun toàn app — st.rerun() thuần, tránh scope gây màn trắng trên HF Space."""
+    st.rerun()
+
+
+def _lam_moi_giao_dien_sau_nut():
+    """Sau bấm nút — rerun để hiện kết quả cũ HOẶC màn hình phân tích mới ngay."""
     st.rerun()
 
 
@@ -6995,6 +7002,10 @@ def hien_thi_tab_phan_tich_va_video_ncv():
             _xoa_session_phan_tich()
         need_load = (
             v_cur.get("metrics")
+            and not (
+                st.session_state.get("reanalyze_triggered", False)
+                and not st.session_state.get("view_old_analysis", False)
+            )
             and (
                 not _session_phan_tich_khop_video(v_cur)
                 or st.session_state.get("angle_df") is None
@@ -9696,7 +9707,7 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
             err_msg = prog_data.get("error_msg", "Lỗi không xác định")
         elif status == "success":
             if finalize_background_analysis_if_ready(video_path):
-                st.rerun(scope="fragment")
+                _lam_moi_giao_dien_sau_nut()
             
     with st.expander("📖 Luồng phân tích 4 bước (bấm để xem)", expanded=False):
         st.markdown("""
@@ -9711,7 +9722,7 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
         if st.button("🔄 THỬ LẠI PHÂN TÍCH", width="stretch", type="primary", key=f"btn_retry_bg_{key_suffix}"):
             clear_analysis_progress(video_path)
             khoi_dong_phan_tich_lai_video(v, auto_start=True)
-            st.rerun(scope="fragment")
+            _lam_moi_giao_dien_sau_nut()
     elif is_processing and not (st.session_state.get("view_old_analysis") and st.session_state.get("has_data")):
         st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
         st.progress(p_val)
@@ -9732,27 +9743,9 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
         st.success("📂 Đang xem kết quả đã lưu. Phân tích mới (nếu có) vẫn chạy nền — xem biểu đồ ở khu vực bên trái.")
     else:
         if st.button("🚀 PHÂN TÍCH VÀ TRÍCH XUẤT KHUNG XƯƠNG NGAY", width="stretch", type="primary", key=f"btn_analyze_now_{key_suffix}"):
-            st.session_state.reanalyze_triggered = True
-            st.session_state.view_old_analysis = False
-            st.session_state.has_data = False
-            st.session_state.pop("_ncv_analysis_loaded_key", None)
-            st.session_state.pop(f"_bg_done_{hashlib.md5(video_path.encode()).hexdigest()}", None)
-            ncv_gd = st.session_state.get('ncv_giai_doan', PHASE_UI_LABELS["g2"])
-            bat_dau_phan_tich_background(
-                video_path=video_path,
-                username=v['username'],
-                full_name=v['full_name'],
-                video_name=v.get('video_name'),
-                exercise_name=v['exercise'],
-                giai_doan=ncv_gd,
-                model_type=st.session_state.get('ncv_model_type', 'MediaPipe Heavy'),
-                confidence=st.session_state.get('ncv_confidence', 0.5),
-                skip_step=st.session_state.get('ncv_skip_frames', 0),
-                resize_width=st.session_state.get('ncv_resize_width', 720),
-                force_train_classifier=True,
-            )
-            st.toast("🚀 Đã khởi chạy phân tích — tiến độ cập nhật ngay bên dưới!", icon="⚡")
-            st.rerun(scope="fragment")
+            if khoi_dong_phan_tich_lai_video(v, auto_start=True):
+                st.toast("🚀 Đã khởi chạy phân tích — tiến độ cập nhật ngay bên dưới!", icon="⚡")
+                _lam_moi_giao_dien_sau_nut()
 
 def download_file_with_progress(file_path, write_progress_fn, start_t, username, video_name):
     """Tải file từ Hugging Face Dataset có cập nhật tiến độ (progress bar) từng chunk"""
@@ -12151,10 +12144,17 @@ def _hien_thi_tab_phan_tich_noi_dung(key_suffix="", stats_ext=None, df_ext=None,
                 and st.session_state.get("_ncv_analysis_loaded_key") != slot_v
             ):
                 _xoa_session_phan_tich()
-            # Tự nạp kết quả đã lưu — đồng bộ Cloud trước (HF Space cần tải CSV/JSON)
-            if has_metrics and (
-                st.session_state.get("angle_df") is None
-                or not _session_phan_tich_khop_video(v)
+            # Tự nạp kết quả đã lưu — không làm khi đang chạy phân tích mới
+            if (
+                has_metrics
+                and not (
+                    st.session_state.get("reanalyze_triggered", False)
+                    and not st.session_state.get("view_old_analysis", False)
+                )
+                and (
+                    st.session_state.get("angle_df") is None
+                    or not _session_phan_tich_khop_video(v)
+                )
             ):
                 with st.spinner(
                     f"📥 Đang tải kết quả: {v.get('full_name')} — {v.get('exercise')}..."
@@ -12208,6 +12208,11 @@ def _hien_thi_tab_phan_tich_noi_dung(key_suffix="", stats_ext=None, df_ext=None,
                     )
                 elif not has_metrics:
                     st.warning(f"⚠️ Video '{v.get('video_name')}' của BN {v.get('full_name')} chưa được phân tích.")
+                if user_role == "Nghiên cứu viên" and has_metrics:
+                    hien_thi_nut_tai_lai_va_phan_tich_moi(
+                        v, key_suffix=f"waiting_{key_suffix}"
+                    )
+                    st.markdown("---")
                 col_v1, col_v2 = st.columns([1.3, 1.0])
                 with col_v1:
                     if is_processing:
