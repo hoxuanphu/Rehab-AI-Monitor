@@ -2493,17 +2493,24 @@ def _quay_lai_ket_qua_cu_da_luu(v, rerun=False):
 
 
 def _hien_thi_hang_video_va_tien_do(v, key_suffix, is_processing=False):
-    """Hàng 2 cột kiểu ảnh 2: video gốc trái, tiến độ phân tích phải."""
-    col_v1, col_v2 = st.columns([1.3, 1.0])
+    """Hàng 2 cột: video thô trái, video phân tích (đang tạo) phải."""
+    st.markdown("##### 📺 So sánh video gốc và video phân tích")
+    col_v1, col_v2 = st.columns([1.0, 1.0])
     with col_v1:
+        st.markdown("**🎬 Video gốc (thô)**")
         if is_processing:
-            st.caption(
-                "🔬 Đang trích xuất khung xương ở bên phải. Bạn có thể xem video gốc bên dưới — "
-                "tiến trình vẫn chạy bình thường."
+            st.caption("Video bệnh nhân upload — xem trong lúc hệ thống phân tích bên phải.")
+        video_path = _lay_duong_dan_video_tho(v)
+        play_path = _dam_bao_video_san_sang_play(video_path, prefer_raw=True, video_record=v)
+        if play_path and not _is_scratch_video_path(play_path):
+            render_video(play_path, check_h264=False, prefer_raw=True)
+        else:
+            st.warning(
+                "⚠️ Chưa tải được video gốc từ Cloud. Tiến trình phân tích vẫn chạy nếu server đã có file."
             )
-        hien_thi_video_goc_fragment(v, key_suffix, v.get("video_name", ""))
     with col_v2:
-        hien_thi_khu_vuc_phan_tich_chuyen_sau_fragment(v, key_suffix)
+        st.markdown("**🤖 Video phân tích**")
+        hien_thi_video_phan_tich_preview_fragment(v, key_suffix)
 
 
 def _hien_thi_thong_bao_che_do_phan_tich_moi():
@@ -6755,12 +6762,11 @@ _on_hf_runtime = bool(
     or os.path.exists("/data")
 )
 if 'ncv_model_type' not in st.session_state:
-    # HF Space CPU yếu: Full vẫn đủ chính xác, nhanh hơn Heavy đáng kể
-    st.session_state.ncv_model_type = "MediaPipe Full" if _on_hf_runtime else "MediaPipe Heavy"
+    st.session_state.ncv_model_type = "MediaPipe Heavy"
 if 'ncv_resize_width' not in st.session_state:
-    st.session_state.ncv_resize_width = 480 if _on_hf_runtime else 720
+    st.session_state.ncv_resize_width = 720
 if 'ncv_skip_frames' not in st.session_state:
-    st.session_state.ncv_skip_frames = 2 if _on_hf_runtime else 0
+    st.session_state.ncv_skip_frames = 0
 if 'view_old_analysis' not in st.session_state:
     st.session_state.view_old_analysis = False
 if 'angle_df' not in st.session_state:
@@ -8202,32 +8208,49 @@ def ve_nhan_rule_classifier(frame_output, dung, gan_dung, scale_factor=1.0):
         return draw_rule_badge(frame_output, dung, gan_dung, scale_factor=scale_factor)
     return frame_output
     
-def ensure_voice_files():
+def ensure_voice_files(force_voice=False):
     import os
     sounds_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sounds")
     if not os.path.exists(sounds_dir):
         os.makedirs(sounds_dir, exist_ok=True)
 
-    # Tần số beep fallback: đúng=880Hz, gần đúng=660Hz, sai=440Hz
+    _VOICE_FILES = ("dung.mp3", "gan_dung.mp3", "sai.mp3")
     _BEEP_FREQ = {"dung.mp3": 880, "gan_dung.mp3": 660, "sai.mp3": 440}
     _TTS_TEXT = {"dung.mp3": "Đúng", "gan_dung.mp3": "Gần đúng", "sai.mp3": "Sai"}
+    marker_path = os.path.join(sounds_dir, ".voice_tts_ok")
 
-    for filename in ("dung.mp3", "gan_dung.mp3", "sai.mp3"):
+    def _bundle_ready():
+        if not os.path.exists(marker_path):
+            return False
+        return all(
+            os.path.exists(os.path.join(sounds_dir, f)) and os.path.getsize(os.path.join(sounds_dir, f)) > 0
+            for f in _VOICE_FILES
+        )
+
+    if not force_voice and _bundle_ready():
+        return sounds_dir
+
+    any_tts = False
+    for filename in _VOICE_FILES:
         filepath = os.path.join(sounds_dir, filename)
-        if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
-            continue
+        need_tts = force_voice or not _bundle_ready()
 
-        # 1. Thử gTTS (cần internet)
         saved = False
-        try:
-            from gtts import gTTS
-            tts = gTTS(text=_TTS_TEXT[filename], lang='vi')
-            tts.save(filepath)
-            saved = os.path.exists(filepath) and os.path.getsize(filepath) > 0
-        except Exception as _gte:
-            print(f"[Audio] gTTS fail cho {filename}: {_gte}")
+        if need_tts:
+            try:
+                from gtts import gTTS
+                tts = gTTS(text=_TTS_TEXT[filename], lang='vi')
+                tts.save(filepath)
+                saved = os.path.exists(filepath) and os.path.getsize(filepath) > 0
+                if saved:
+                    any_tts = True
+                    print(f"[Audio] gTTS voice: {filename}")
+            except Exception as _gte:
+                print(f"[Audio] gTTS fail cho {filename}: {_gte}")
 
-        # 2. Fallback: sinh sine wave bằng ffmpeg (không cần internet)
+        if not saved and os.path.exists(filepath) and os.path.getsize(filepath) > 0 and not force_voice:
+            saved = True
+
         if not saved:
             try:
                 freq = _BEEP_FREQ[filename]
@@ -8239,12 +8262,27 @@ def ensure_voice_files():
                 )
                 saved = os.path.exists(filepath) and os.path.getsize(filepath) > 0
                 if saved:
-                    print(f"[Audio] Dùng beep fallback cho {filename} ({freq}Hz)")
+                    print(f"[Audio] fallback beep cho {filename} ({freq}Hz)")
             except Exception as _ffe:
                 print(f"[Audio] ffmpeg beep fail cho {filename}: {_ffe}")
 
+    if any_tts:
+        try:
+            with open(marker_path, "w", encoding="utf-8") as mf:
+                mf.write("gtts\n")
+        except Exception:
+            pass
+    elif _bundle_ready():
+        pass
+    else:
+        try:
+            if os.path.exists(marker_path):
+                os.remove(marker_path)
+        except Exception:
+            pass
+
     missing = [
-        f for f in ("dung.mp3", "gan_dung.mp3", "sai.mp3")
+        f for f in _VOICE_FILES
         if not os.path.exists(os.path.join(sounds_dir, f))
         or os.path.getsize(os.path.join(sounds_dir, f)) == 0
     ]
@@ -9068,7 +9106,7 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
     
     try:
         from pydub import AudioSegment
-        sounds_dir = ensure_voice_files()
+        sounds_dir = ensure_voice_files(force_voice=True)
         if sounds_dir and audio_events:
             total_duration_ms = int((tong_frame / fps_export) * 1000) + 1000
             # GIẢI PHÁP CHỐNG SẬP WEB (OOM ERROR): Giới hạn 40 sự kiện âm thanh để tránh tràn RAM
@@ -10168,6 +10206,105 @@ def hien_thi_video_goc_fragment(video_or_v, key_suffix, video_name=""):
             st.session_state[show_key] = True
             st.rerun(scope="fragment")
 
+def _tim_duong_dan_video_phan_tich_hien_tai(v, video_path, prog_data=None):
+    """Tìm file video phân tích có thể phát: checkpoint đang ghi, kết quả mới, hoặc bản đã lưu."""
+    candidates = []
+    if video_path:
+        try:
+            ckpt = load_checkpoint(get_checkpoint_path(video_path, PROCESSED_DIR))
+            if ckpt and ckpt.get("out_path"):
+                candidates.append(ckpt["out_path"])
+        except Exception:
+            pass
+    if prog_data:
+        result = prog_data.get("result") or {}
+        proc = result.get("processed_video_path")
+        if proc:
+            candidates.append(proc)
+    ss_proc = st.session_state.get("processed_video_path")
+    if ss_proc:
+        candidates.append(ss_proc)
+    if v:
+        db_proc = v.get("processed_path")
+        if db_proc:
+            candidates.append(db_proc)
+    seen = set()
+    for raw in candidates:
+        if not raw or raw in seen:
+            continue
+        seen.add(raw)
+        play = dam_bao_tai_video_phan_tich(raw, allow_sync_transcode=False)
+        if play and is_local_file_ready(play) and os.path.getsize(play) > 5 * 1024:
+            return play
+        for fb in video_fallback_paths(raw):
+            if is_local_file_ready(fb) and os.path.getsize(fb) > 5 * 1024:
+                return fb
+        play = _dam_bao_video_san_sang_play(raw, prefer_raw=False)
+        if play and is_local_file_ready(play) and os.path.getsize(play) > 5 * 1024:
+            return play
+    return None
+
+
+def _hien_thi_tien_do_phan_tich_compact(prog_data, v, key_suffix):
+    """Thanh tiến độ gọn cho cột video phân tích."""
+    if not prog_data:
+        return False, False
+    status = prog_data.get("status")
+    video_path = v.get("video_path")
+    if status == "error":
+        st.error(f"❌ Phân tích thất bại: {prog_data.get('error_msg', 'Lỗi không xác định')}")
+        if st.button(
+            "🔄 THỬ LẠI PHÂN TÍCH",
+            width="stretch",
+            type="primary",
+            key=f"btn_retry_preview_{key_suffix}",
+        ):
+            clear_analysis_progress(video_path)
+            _xu_ly_ket_qua_khoi_dong_phan_tich(khoi_dong_phan_tich_lai_video(v, auto_start=True))
+        return False, True
+    if status == "success":
+        if finalize_background_analysis_if_ready(video_path):
+            _lam_moi_giao_dien_sau_nut()
+        else:
+            st.rerun(scope="fragment")
+        return False, False
+    if status == "processing":
+        p_val = prog_data.get("progress", 0.0)
+        status_msg = prog_data.get("status_msg", "")
+        start_t = prog_data.get("start_time")
+        elapsed_live = (time.time() - float(start_t)) if start_t else prog_data.get("elapsed", 0.0)
+        st.progress(p_val)
+        detail = f" — {status_msg}" if status_msg else ""
+        st.caption(f"🔄 **{p_val * 100:.1f}%** | ⏱️ {elapsed_live:.1f}s{detail}")
+        return True, False
+    return False, False
+
+
+def hien_thi_video_phan_tich_preview_fragment(v, key_suffix):
+    """Cột phải: tiến độ + phát video phân tích (checkpoint hoặc bản đã lưu)."""
+    video_path = v["video_path"]
+
+    @st.fragment(run_every=_interval_khu_vuc_phan_tich(video_path))
+    def _render_preview():
+        prog_data = read_progress(video_path)
+        is_processing, is_error = _hien_thi_tien_do_phan_tich_compact(prog_data, v, key_suffix)
+        if is_error:
+            return
+        play_path = _tim_duong_dan_video_phan_tich_hien_tai(v, video_path, prog_data)
+        if play_path:
+            if is_processing:
+                st.caption("🔄 Video phân tích đang được tạo — tự cập nhật theo tiến độ.")
+            render_video(play_path, check_h264=True, prefer_raw=False)
+        elif is_processing:
+            st.info("⏳ Đang tạo video phân tích (khung xương, nhãn REF/ML, âm thanh Đúng/Sai/Gần đúng)...")
+        elif v.get("processed_path"):
+            st.warning("⚠️ Chưa tải được video phân tích từ Cloud — thử tải lại trang sau vài giây.")
+        else:
+            st.info("Video phân tích sẽ hiển thị ở đây khi quá trình hoàn tất.")
+
+    _render_preview()
+
+
 def _interval_khu_vuc_phan_tich(video_path):
     prog = read_progress(video_path) if video_path else None
     if prog and prog.get("status") in ("processing", "success"):
@@ -10355,35 +10492,18 @@ def la_bai_tap_gay(exercise_name):
 
 
 def tinh_tham_so_toc_do_phan_tich(video_path, exercise_name, model_type, skip_step, resize_width):
-    """Tự động giảm tải cho video dài — áp dụng cả bài Gậy (thường rất dài trên HF Space)."""
-    frames, fps = lay_so_khung_video(video_path)
-    duration = (frames / fps) if fps > 0 else 0.0
-    is_gay = la_bai_tap_gay(exercise_name)
-    on_cloud = bool(HF_SPACE_ID or os.path.exists("/data"))
-    # Ngưỡng thấp hơn trên cloud / bài gậy để tránh treo ở 3% hàng chục phút
-    fast = frames > (4500 if is_gay else 6000) or duration > (150 if is_gay else 240)
-    if not fast:
-        if on_cloud and int(skip_step or 0) == 0:
-            try:
-                rw = min(int(resize_width or 720), 480)
-            except (TypeError, ValueError):
-                rw = 480
-            return model_type, skip_step, rw
-        return model_type, skip_step, resize_width
-    mt = str(model_type or "")
-    if "Heavy" in mt:
-        mt = "MediaPipe Lite" if duration > 120 or frames > 3000 else "MediaPipe Full"
-    elif "Full" in mt and (duration > 180 or frames > 4500):
-        mt = "MediaPipe Lite"
+    """Giữ nguyên cấu hình NCV chọn trên sidebar — không tự giảm 480p/skip/model."""
     try:
-        ss = max(int(skip_step or 0), 2 if (is_gay or on_cloud) else 2)
-    except (TypeError, ValueError):
-        ss = 2
-    try:
-        rw = min(int(resize_width or 720), 480)
-    except (TypeError, ValueError):
-        rw = 480
-    return mt, ss, rw
+        frames, fps = lay_so_khung_video(video_path)
+        duration = (frames / fps) if fps > 0 else 0.0
+        if frames > 6000 or duration > 240:
+            print(
+                f"[Analysis] Video dai ({frames} frames, {duration:.0f}s) — "
+                f"Heavy/720p/moi frame co the mat nhieu thoi gian."
+            )
+    except Exception:
+        pass
+    return model_type, skip_step, resize_width
 
 
 def tim_video_trong_db(video_path):
@@ -12761,8 +12881,8 @@ def _hien_thi_tab_phan_tich_noi_dung(key_suffix="", stats_ext=None, df_ext=None,
                         v, key_suffix=f"split_{key_suffix}"
                     )
                     st.markdown("---")
-                if is_processing and not da_co_du_lieu:
-                    _hien_thi_hang_video_va_tien_do(v, key_suffix, is_processing=True)
+                if is_processing or st.session_state.get("reanalyze_triggered"):
+                    _hien_thi_hang_video_va_tien_do(v, key_suffix, is_processing=is_processing)
                     st.markdown("---")
                 if not da_co_du_lieu:
                     st.caption(
@@ -13623,15 +13743,6 @@ def _hien_thi_tab_phan_tich_noi_dung(key_suffix="", stats_ext=None, df_ext=None,
                                     st.rerun()
                                 else:
                                     st.error("❌ Lỗi tạo file ZIP. Thử lại sau.")
-
-    # Thanh tiến độ phân tích mới bên dưới kết quả cũ — chỉ hiện khi đang chạy background
-    try:
-        if is_processing and da_co_du_lieu and v:
-            st.markdown("---")
-            st.markdown("#### 🔄 Tiến độ phân tích mới")
-            hien_thi_khu_vuc_phan_tich_chuyen_sau_fragment(v, key_suffix + "_below")
-    except Exception:
-        pass
 
 def hien_thi_tab_phan_tich(key_suffix="", stats_ext=None, df_ext=None, exercise_ext=None):
     """Hiển thị tab biểu đồ — polling tiến trình do panel bên phải đảm nhiệm."""
@@ -15329,7 +15440,8 @@ def _noi_dung_frames_day_du(key_suffix=""):
     # 0. HIỂN THỊ VIDEO ĐÃ PHÂN TÍCH
     st.markdown("### 🎬 VIDEO ĐÃ PHÂN TÍCH")
     st.caption(
-        "🔊 Âm thanh **Đúng / Gần đúng / Sai** được trộn vào video khi bấm **Chạy phân tích mới**."
+        "🔊 Giọng nói AI **Đúng / Gần đúng / Sai** được trộn vào video khi bấm **Chạy phân tích mới** "
+        "(mặc định: Heavy · 720p · mọi frame)."
     )
     _play_check = playback_video_path or processed_video_path
     if (
@@ -15339,9 +15451,17 @@ def _noi_dung_frames_day_du(key_suffix=""):
         and not video_has_audio_track(_play_check)
     ):
         st.info(
-            "ℹ️ Video này chưa có âm thanh phản hồi (có thể là bản phân tích cũ). "
-            "Bấm **🚀 Chạy phân tích mới** ở tab Phân tích để tạo lại video có tiếng."
+            "ℹ️ Video này chưa có giọng nói phản hồi (bản phân tích cũ hoặc chỉ có tiếng beep). "
+            "Bấm **🚀 Chạy phân tích mới** để tạo lại video có giọng nói AI."
         )
+    if total_frames >= 3:
+        _idx_sample = [int((f or {}).get("index") or (i + 1)) for i, f in enumerate(all_frames_data[:12])]
+        _gaps = [b - a for a, b in zip(_idx_sample, _idx_sample[1:]) if b - a > 1]
+        if _gaps and max(_gaps, default=1) > 1:
+            st.info(
+                "ℹ️ Khung hình đang **nhảy số** (vd. #1, #4, #7) — phân tích cũ đã bỏ frame. "
+                "Bấm **🚀 Chạy phân tích mới** với mặc định **Mọi frame** để có đủ #1, #2, #3..."
+            )
     
     # Khung video và thông tin
     v_col1, v_col2 = st.columns([1.3, 1.0], gap='large')
@@ -18151,17 +18271,17 @@ def main():
             st.slider("Độ tự tin tối thiểu (Confidence)", 0.0, 1.0, 0.5, key="ncv_confidence", help="Ngưỡng để AI chấp nhận một điểm khớp xương.")
             st.selectbox("Tốc độ xử lý", 
                          options=[0, 1, 2, 4], 
-                         index=([0, 1, 2, 4].index(st.session_state.get("ncv_skip_frames", 2 if (HF_SPACE_ID or os.path.exists("/data")) else 0))
-                                  if st.session_state.get("ncv_skip_frames", 2 if (HF_SPACE_ID or os.path.exists("/data")) else 0) in [0, 1, 2, 4]
-                                  else (2 if (HF_SPACE_ID or os.path.exists("/data")) else 0)),
+                         index=([0, 1, 2, 4].index(st.session_state.get("ncv_skip_frames", 0))
+                                  if st.session_state.get("ncv_skip_frames", 0) in [0, 1, 2, 4]
+                                  else 0),
                          format_func=lambda x: "Mặc định (Mọi frame)" if x==0 else f"Nhanh (Bỏ qua {x} frame)",
                          key="ncv_skip_frames",
-                         help="Bỏ qua khung hình để tăng tốc (gợi ý: 2 frame trên Hugging Face). Áp dụng khi bạn chọn giá trị > 0, kể cả Heavy/Full.")
+                         help="0 = xử lý mọi khung hình (mặc định). Tăng để phân tích nhanh hơn nhưng thiếu frame.")
             st.selectbox("Độ phân giải video (Video Quality)",
                          options=[480, 720, 1080],
-                         index=([480, 720, 1080].index(st.session_state.get("ncv_resize_width", 480 if (HF_SPACE_ID or os.path.exists("/data")) else 720))
-                                  if st.session_state.get("ncv_resize_width", 480 if (HF_SPACE_ID or os.path.exists("/data")) else 720) in [480, 720, 1080]
-                                  else (0 if (HF_SPACE_ID or os.path.exists("/data")) else 1)),
+                         index=([480, 720, 1080].index(st.session_state.get("ncv_resize_width", 720))
+                                  if st.session_state.get("ncv_resize_width", 720) in [480, 720, 1080]
+                                  else 1),
                          format_func=lambda x: "480p (Tốc độ tối ưu)" if x==480 else ("720p (HD - Chuẩn sắc nét)" if x==720 else "1080p (Full HD - Cực kỳ chuẩn xác)"),
                          key="ncv_resize_width",
                          help="Độ phân giải càng cao thì vẽ khung xương càng sắc nét và bám sát khớp bệnh nhân hơn.")
@@ -18191,15 +18311,15 @@ def main():
             st.selectbox("Mô hình Pose", 
                          options=["MediaPipe Heavy", "MediaPipe Full", "MediaPipe Lite"], 
                          index=(["MediaPipe Heavy", "MediaPipe Full", "MediaPipe Lite"].index(
-                             st.session_state.get("ncv_model_type", "MediaPipe Full" if (HF_SPACE_ID or os.path.exists("/data")) else "MediaPipe Heavy"))
-                             if st.session_state.get("ncv_model_type", "MediaPipe Full" if (HF_SPACE_ID or os.path.exists("/data")) else "MediaPipe Heavy")
+                             st.session_state.get("ncv_model_type", "MediaPipe Heavy"))
+                             if st.session_state.get("ncv_model_type", "MediaPipe Heavy")
                              in ["MediaPipe Heavy", "MediaPipe Full", "MediaPipe Lite"]
-                             else (1 if (HF_SPACE_ID or os.path.exists("/data")) else 0)),
+                             else 0),
                          key="ncv_model_type",
                          help=(
-                             "Heavy (Complexity 2): chính xác nhất, chậm nhất. "
-                             "Full (Complexity 1): cân bằng tốc độ/chính xác — khuyến nghị trên Hugging Face. "
-                             "Lite (Complexity 0): nhanh nhất, dashboard gọn nhẹ."
+                             "Heavy (Complexity 2): chính xác nhất — mặc định. "
+                             "Full (Complexity 1): cân bằng tốc độ/chính xác. "
+                             "Lite (Complexity 0): nhanh nhất."
                          ))
 
             st.markdown("### 🧹 LÀM MỚI TIẾN TRÌNH")
