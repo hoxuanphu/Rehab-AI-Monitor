@@ -5492,12 +5492,22 @@ def _inject_base_css_once():
     }
     @keyframes header-logo-glow {
         0%, 100% {
-            box-shadow: 0 0 14px rgba(0, 198, 255, 0.45), 0 0 30px rgba(0, 198, 255, 0.18);
-            border-color: rgba(0, 198, 255, 0.75);
+            box-shadow: 0 0 12px rgba(0, 198, 255, 0.7), 0 0 0 3px rgba(0, 198, 255, 0.5);
+            border-color: rgba(0, 198, 255, 0.9);
         }
         50% {
-            box-shadow: 0 0 26px rgba(0, 198, 255, 0.75), 0 0 55px rgba(0, 198, 255, 0.30);
-            border-color: rgba(0, 230, 255, 0.95);
+            box-shadow: 0 0 28px rgba(0, 230, 255, 1), 0 0 55px rgba(0, 198, 255, 0.4), 0 0 0 4px rgba(0, 230, 255, 0.85);
+            border-color: rgba(0, 230, 255, 1);
+        }
+    }
+    @keyframes header-logo-glow-green {
+        0%, 100% {
+            box-shadow: 0 0 12px rgba(0, 230, 118, 0.7), 0 0 0 3px rgba(0, 230, 118, 0.5);
+            border-color: rgba(0, 230, 118, 0.9);
+        }
+        50% {
+            box-shadow: 0 0 28px rgba(0, 255, 130, 1), 0 0 55px rgba(0, 230, 118, 0.4), 0 0 0 4px rgba(0, 255, 130, 0.85);
+            border-color: rgba(0, 255, 130, 1);
         }
     }
     .main-header .header-logos-row {
@@ -5508,6 +5518,7 @@ def _inject_base_css_once():
         margin: 0 auto 14px auto;
         max-width: 520px;
         padding: 10px 8px 4px 8px;
+        overflow: visible;
     }
     .main-header .header-logo-glow {
         width: 82px;
@@ -5518,14 +5529,18 @@ def _inject_base_css_once():
         justify-content: center;
         background: rgba(0, 198, 255, 0.06);
         padding: 3px;
-        border: 2.5px solid rgba(0, 198, 255, 0.75);
-        animation: header-logo-glow 3s ease-in-out infinite;
+        border: 3px solid rgba(0, 198, 255, 0.9);
+        box-shadow: 0 0 12px rgba(0, 198, 255, 0.7), 0 0 0 3px rgba(0, 198, 255, 0.5);
+        animation: header-logo-glow 2.5s ease-in-out infinite;
         flex-shrink: 0;
     }
     .main-header .header-logo-ds {
         animation-delay: 0.35s;
     }
     .main-header .header-logo-pnt {
+        border-color: rgba(0, 230, 118, 0.9);
+        box-shadow: 0 0 12px rgba(0, 230, 118, 0.7), 0 0 0 3px rgba(0, 230, 118, 0.5);
+        animation: header-logo-glow-green 2.5s ease-in-out infinite;
         animation-delay: 0.7s;
     }
     .main-header .header-logo-glow img {
@@ -7337,16 +7352,6 @@ def hien_thi_tab_phan_tich_va_video_ncv():
             f"**{v_cur.get('exercise', 'N/A')}** · `{v_cur.get('video_name', '')}`"
         )
     if v_cur and v_cur.get("username"):
-        hien_thi_ket_qua_gan_nhat_va_lich_su(
-            v_cur.get("username"),
-            v_cur.get("video_name"),
-            exercise=v_cur.get("exercise"),
-            selected_v=v_cur,
-            key_suffix="ncv_combined",
-            chi_nhan_xet=True,
-        )
-        # (Đã bỏ hàng nút "Thao tác nhanh" thừa ở đây — subtab nằm ngay dưới,
-        # nút Tải lại/Chạy mới hiển thị bên trong nội dung từng subtab.)
         if st.session_state.get("reanalyze_triggered") and v_cur.get("video_path"):
             prog = read_progress(v_cur["video_path"])
             if prog and prog.get("status") == "processing":
@@ -12550,12 +12555,22 @@ st.markdown(f"""
     
     @keyframes header-logo-glow {{
         0%, 100% {{
-            box-shadow: 0 0 10px rgba(0, 198, 255, 0.45), 0 0 0 2px rgba(0, 198, 255, 0.65);
-            border-color: rgba(0, 198, 255, 0.75);
+            box-shadow: 0 0 12px rgba(0, 198, 255, 0.7), 0 0 0 3px rgba(0, 198, 255, 0.5);
+            border-color: rgba(0, 198, 255, 0.9);
         }}
         50% {{
-            box-shadow: 0 0 24px rgba(0, 230, 255, 0.9), 0 0 48px rgba(0, 198, 255, 0.35), 0 0 0 3px rgba(0, 230, 118, 0.95);
+            box-shadow: 0 0 28px rgba(0, 230, 255, 1), 0 0 55px rgba(0, 198, 255, 0.4), 0 0 0 4px rgba(0, 230, 255, 0.85);
             border-color: rgba(0, 230, 255, 1);
+        }}
+    }}
+    @keyframes header-logo-glow-green {{
+        0%, 100% {{
+            box-shadow: 0 0 12px rgba(0, 230, 118, 0.7), 0 0 0 3px rgba(0, 230, 118, 0.5);
+            border-color: rgba(0, 230, 118, 0.9);
+        }}
+        50% {{
+            box-shadow: 0 0 28px rgba(0, 255, 130, 1), 0 0 55px rgba(0, 230, 118, 0.4), 0 0 0 4px rgba(0, 255, 130, 0.85);
+            border-color: rgba(0, 255, 130, 1);
         }}
     }}
     .main-header .header-logos-row {{
@@ -12566,6 +12581,7 @@ st.markdown(f"""
         margin: 0 auto 14px auto;
         max-width: 520px;
         padding: 10px 8px 4px 8px;
+        overflow: visible;
     }}
     .main-header .header-logo-glow {{
         width: 82px;
@@ -12576,12 +12592,18 @@ st.markdown(f"""
         justify-content: center;
         background: #ffffff;
         padding: 3px;
-        border: 2.5px solid rgba(0, 198, 255, 0.75);
+        border: 3px solid rgba(0, 198, 255, 0.9);
+        box-shadow: 0 0 12px rgba(0, 198, 255, 0.7), 0 0 0 3px rgba(0, 198, 255, 0.5);
         animation: header-logo-glow 2.5s ease-in-out infinite;
         flex-shrink: 0;
     }}
-    .main-header .header-logo-ds {{ border-color: rgba(0, 230, 118, 0.85); animation-delay: 0.35s; }}
-    .main-header .header-logo-pnt {{ animation-delay: 0.7s; }}
+    .main-header .header-logo-ds {{ animation-delay: 0.35s; }}
+    .main-header .header-logo-pnt {{
+        border-color: rgba(0, 230, 118, 0.9);
+        box-shadow: 0 0 12px rgba(0, 230, 118, 0.7), 0 0 0 3px rgba(0, 230, 118, 0.5);
+        animation: header-logo-glow-green 2.5s ease-in-out infinite;
+        animation-delay: 0.7s;
+    }}
     .main-header .header-logo-glow img {{
         width: 72px;
         height: 72px;
