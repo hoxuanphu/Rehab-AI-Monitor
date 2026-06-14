@@ -16354,8 +16354,30 @@ def hien_thi_danh_sach_video_fragment(user_role):
                                         _loaded_ok = False
                                         v_fresh = _lam_moi_ban_ghi_video_tu_db(v)
                                         has_metrics = bool((v_fresh or v).get("metrics"))
-                                        with st.spinner("📥 Đang tải kết quả gần nhất (biểu đồ, video khung xương, ảnh frame)..."):
-                                            _loaded_ok = khoi_phuc_ket_qua_cu(v_fresh or v, tai_day_du=True)
+                                        with st.spinner("📥 Đang tải kết quả..."):
+                                            # Bước 1: Load metrics + CSV ngay (nhanh — chỉ đọc file nhỏ, hiện biểu đồ)
+                                            _loaded_ok = khoi_phuc_ket_qua_cu(v_fresh or v, tai_csv=True, tai_day_du=False)
+                                            # Bước 2: Tải video khung xương + frames ở background thread — không block UI
+                                            if _loaded_ok or has_metrics:
+                                                _v_for_bg = v_fresh or v
+                                                def _bg_download_files(_vbg=_v_for_bg):
+                                                    try:
+                                                        proc = _vbg.get("processed_path") or _vbg.get("video_path")
+                                                        if proc:
+                                                            ensure_local_file(proc, try_fallbacks=True)
+                                                            dam_bao_tai_video_phan_tich(proc)
+                                                        frames_json = _vbg.get("all_frames_data_path")
+                                                        if frames_json:
+                                                            ensure_local_file(frames_json)
+                                                        fz = _vbg.get("frames_zip")
+                                                        if fz:
+                                                            ensure_local_file(fz)
+                                                        if proc:
+                                                            check_and_extract_frames_zip(proc)
+                                                    except Exception as _e:
+                                                        print(f"[BG Download] Lỗi tải file phân tích: {_e}")
+                                                import threading as _thr
+                                                _thr.Thread(target=_bg_download_files, daemon=True).start()
                                         if _loaded_ok:
                                             st.toast("✅ Đã tải kết quả gần nhất — chuyển tab Phân tích...", icon="📊")
                                         elif has_metrics:
