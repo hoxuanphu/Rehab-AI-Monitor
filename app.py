@@ -8711,7 +8711,21 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
                 if callback:
                     try: callback(0.505)
                     except: pass
-            clf_state = ensure_classifier_ready(PROCESSED_DIR, DB_DIR, auto_train=True)
+            if callback and not (force_train_classifier and train_pose_classifier):
+                try: callback(0.502)
+                except: pass
+            _clf_hb_stop = threading.Event()
+            def _clf_heartbeat():
+                while not _clf_hb_stop.wait(5.0):
+                    if callback:
+                        try: callback(0.503)
+                        except: pass
+            _clf_hb_thread = threading.Thread(target=_clf_heartbeat, daemon=True)
+            _clf_hb_thread.start()
+            try:
+                clf_state = ensure_classifier_ready(PROCESSED_DIR, DB_DIR, auto_train=True)
+            finally:
+                _clf_hb_stop.set()
             if clf_state.get("ready"):
                 ml_predict_row = create_pose_classifier_predictor(DB_DIR)
                 if clf_state.get("trained"):
