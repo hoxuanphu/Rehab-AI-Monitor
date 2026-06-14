@@ -242,16 +242,21 @@ def _valid_raw_video_local(path):
 
 def find_ready_local_video(file_path, min_size=5 * 1024):
     """Trả về đường dẫn video local hợp lệ đầu tiên trong danh sách fallback."""
+    best_fallback = None
     for p in video_fallback_paths(file_path):
         if is_local_file_ready(p, min_size=min_size):
             try:
                 mtime, size = os.path.getmtime(p), os.path.getsize(p)
                 if _check_video_valid_cached(p, mtime, size):
                     return p
+                # File exists với kích thước đủ nhưng validation chưa chắc chắn
+                # (H.264 thường báo 0 FRAME_COUNT) — giữ làm fallback
+                if best_fallback is None:
+                    best_fallback = p
             except Exception:
-                if is_local_file_ready(p, min_size=min_size):
-                    return p
-    return None
+                if best_fallback is None:
+                    best_fallback = p
+    return best_fallback
 
 
 def sync_transcode_to_h264(src_path, dst_path=None, audio_path=None, timeout=1800, on_tick=None):
@@ -979,11 +984,11 @@ def _check_video_valid_cached(path, mtime, size):
                 return True
     except:
         pass
-    # Dự phòng: dùng OpenCV
+    # Dự phòng: dùng OpenCV — grab() thay cho FRAME_COUNT vì H.264 thường báo 0 frames
     try:
         import cv2
         cap_check = cv2.VideoCapture(path)
-        if cap_check.isOpened() and int(cap_check.get(cv2.CAP_PROP_FRAME_COUNT)) > 0:
+        if cap_check.isOpened() and cap_check.grab():
             cap_check.release()
             return True
         cap_check.release()
