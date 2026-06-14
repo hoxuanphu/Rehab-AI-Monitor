@@ -2575,6 +2575,11 @@ def render_video(video_path, check_h264=True, prefer_raw=False):
     # Ưu tiên phát local nếu file đã sẵn sàng (tránh hiện "Video đang tải từ Cloud" khi không cần)
     if not prefer_raw:
         _local_first = find_ready_local_video(video_path)
+        if not _local_first:
+            # H.264 chưa xong — thử phát MP4 gốc qua static serving để không bị màn đen
+            _raw_local = get_local_frame_path(video_path) if isinstance(video_path, str) else None
+            if _raw_local and os.path.exists(_raw_local) and os.path.getsize(_raw_local) > 0:
+                _local_first = _raw_local
         if _local_first and _render_video_static_iframe(_local_first):
             return
 
@@ -9534,22 +9539,17 @@ def khoi_dong_phan_tich_lai_video(v, auto_start=True):
         st.session_state.pop(done_key, None)
     st.session_state.reanalyze_triggered = True
     st.session_state.current_eval_video = v
-    if co_ket_qua_cu:
-        # Giữ biểu đồ + video + frames đã lưu — không xóa session
-        st.session_state.view_old_analysis = True
-        if not st.session_state.get("has_data") or st.session_state.get("angle_df") is None:
-            _nap_bieu_do_nhanh_tu_cloud(v, giu_phan_tich_moi=True)
-        else:
-            _gan_session_ket_qua_tu_video(v)
-            _bat_dau_tai_day_du_song_song(v)
-    else:
-        st.session_state.view_old_analysis = False
-        st.session_state.has_data = False
-        st.session_state.stats = None
-        st.session_state.angle_df = None
-        st.session_state.processed_video_path = None
-        st.session_state.current_df_csv_path = None
-        st.session_state.pop("_ncv_analysis_loaded_key", None)
+    # Luôn xóa dữ liệu cũ khi bắt đầu phân tích mới — người dùng thấy màn hình tiến độ ngay
+    st.session_state.view_old_analysis = False
+    st.session_state.has_data = False
+    st.session_state.stats = None
+    st.session_state.angle_df = None
+    st.session_state.processed_video_path = None
+    st.session_state.current_df_csv_path = None
+    st.session_state.all_frames_data_path = None
+    st.session_state.frames_zip = None
+    st.session_state.pop("_ncv_analysis_loaded_key", None)
+    _ = co_ket_qua_cu  # không dùng nữa nhưng giữ để tránh lỗi reference
 
     if not auto_start or not video_path:
         return True
@@ -15107,26 +15107,35 @@ def _noi_dung_frames_day_du(key_suffix=""):
     _zip_local = (_zip_from_proc if (_zip_from_proc and os.path.exists(_zip_from_proc))
                   else (_fz_sess if (_fz_sess and os.path.exists(_fz_sess)) else ""))
     _first_frame_path = get_local_frame_path((all_frames_data[0] if all_frames_data else {}).get("path", ""))
+    _vid_ok = (_proc_fp and os.path.exists(_proc_fp) and os.path.getsize(_proc_fp) > 0)
     _frames_ready = (
         (_first_frame_path and os.path.exists(_first_frame_path) and os.path.getsize(_first_frame_path) >= 5 * 1024)
         or bool(_zip_local)
+        or _vid_ok   # video tồn tại local → frame recovery trong _render_frame_grid xử lý
     )
     if not _frames_ready:
+        # Chưa có gì local — thử tải từ HF Dataset
         _zip_to_dl = _zip_from_proc or _fz_sess
+        _got_new_zip = False
+        _got_new_vid = False
         with st.spinner("📥 Đang tải ảnh frames từ Cloud..."):
-            if _zip_to_dl:
-                ensure_local_file(_zip_to_dl)
-            if _proc_fp:
-                ensure_local_file(_proc_fp, try_fallbacks=True)
-                check_and_extract_frames_zip(_proc_fp)
+            if _zip_to_dl and not os.path.exists(_zip_to_dl):
+                if ensure_local_file(_zip_to_dl):
+                    _got_new_zip = os.path.exists(_zip_to_dl)
+            if _proc_fp and not os.path.exists(_proc_fp):
+                if ensure_local_file(_proc_fp, try_fallbacks=True):
+                    _got_new_vid = os.path.exists(_proc_fp)
+                    if _got_new_vid:
+                        check_and_extract_frames_zip(_proc_fp)
         _zip_now = (_zip_from_proc if (_zip_from_proc and os.path.exists(_zip_from_proc))
                     else (_fz_sess if (_fz_sess and os.path.exists(_fz_sess)) else ""))
-        _first_ok = (_first_frame_path and os.path.exists(_first_frame_path) and os.path.getsize(_first_frame_path) >= 5 * 1024)
-        _vid_ok = (_proc_fp and os.path.exists(_proc_fp) and os.path.getsize(_proc_fp) > 0)
-        if _zip_now or _first_ok or _vid_ok:
+        _first_ok_now = (_first_frame_path and os.path.exists(_first_frame_path) and os.path.getsize(_first_frame_path) >= 5 * 1024)
+        if _zip_now or _first_ok_now:
+            st.rerun()
+        elif _got_new_vid and os.path.exists(_proc_fp):
             st.rerun()
         else:
-            st.info("⏳ Ảnh frames chưa có — tải lại kết quả đã lưu hoặc phân tích lại video.")
+            st.info("⏳ Ảnh frames chưa có trên Cloud. Chạy lại phân tích trên hệ thống này để tạo ảnh.")
             if st.session_state.get("current_eval_video"):
                 hien_thi_nut_tai_lai_va_phan_tich_moi(
                     st.session_state.current_eval_video, key_suffix=f"noframes_{key_suffix}"
