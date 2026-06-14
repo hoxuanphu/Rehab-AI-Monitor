@@ -9169,7 +9169,66 @@ try:
 except (TypeError, ValueError):
     MAX_CONCURRENT_ANALYSIS = 1 if _hf_default_concurrent == "1" else 4
 JOB_ORPHAN_SECONDS = 90  # Không có heartbeat trong 90s → coi job bị gián đoạn, tự khởi động lại
-_analysis_semaphore = threading.BoundedSemaphore(MAX_CONCURRENT_ANALYSIS)
+
+
+class AnalysisSlotPool:
+    """Quản lý slot phân tích — tự nhả slot khi thread chết / heartbeat cũ (tránh kẹt hàng đợi)."""
+
+    def __init__(self, max_slots):
+        self.max_slots = max(1, max_slots)
+        self._lock = threading.Lock()
+        self._holders = {}
+
+    def _purge_dead(self):
+        for vp in list(self._holders.keys()):
+            t = _running_threads.get(vp)
+            if t is None or not t.is_alive():
+                self._holders.pop(vp, None)
+                continue
+            prog = _load_progress_file(vp)
+            if not prog or prog.get("status") != "processing":
+                self._holders.pop(vp, None)
+                continue
+            hb = float(prog.get("heartbeat") or prog.get("start_time") or 0)
+            if hb and (time.time() - hb) > JOB_ORPHAN_SECONDS:
+                self._holders.pop(vp, None)
+                _running_threads.pop(vp, None)
+
+    def try_acquire(self, video_path, priority=False, timeout=2.0):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            with self._lock:
+                self._purge_dead()
+                if priority and len(self._holders) >= self.max_slots:
+                    oldest_vp, oldest_hb = None, float("inf")
+                    for vp in self._holders:
+                        prog = _load_progress_file(vp) or {}
+                        hb = float(prog.get("heartbeat") or prog.get("start_time") or 0) or time.time()
+                        if hb < oldest_hb:
+                            oldest_hb, oldest_vp = hb, vp
+                    if oldest_vp and (time.time() - oldest_hb) > 45:
+                        self._holders.pop(oldest_vp, None)
+                if video_path in self._holders or len(self._holders) < self.max_slots:
+                    self._holders[video_path] = time.time()
+                    return True
+            time.sleep(0.12)
+        return False
+
+    def release(self, video_path):
+        with self._lock:
+            self._holders.pop(video_path, None)
+
+    def holder_summary(self):
+        with self._lock:
+            self._purge_dead()
+            names = []
+            for vp in self._holders:
+                prog = _load_progress_file(vp) or {}
+                names.append(prog.get("video_name") or os.path.basename(vp))
+            return names
+
+
+_analysis_slots = AnalysisSlotPool(MAX_CONCURRENT_ANALYSIS)
 
 def doc_lock_save_data(file_path, handle_fn):
     """
@@ -9346,6 +9405,7 @@ def _chay_khoi_phuc_phan_tich_sau_deploy():
         if _resume_phan_tich_done:
             return 0
         try:
+            _analysis_slots._purge_dead()
             _tai_trang_thai_phan_tich_tu_hf(force=True)
         except Exception as hf_restore_err:
             print(f"[HF Resume] Loi tai progress tu Dataset: {hf_restore_err}")
@@ -10449,31 +10509,49 @@ def bat_dau_phan_tich_background(
         nonlocal video_path
         progress_video_path = video_path
         start_t = snap["start_time"]
-
-        # HÀNG ĐỢI: chỉ cho tối đa MAX_CONCURRENT_ANALYSIS video chạy cùng lúc.
-        # Job vượt giới hạn sẽ chờ ở đây và hiển thị trạng thái "đang chờ trong hàng đợi".
         sem_acquired = False
-        wait_started = time.time()
-        while not sem_acquired:
-            sem_acquired = _analysis_semaphore.acquire(timeout=2.0)
-            if not sem_acquired:
-                waited = time.time() - wait_started
-                q_snap = _tien_do_phan_tich_hien_tai(progress_video_path)
-                write_progress(
-                    progress_video_path, "processing", username=username, video_name=video_name,
-                    progress=q_snap["progress"], elapsed=time.time() - start_t, start_time=start_t,
-                    status_msg=f"⏳ Đang chờ trong hàng đợi (tối đa {MAX_CONCURRENT_ANALYSIS} video chạy song song)... {waited:.0f}s"
-                )
-
-        boot_snap = _tien_do_phan_tich_hien_tai(progress_video_path)
-        write_progress(
-            progress_video_path, "processing", username=username, video_name=video_name,
-            progress=max(boot_snap["progress"], 0.02), elapsed=time.time() - start_t,
-            start_time=start_t,
-            status_msg=boot_snap["status_msg"] or "🚀 Đang khởi tạo luồng phân tích...",
+        ckpt_wait = load_checkpoint(get_checkpoint_path(progress_video_path, PROCESSED_DIR))
+        is_resume_pass2 = bool(
+            ckpt_wait
+            and ckpt_wait.get("pass1_data")
+            and ckpt_wait.get("phase") in ("pass1_done", "pass2")
         )
-        
+
         try:
+            # HÀNG ĐỢI: tối đa MAX_CONCURRENT_ANALYSIS video — tự nhả slot job chết
+            wait_started = time.time()
+            while not sem_acquired:
+                sem_acquired = _analysis_slots.try_acquire(
+                    progress_video_path, priority=is_resume_pass2, timeout=2.0
+                )
+                if not sem_acquired:
+                    waited = time.time() - wait_started
+                    holders = _analysis_slots.holder_summary()
+                    holder_txt = ", ".join(holders[:2]) if holders else "video khác"
+                    if is_resume_pass2:
+                        q_prog = 0.45
+                        step = "Bước 2 sẵn sàng — đang chờ slot CPU"
+                    else:
+                        q_prog = min(0.44, max(0.02, waited / 600.0 * 0.44))
+                        step = "Đang chờ slot phân tích"
+                    write_progress(
+                        progress_video_path, "processing", username=username, video_name=video_name,
+                        progress=q_prog, elapsed=time.time() - start_t, start_time=start_t,
+                        status_msg=(
+                            f"⏳ {step} ({waited:.0f}s) — đang chạy: **{holder_txt}** "
+                            f"(tối đa {MAX_CONCURRENT_ANALYSIS} video/lúc)"
+                        ),
+                    )
+                    if waited > 900:
+                        _analysis_slots._purge_dead()
+
+            boot_snap = _tien_do_phan_tich_hien_tai(progress_video_path)
+            write_progress(
+                progress_video_path, "processing", username=username, video_name=video_name,
+                progress=max(boot_snap["progress"], 0.02), elapsed=time.time() - start_t,
+                start_time=start_t,
+                status_msg=boot_snap["status_msg"] or "🚀 Đang khởi tạo luồng phân tích...",
+            )
             # Bước A: Nếu có tệp tải lên tạm thời, thực hiện nén/FFmpeg trong background trước
             if temp_uploaded_path:
                 write_progress(progress_video_path, "processing", username=username, video_name=video_name, progress=0.05, elapsed=0.0, start_time=start_t, status_msg="⚙️ Đang tối ưu hóa định dạng video (H.264)...")
@@ -10852,12 +10930,8 @@ def bat_dau_phan_tich_background(
             elap = time.time() - start_t
             write_progress(progress_video_path, "error", username=username, video_name=video_name, progress=1.0, elapsed=elap, start_time=start_t, error_msg=str(e))
         finally:
-            # Nhả slot hàng đợi để job tiếp theo được chạy
             if sem_acquired:
-                try:
-                    _analysis_semaphore.release()
-                except Exception as rel_err:
-                    print(f"[BG Process] Loi nha semaphore: {rel_err}")
+                _analysis_slots.release(progress_video_path)
             
     t = threading.Thread(target=thread_target, daemon=True)
     _running_threads[video_path] = t
