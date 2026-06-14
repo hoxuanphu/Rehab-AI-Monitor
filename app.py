@@ -2175,8 +2175,9 @@ def khoi_phuc_ket_qua_cu(v, tai_csv=True, tai_day_du=False):
     return bool(st.session_state.get("stats"))
 
 
-def _quay_lai_ket_qua_cu_da_luu(v, rerun=True):
-    """Hủy phân tích mới và nạp lại kết quả đã lưu (giống nút Tải lại kết quả)."""
+def _quay_lai_ket_qua_cu_da_luu(v, rerun=False):
+    """Hủy phân tích mới và nạp lại kết quả đã lưu (giống nút Tải lại kết quả).
+    Không gọi st.rerun() — tránh màn trắng khi chạy trong fragment trên HF Space."""
     v = _lam_moi_ban_ghi_video_tu_db(v)
     if not v or not v.get("metrics"):
         st.error("❌ Không tìm thấy kết quả cũ cho video này.")
@@ -2194,16 +2195,14 @@ def _quay_lai_ket_qua_cu_da_luu(v, rerun=True):
             ok = khoi_phuc_ket_qua_cu(v, tai_day_du=True)
     if ok and st.session_state.get("angle_df") is not None:
         st.toast("✅ Đã quay lại kết quả phân tích cũ!", icon="📊")
-        if rerun:
-            st.rerun()
+        st.session_state._pending_chart_refresh = True
+        # Không gọi st.rerun() ở đây — bấm nút đã trigger rerun; gọi thêm dễ gây màn trắng trên HF.
         return True
     if ok and st.session_state.get("stats"):
         st.warning(
             "⚠️ Đã khôi phục số liệu tóm tắt nhưng chưa tải được CSV/JSON biểu đồ từ Cloud."
         )
         thong_bao_loi_tai_hf()
-        if rerun:
-            st.rerun()
         return False
     st.error("❌ Không tìm thấy kết quả cũ cho video này.")
     thong_bao_loi_tai_hf()
@@ -2240,7 +2239,6 @@ def hien_thi_nut_tai_lai_va_phan_tich_moi(v_re, key_suffix=""):
             else:
                 st.error("❌ Không tìm thấy kết quả cũ cho video này.")
                 thong_bao_loi_tai_hf()
-            st.rerun(scope="app")
     with c2:
         if st.button(
             "🚀 Chạy phân tích mới",
@@ -2252,7 +2250,6 @@ def hien_thi_nut_tai_lai_va_phan_tich_moi(v_re, key_suffix=""):
                 st.toast("🚀 Đã khởi chạy phân tích mới — theo dõi tiến độ bên dưới!", icon="⚡")
             else:
                 st.error("❌ Không khởi chạy được — kiểm tra đường dẫn video.")
-            st.rerun(scope="app")
 
 
 def render_video(video_path, check_h264=True, prefer_raw=False):
@@ -12071,6 +12068,10 @@ def _hien_thi_tab_phan_tich_noi_dung(key_suffix="", stats_ext=None, df_ext=None,
     """Nội dung tab phân tích — tách riêng để fragment có thể auto-refresh khi đang chạy AI."""
     user_role = st.session_state.user_info.get('role')
 
+    if st.session_state.pop("_pending_chart_refresh", False):
+        st.session_state.view_old_analysis = True
+        st.session_state.reanalyze_triggered = False
+
     # Luôn kiểm tra phân tích nền đã xong — kể cả đang chạy phân tích mới
     if st.session_state.get('current_eval_video'):
         v_path = st.session_state.current_eval_video.get('video_path')
@@ -12132,13 +12133,25 @@ def _hien_thi_tab_phan_tich_noi_dung(key_suffix="", stats_ext=None, df_ext=None,
             if st.session_state.get('reanalyze_triggered', False):
                 st.info("💡 Bạn đang cấu hình lại để chạy phân tích AI mới. Kết quả phân tích cũ vẫn được bảo lưu an toàn.")
                 if st.button("⬅️ HỦY BỎ & XEM LẠI KẾT QUẢ ĐÃ LƯU", key=f"btn_cancel_reanalyze_{key_suffix}", width="stretch"):
-                    _quay_lai_ket_qua_cu_da_luu(v)
+                    _quay_lai_ket_qua_cu_da_luu(v, rerun=False)
                 st.markdown("---")
 
             prog_data = read_progress(v.get('video_path'))
             is_processing = bool(
                 prog_data and prog_data.get("status") == "processing"
             )
+            if has_metrics and not (
+                st.session_state.get("has_data")
+                and st.session_state.get("angle_df") is not None
+            ):
+                if st.button(
+                    "📊 XEM KẾT QUẢ ĐÃ LƯU NGAY",
+                    key=f"btn_force_load_saved_{key_suffix}",
+                    width="stretch",
+                    type="primary",
+                ):
+                    _quay_lai_ket_qua_cu_da_luu(v, rerun=False)
+
             da_co_du_lieu = bool(
                 st.session_state.get("has_data")
                 and st.session_state.get("angle_df") is not None
@@ -12154,14 +12167,6 @@ def _hien_thi_tab_phan_tich_noi_dung(key_suffix="", stats_ext=None, df_ext=None,
                 or (st.session_state.get('reanalyze_triggered', False) and not da_co_du_lieu)
                 or (is_processing and not da_co_du_lieu)
             ):
-                if has_metrics and not da_co_du_lieu:
-                    if st.button(
-                        "📊 XEM KẾT QUẢ ĐÃ LƯU NGAY",
-                        key=f"btn_force_load_saved_{key_suffix}",
-                        width="stretch",
-                        type="primary",
-                    ):
-                        _quay_lai_ket_qua_cu_da_luu(v, rerun=True)
                 if st.session_state.get('reanalyze_triggered') or is_processing:
                     st.info(
                         "🔬 **Chế độ phân tích mới** — MediaPipe 33 landmarks, đối chiếu YouTube (REF), "
@@ -12221,7 +12226,6 @@ def _hien_thi_tab_phan_tich_noi_dung(key_suffix="", stats_ext=None, df_ext=None,
                     _bt_new = st.session_state.get("exercise")
                     if _bt_new:
                         bt = _bt_new
-                    st.rerun(scope="fragment")
         if tk is None or df is None:
             st.warning("⚠️ Dữ liệu phân tích chi tiết không khả dụng hoặc chưa được tải.")
             thong_bao_loi_tai_hf()
