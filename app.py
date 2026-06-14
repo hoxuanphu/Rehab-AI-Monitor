@@ -8109,7 +8109,7 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
         segment_bounds = None
 
     from concurrent.futures import ThreadPoolExecutor
-    img_writer_executor = ThreadPoolExecutor(max_workers=4)
+    img_writer_executor = ThreadPoolExecutor(max_workers=6)
     frame_write_futures = []
 
     model = None if resume_pass1 else get_pose_model(model_type=model_type, min_confidence=min_confidence)
@@ -8129,11 +8129,21 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
     last_pose_landmarks = None
     last_known_center = None
     has_multiple_people_warning = False
+    pass1_data_serialized = (
+        list(ckpt.get("pass1_data", []))
+        if (ckpt_valid and ckpt.get("pass1_data"))
+        else None
+    )
+    ckpt_save_executor = ThreadPoolExecutor(max_workers=1)
+    ckpt_save_busy = [False]
 
     def _persist_checkpoint(phase, pass2_done=0):
         if not ckpt_path:
             return
-        save_checkpoint(ckpt_path, {
+        nonlocal pass1_data_serialized
+        if pass1_data_serialized is None and raw_pass1_data:
+            pass1_data_serialized = [serialize_pass1_item(x) for x in raw_pass1_data]
+        payload = {
             "config_hash": cfg_hash,
             "video_path": checkpoint_video_path or duong_dan_video,
             "analysis_input_path": duong_dan_video,
@@ -8152,7 +8162,7 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
             "resize_width": resize_width,
             "model_type": model_type,
             "exercise_name": exercise_name,
-            "pass1_data": [serialize_pass1_item(x) for x in raw_pass1_data],
+            "pass1_data": pass1_data_serialized or [],
             "pass2_processed_count": pass2_done,
             "du_lieu_goc": du_lieu_goc,
             "danh_sach_frame_paths": danh_sach_frame_paths,
@@ -8161,9 +8171,20 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
             "last_state": last_state,
             "last_audio_time": last_audio_time,
             "all_warnings": all_warnings,
-        })
-        if ckpt_path and os.path.exists(ckpt_path):
-            _day_progress_checkpoint_len_hf(checkpoint_video_path or duong_dan_video, force=(phase == "pass1_done"))
+        }
+
+        def _save_job():
+            try:
+                save_checkpoint(ckpt_path, payload)
+                if phase == "pass1_done":
+                    _day_progress_checkpoint_len_hf(checkpoint_video_path or duong_dan_video, force=True)
+            finally:
+                ckpt_save_busy[0] = False
+
+        if ckpt_save_busy[0]:
+            return
+        ckpt_save_busy[0] = True
+        ckpt_save_executor.submit(_save_job)
 
     # Tự động phát hiện bên tay tập chủ đạo (LEFT hoặc RIGHT) để tránh nhảy bên gây lỗi trích xuất
     left_deviations = []
@@ -8537,7 +8558,7 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
             # Save extracted frames after all overlays have been drawn.
             try:
                 frame_write_futures.append(
-                    img_writer_executor.submit(cv2.imwrite, local_frame_path, xu_ly.copy(), [cv2.IMWRITE_JPEG_QUALITY, 85])
+                    img_writer_executor.submit(cv2.imwrite, local_frame_path, xu_ly, [cv2.IMWRITE_JPEG_QUALITY, 80])
                 )
             except Exception as write_err:
                 print("Loi submit ghi anh:", write_err)
@@ -8554,8 +8575,8 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
 
             if processed_count % CHECKPOINT_INTERVAL_PASS2 == 0 or processed_count == len(raw_pass1_data):
                 _persist_checkpoint("pass2", processed_count)
-                
-            if processed_count % 50 == 0:
+
+            if processed_count % 200 == 0:
                 gc.collect()
     except Exception as e:
         print("Lỗi trong Pass 2:", e)
@@ -8576,12 +8597,14 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
                         fut.result()
                     except Exception as write_wait_err:
                         print("Loi cho ghi anh:", write_wait_err)
-                    if callback and (fut_idx % 50 == 0 or fut_idx == total_futures):
+                    if callback and (fut_idx % 25 == 0 or fut_idx == total_futures):
                         try:
                             callback(0.90 + min(fut_idx / max(total_futures, 1), 1.0) * 0.02)
                         except:
                             pass
             img_writer_executor.shutdown(wait=False)
+        if 'ckpt_save_executor' in locals():
+            ckpt_save_executor.shutdown(wait=True)
         gc.collect()
 
     if use_jpg_assembly:
@@ -9278,7 +9301,7 @@ def _noi_dung_jobs_dang_chay(key_suffix=""):
         c1, c2 = st.columns([3.2, 1])
         with c1:
             try:
-                st.progress(prog, text=f"🎬 {vname} — {prog*100:.0f}% · ⏱️ {elapsed:.0f}s · {msg}")
+                st.progress(prog, text=f"🎬 {vname} — {prog*100:.1f}% · ⏱️ {elapsed:.0f}s · {msg}")
             except TypeError:
                 st.progress(prog)
                 st.caption(f"🎬 {vname} — {prog*100:.0f}% · {msg}")
@@ -9344,7 +9367,7 @@ def hien_thi_tien_trinh_background(video_path):
         """, unsafe_allow_html=True)
         
         st.progress(p_val)
-        st.info(f"🔄 Tiến độ tổng thể: {p_val*100:.0f}%")
+        st.info(f"🔄 Tiến độ tổng thể: {p_val*100:.1f}%")
         
         # Cho phép hủy và xem kết quả cũ nếu có kết quả cũ
         try:
@@ -9425,7 +9448,7 @@ def _noi_dung_tien_trinh_background_small(video_path):
         """, unsafe_allow_html=True)
         
         st.progress(p_val)
-        st.info(f"🔄 Đang xử lý... {p_val*100:.0f}%")
+        st.info(f"🔄 Đang xử lý... {p_val*100:.1f}%")
         
         # Mách nước tối ưu hóa tốc độ
         st.markdown("""
@@ -9503,7 +9526,7 @@ def _noi_dung_tien_trinh_background_home(video_path):
         """, unsafe_allow_html=True)
         
         st.progress(p_val)
-        st.info(f"🔄 Tiến độ tổng thể: {p_val*100:.0f}%")
+        st.info(f"🔄 Tiến độ tổng thể: {p_val*100:.1f}%")
         
         # Mách nước tối ưu hóa tốc độ
         st.markdown("""
@@ -9572,7 +9595,7 @@ def hien_thi_video_goc_fragment(video_or_v, key_suffix, video_name=""):
 def _interval_khu_vuc_phan_tich(video_path):
     prog = read_progress(video_path) if video_path else None
     if prog and prog.get("status") in ("processing", "success"):
-        return timedelta(seconds=1.5)
+        return timedelta(seconds=1.0)
     return None
 
 
@@ -9580,7 +9603,7 @@ def _interval_tien_trinh_background(video_path):
     """Chỉ auto-refresh tiến trình khi đang chạy hoặc vừa xong — tránh rerun 4s vô ích."""
     prog = read_progress(video_path) if video_path else None
     if prog and prog.get("status") in ("processing", "success"):
-        return timedelta(seconds=4)
+        return timedelta(seconds=1.5)
     return None
 
 
@@ -9635,7 +9658,7 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
         st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
         st.progress(p_val)
         detail = f" — {status_msg}" if status_msg else ""
-        st.info(f"🔄 Đang xử lý... **{p_val*100:.0f}%** | ⏱️ {elapsed:.1f}s{detail}")
+        st.info(f"🔄 Đang xử lý... **{p_val*100:.1f}%** | ⏱️ {elapsed:.1f}s{detail}")
         st.button("🚀 ĐANG TRÍCH XUẤT KHUNG XƯƠNG...", width="stretch", type="primary", key=f"btn_analyze_disabled_{key_suffix}", disabled=True)
         
         # Cho phép hủy/quay lại xem kết quả cũ
@@ -10221,7 +10244,7 @@ def bat_dau_phan_tich_background(
             
             # Callback cập nhật tiến độ cho MediaPipe
             last_write_time = [0.0]
-            last_prog_percent = [-1]
+            last_prog_tenth = [-1]
 
             def bg_progress_callback(p):
                 now = time.time()
@@ -10250,12 +10273,12 @@ def bat_dau_phan_tich_background(
                 else:
                     status_msg = "📦 Đang lưu frames, đóng gói video và hoàn tất kết quả..."
                 
-                percent = int(prog_val * 100)
-                # Ghi tiến độ thường xuyên để UI không có cảm giác đứng im với video dài.
-                if percent != last_prog_percent[0] or (now - last_write_time[0] >= 0.35):
+                percent_tenth = int(prog_val * 1000)
+                # Ghi tiến độ mỗi 0.25s hoặc khi % thay đổi ≥0.1 — UI không bị đứng im.
+                if percent_tenth != last_prog_tenth[0] or (now - last_write_time[0] >= 0.25):
                     write_progress(progress_video_path, "processing", username=username, video_name=video_name, progress=prog_val, elapsed=elap, start_time=start_t, status_msg=status_msg)
                     last_write_time[0] = now
-                    last_prog_percent[0] = percent
+                    last_prog_tenth[0] = percent_tenth
                 
             # Bước C: Xác thực file video mở được bằng OpenCV (tránh "Video Error" do file tạm/hỏng)
             resolved_analysis = _dam_bao_video_cho_phan_tich(

@@ -8,7 +8,7 @@ import subprocess
 import time
 
 CHECKPOINT_VERSION = 1
-CHECKPOINT_INTERVAL_PASS2 = 75
+CHECKPOINT_INTERVAL_PASS2 = 150
 
 
 class _LmPoint:
