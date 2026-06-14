@@ -3023,9 +3023,18 @@ a {{color:{title_color};text-decoration:none}}
 # --- TỰ ĐỘNG ĐỒNG BỘ DỮ LIỆU SANG HUGGING FACE DATASET (MIỄN PHÍ - BỀN VỮNG) ---
 import threading
 
-HF_TOKEN = os.environ.get("HF_TOKEN", "").strip() or None
-HF_SPACE_ID = (os.environ.get("HF_SPACE_ID") or os.environ.get("SPACE_ID", "")).strip() or None
-HF_DATASET_ID = (os.environ.get("HF_DATASET_ID", "").strip() or None) or (f"{HF_SPACE_ID}-data" if HF_SPACE_ID else "quynhphuong1209/Rehab-AI-Monitor-2026-data")
+def _get_secret(key, default=""):
+    val = os.environ.get(key, "").strip()
+    if not val:
+        try:
+            val = (st.secrets.get(key) or "").strip()
+        except Exception:
+            pass
+    return val or default
+
+HF_TOKEN = _get_secret("HF_TOKEN") or None
+HF_SPACE_ID = (_get_secret("HF_SPACE_ID") or _get_secret("SPACE_ID")).strip() or None
+HF_DATASET_ID = _get_secret("HF_DATASET_ID") or (f"{HF_SPACE_ID}-data" if HF_SPACE_ID else "quynhphuong1209/Rehab-AI-Monitor-2026-data")
 
 _hf_dataset_access_cache = {"ok": None, "msg": None, "fp": None}
 _hf_last_download_error = None
