@@ -1636,7 +1636,7 @@ def _prefetch_video_quiet(video_path):
     threading.Thread(target=_bg, daemon=True).start()
 
 
-def _render_video_html5_iframe(sources_html, comp_key, height=300, footer_html=""):
+def _render_video_html5_iframe(sources_html, comp_key, height=520, footer_html=""):
     """Phát video HTML5 — preload metadata để hiện khung hình nhanh."""
     import streamlit.components.v1 as _stcomp
     foot = footer_html or ""
@@ -1647,7 +1647,7 @@ def _render_video_html5_iframe(sources_html, comp_key, height=300, footer_html="
 <!DOCTYPE html><html><head>
 <style>
   body{{margin:0;padding:0;background:transparent;overflow:hidden;}}
-  video{{width:100%;border-radius:8px;display:block;height:{height}px;background:#111;object-fit:contain;}}
+  video{{width:100%;height:auto;max-height:{height}px;border-radius:8px;display:block;background:#111;object-fit:contain;}}
   .vf{{color:#aaa;font-size:0.72rem;margin-top:4px;text-align:right;font-family:sans-serif;}}
   #_{msg_id}{{display:none;width:100%;height:{height}px;background:#1a1a2e;border-radius:8px;
     align-items:center;justify-content:center;flex-direction:column;color:#aaa;font-family:sans-serif;font-size:0.85rem;text-align:center;}}
@@ -1692,7 +1692,7 @@ def _render_video_html5_iframe(sources_html, comp_key, height=300, footer_html="
 {f'<div class="vf">{foot}</div>' if foot else ''}
 </body></html>
 """,
-        height=height + (18 if foot else 0),
+        height=height + (22 if foot else 0),
     )
 
 
@@ -1766,7 +1766,7 @@ def _render_video_static_iframe(target_path, video_key=None):
             except Exception:
                 shutil.copy2(target_path, static_path)
 
-        iframe_height = 400
+        iframe_height = 520
         try:
             cap_info = cv2.VideoCapture(target_path)
             if cap_info.isOpened():
@@ -1775,7 +1775,7 @@ def _render_video_static_iframe(target_path, video_key=None):
                 cap_info.release()
                 if v_w > 0 and v_h > 0:
                     iframe_height = int((v_h / v_w) * 640)
-                    iframe_height = max(200, min(iframe_height, 650))
+                    iframe_height = max(300, min(iframe_height, 720))
         except Exception:
             pass
 
@@ -2545,7 +2545,7 @@ def render_video(video_path, check_h264=True, prefer_raw=False):
 <!DOCTYPE html><html><head>
 <style>
   body{{margin:0;padding:0;background:transparent;overflow:hidden;}}
-  video{{width:100%;border-radius:8px;display:block;height:240px;background:#000;}}
+  video{{width:100%;height:auto;max-height:520px;border-radius:8px;display:block;background:#000;object-fit:contain;}}
 </style>
 </head><body>
 <video id="vp" controls preload="auto" playsinline>
@@ -15570,7 +15570,7 @@ Dòng **Xác suất 3 lớp** (nếu có): tổng ~100%, cho biết mô hình ph
         .frame-card-img {{
             max-width: 100%;
             height: auto;
-            max-height: 200px;
+            max-height: 400px;
             object-fit: contain;
             border-radius: 4px;
             transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
