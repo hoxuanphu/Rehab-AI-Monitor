@@ -8503,18 +8503,22 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
 
         def _save_job():
             try:
-                save_checkpoint(ckpt_path, payload)
-                if phase == "pass1_done":
+                ok = save_checkpoint(ckpt_path, payload)
+                if ok and phase == "pass1_done":
                     _day_progress_checkpoint_len_hf(
                         checkpoint_video_path or duong_dan_video, force=True, progress=0.5, status="processing"
                     )
             finally:
                 ckpt_save_busy[0] = False
 
-        if ckpt_save_busy[0]:
+        if ckpt_save_busy[0] and phase != "pass1_done":
             return
         ckpt_save_busy[0] = True
-        ckpt_save_executor.submit(_save_job)
+        if phase == "pass1_done":
+            # Pass 1 xong — ghi đồng bộ để thread khác / HF không đọc file dở
+            _save_job()
+        else:
+            ckpt_save_executor.submit(_save_job)
 
     # Tự động phát hiện bên tay tập chủ đạo (LEFT hoặc RIGHT) để tránh nhảy bên gây lỗi trích xuất
     left_deviations = []
@@ -9314,8 +9318,19 @@ def _tai_trang_thai_phan_tich_tu_hf(force=False):
                 # JSON nhỏ — luôn tải lại sau deploy để giữ đúng % hiển thị
                 need = True
             elif base.startswith("checkpoint_") and base.endswith(".pkl.gz"):
-                need = force or not os.path.exists(dst) or os.path.getsize(dst) < 100
+                if os.path.exists(dst) and os.path.getsize(dst) > 100 and load_checkpoint(dst):
+                    need = False
+                else:
+                    need = force or not os.path.exists(dst) or os.path.getsize(dst) < 100
             if need and _hf_download_dataset_file(rel_norm, quiet=True, min_size=2):
+                if base.startswith("checkpoint_") and base.endswith(".pkl.gz"):
+                    if load_checkpoint(dst) is None:
+                        try:
+                            if os.path.exists(dst):
+                                os.remove(dst)
+                        except Exception:
+                            pass
+                        continue
                 restored += 1
     except Exception as e:
         print(f"[HF Resume] Loi tai trang thai phan tich: {e}")

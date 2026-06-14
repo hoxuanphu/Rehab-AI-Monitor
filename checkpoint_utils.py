@@ -5,10 +5,21 @@ import json
 import os
 import pickle
 import subprocess
+import threading
 import time
 
 CHECKPOINT_VERSION = 1
 CHECKPOINT_INTERVAL_PASS2 = 150
+
+_ckpt_locks = {}
+_ckpt_locks_guard = threading.Lock()
+
+
+def _ckpt_lock(path):
+    with _ckpt_locks_guard:
+        if path not in _ckpt_locks:
+            _ckpt_locks[path] = threading.Lock()
+        return _ckpt_locks[path]
 
 
 class _LmPoint:
@@ -108,31 +119,65 @@ def deserialize_pass1_item(item):
 def save_checkpoint(path, data):
     if not path:
         return False
-    try:
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        payload = dict(data)
-        payload["version"] = CHECKPOINT_VERSION
-        payload["saved_at"] = time.time()
-        with gzip.open(path, "wb") as f:
-            pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
-        return True
-    except Exception as e:
-        print(f"[Checkpoint] Loi ghi checkpoint: {e}")
-        return False
+    lock = _ckpt_lock(path)
+    tmp = None
+    with lock:
+        try:
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+            payload = dict(data)
+            payload["version"] = CHECKPOINT_VERSION
+            payload["saved_at"] = time.time()
+            tmp = f"{path}.{os.getpid()}.{int(time.time() * 1000)}.tmp"
+            with gzip.open(tmp, "wb") as f:
+                pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
+            # Xác minh file gzip đọc được trước khi thay thế — tránh file dở dang
+            with gzip.open(tmp, "rb") as f:
+                verified = pickle.load(f)
+            if not isinstance(verified, dict):
+                raise ValueError("checkpoint payload invalid after write")
+            os.replace(tmp, path)
+            tmp = None
+            return True
+        except Exception as e:
+            print(f"[Checkpoint] Loi ghi checkpoint: {e}")
+            if tmp and os.path.exists(tmp):
+                try:
+                    os.remove(tmp)
+                except Exception:
+                    pass
+            return False
 
 
-def load_checkpoint(path):
+def load_checkpoint(path, retries=4, retry_delay=0.2):
     if not path or not os.path.exists(path):
         return None
-    try:
-        with gzip.open(path, "rb") as f:
-            data = pickle.load(f)
-        if not isinstance(data, dict) or data.get("version") != CHECKPOINT_VERSION:
-            return None
-        return data
-    except Exception as e:
-        print(f"[Checkpoint] Loi doc checkpoint: {e}")
-        return None
+    lock = _ckpt_lock(path)
+    last_err = None
+    for attempt in range(max(1, retries)):
+        with lock:
+            try:
+                if os.path.getsize(path) < 64:
+                    return None
+                with gzip.open(path, "rb") as f:
+                    data = pickle.load(f)
+                if not isinstance(data, dict) or data.get("version") != CHECKPOINT_VERSION:
+                    return None
+                return data
+            except Exception as e:
+                last_err = e
+        if attempt < retries - 1:
+            time.sleep(retry_delay * (attempt + 1))
+    err_s = str(last_err or "")
+    if any(x in err_s for x in ("end-of-stream", "EOF", "truncated", "Compressed file ended")):
+        try:
+            bad = f"{path}.bad.{int(time.time())}"
+            os.replace(path, bad)
+            print(f"[Checkpoint] File checkpoint hỏng đã đổi tên -> {os.path.basename(bad)}")
+        except Exception:
+            pass
+    else:
+        print(f"[Checkpoint] Loi doc checkpoint: {last_err}")
+    return None
 
 
 def clear_checkpoint(path):
