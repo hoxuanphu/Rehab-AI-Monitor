@@ -2168,7 +2168,10 @@ def khoi_phuc_ket_qua_cu(v, tai_csv=True, tai_day_du=False):
         if proc:
             check_and_extract_frames_zip(proc)
     if st.session_state.get("angle_df") is not None:
-        _gan_khoa_session_phan_tich(v)
+        _gan_khoa_session_phan_tich(st.session_state.get("current_eval_video") or v)
+        return True
+    if tai_csv or tai_day_du:
+        return False
     return bool(st.session_state.get("stats"))
 
 
@@ -7018,12 +7021,7 @@ def _dam_bao_du_lieu_video_frames_truoc_hien_thi(v=None):
     if not v or not v.get("metrics"):
         return
     if st.session_state.get("angle_df") is None or not st.session_state.get("all_frames_data_path"):
-        try:
-            if not tu_dong_nap_ket_qua_phan_tich_gan_nhat(v, force=True):
-                khoi_phuc_ket_qua_cu(v, tai_day_du=True)
-            st.session_state.view_old_analysis = True
-        except Exception as preload_err:
-            print(f"[Frames] Loi nap du lieu truoc hien thi: {preload_err}")
+        _quay_lai_ket_qua_cu_da_luu(v, rerun=False)
 
 def hien_thi_tab_nckh_va_thanh_vien_ncv():
     """Gộp tab Đề tài NCKH và Thành viên cho Nghiên cứu viên"""
@@ -12111,7 +12109,7 @@ def _hien_thi_tab_phan_tich_noi_dung(key_suffix="", stats_ext=None, df_ext=None,
                 and st.session_state.get("_ncv_analysis_loaded_key") != slot_v
             ):
                 _xoa_session_phan_tich()
-            # Tự nạp kết quả đã lưu — luôn thử khi video đã có metrics
+            # Tự nạp kết quả đã lưu — đồng bộ Cloud trước (HF Space cần tải CSV/JSON)
             if has_metrics and (
                 st.session_state.get("angle_df") is None
                 or not _session_phan_tich_khop_video(v)
@@ -12119,6 +12117,11 @@ def _hien_thi_tab_phan_tich_noi_dung(key_suffix="", stats_ext=None, df_ext=None,
                 with st.spinner(
                     f"📥 Đang tải kết quả: {v.get('full_name')} — {v.get('exercise')}..."
                 ):
+                    _dong_bo_video_list_day_du_tu_hf(force=True)
+                    v_hf, _ = tai_tep_phan_tich_tu_hf(v)
+                    if v_hf:
+                        v = v_hf
+                        st.session_state.current_eval_video = v
                     loaded = tu_dong_nap_ket_qua_phan_tich_gan_nhat(v, force=True)
                     if not loaded or st.session_state.get("angle_df") is None:
                         loaded = khoi_phuc_ket_qua_cu(v, tai_day_du=True)
@@ -12158,10 +12161,7 @@ def _hien_thi_tab_phan_tich_noi_dung(key_suffix="", stats_ext=None, df_ext=None,
                         width="stretch",
                         type="primary",
                     ):
-                        if khoi_phuc_ket_qua_cu(v, tai_day_du=True):
-                            st.session_state.view_old_analysis = True
-                            st.session_state.reanalyze_triggered = False
-                            st.rerun(scope="fragment")
+                        _quay_lai_ket_qua_cu_da_luu(v, rerun=True)
                 if st.session_state.get('reanalyze_triggered') or is_processing:
                     st.info(
                         "🔬 **Chế độ phân tích mới** — MediaPipe 33 landmarks, đối chiếu YouTube (REF), "
