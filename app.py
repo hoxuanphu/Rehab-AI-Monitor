@@ -439,7 +439,10 @@ def get_school_logo_base64():
         uri = _image_path_to_data_uri(p)
         if uri:
             return uri
-    return "https://huph.edu.vn/uploads/logo/logo-huph.png"
+    return (
+        "https://raw.githubusercontent.com/quynhphuong1209/Rehab-AI-Monitor/main/"
+        "assets/abc1.png"
+    )
 
 
 DS_LOGO_URL = (
@@ -13191,7 +13194,10 @@ def _hien_thi_tab_phan_tich_noi_dung(key_suffix="", stats_ext=None, df_ext=None,
     # Nút thao tác nhanh khi đã có kết quả (NCV) — bỏ qua nếu đã hiện ở hàng video/tiến độ phía trên
     _v_hdr = st.session_state.get("current_eval_video")
     _prog_hdr = read_progress(_v_hdr.get("video_path")) if _v_hdr else None
-    _dang_phan_tich_hdr = bool(_prog_hdr and _prog_hdr.get("status") == "processing")
+    _dang_phan_tich_hdr = bool(
+        _prog_hdr and _prog_hdr.get("status") == "processing"
+        and st.session_state.get("_analysis_started_this_session")
+    )
     if user_role == "Nghiên cứu viên" and tk is not None and not _dang_phan_tich_hdr:
         st.success(
             f"📊 **KẾT QUẢ ĐÃ LƯU:** BN **{st.session_state.get('current_eval_video', {}).get('full_name', 'Bệnh nhân')}** — "
@@ -13296,6 +13302,11 @@ def _hien_thi_tab_phan_tich_noi_dung(key_suffix="", stats_ext=None, df_ext=None,
             </p>
         </div>
         """, unsafe_allow_html=True)
+        _sound_gay = "sounds/dung.mp3" if acc_val >= 80 else ("sounds/gan_dung.mp3" if acc_val >= 50 else "sounds/sai.mp3")
+        _sound_label = "✅ Đúng" if acc_val >= 80 else ("⚠️ Gần đúng" if acc_val >= 50 else "❌ Sai")
+        if os.path.exists(_sound_gay):
+            st.caption(f"🔊 AI nhận định: **{_sound_label}**")
+            st.audio(_sound_gay)
     else:
         # 1. PHÂN CHIA VÀ SO SÁNH 3 GIAI ĐOẠN TẬP LUYỆN
         st.markdown("### 🏥 HIỆU SUẤT THEO 3 GIAI ĐOẠN HỒI PHỤC (ĐỐI CHIẾU VIDEO YOUTUBE)")
@@ -13376,6 +13387,12 @@ def _hien_thi_tab_phan_tich_noi_dung(key_suffix="", stats_ext=None, df_ext=None,
             </p>
         </div>
         """, unsafe_allow_html=True)
+        _best_acc = max(acc_g1, acc_g2, acc_g3)
+        _sound_codman = "sounds/dung.mp3" if _best_acc >= 80 else ("sounds/gan_dung.mp3" if _best_acc >= 50 else "sounds/sai.mp3")
+        _sound_label_c = "✅ Đúng" if _best_acc >= 80 else ("⚠️ Gần đúng" if _best_acc >= 50 else "❌ Sai")
+        if os.path.exists(_sound_codman):
+            st.caption(f"🔊 AI nhận định: **{_sound_label_c}**")
+            st.audio(_sound_codman)
 
     if user_role == "Nghiên cứu viên":
         st.markdown("<br>", unsafe_allow_html=True)
@@ -16109,7 +16126,7 @@ Dòng **Xác suất 3 lớp** (nếu có): tổng ~100%, cho biết mô hình ph
 
         rc1, rc2, rc3, rc4 = st.columns([1.5, 1.5, 2.0, 0.6])
         with rc1:
-            fpp_option = st.selectbox("📄 Số/Trang", [12, 24, 36, 48, 96, "Tất cả"], index=1, key=f"fpp_{tab_key}_{key_suffix_val}")
+            fpp_option = st.selectbox("📄 Số/Trang", [12, 24, 36, 48, 96, "Tất cả"], index=3, key=f"fpp_{tab_key}_{key_suffix_val}")
             fpp = 999999 if fpp_option == "Tất cả" else int(fpp_option)
         with rc2:
             grid_cols = st.selectbox("🗂️ Số cột", [1, 2, 3, 4], index=3, key=f"fcols_{tab_key}_{key_suffix_val}")
