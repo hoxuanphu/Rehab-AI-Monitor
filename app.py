@@ -5867,63 +5867,49 @@ def _inject_base_css_once():
         font-size: 0.85rem !important;
     }
 </style>
-<script>
-(function(){
-    /* === NO-BLINK FIX: chặn Streamlit set opacity < 1 lên buttons/tabs khi fragment refresh ===
-       Streamlit dùng React inline style để dim elements — CSS !important không đủ vì inline style
-       cũng có độ ưu tiên cao. MutationObserver chặn ngay khi DOM thay đổi.                     */
-    if (window.__stNoBlinkInstalled) return;
-    window.__stNoBlinkInstalled = true;
-
-    var SEL = 'button,[role="tab"],[data-baseweb="button"],[data-baseweb="segmented-control"]';
-
-    function fix(el) {
-        if (!el || el.nodeType !== 1) return;
-        /* Nếu element hoặc tổ tiên là interactive thì lock opacity */
-        if (el.matches(SEL) || el.closest(SEL)) {
-            var op = parseFloat(el.style.opacity);
-            if (op > 0 && op < 0.99) {
-                el.style.setProperty('opacity', '1', 'important');
-            }
-        }
-        /* Quét children luôn */
-        var kids = el.querySelectorAll ? el.querySelectorAll(SEL) : [];
-        for (var i = 0; i < kids.length; i++) {
-            var k = kids[i];
-            var kop = parseFloat(k.style.opacity);
-            if (kop > 0 && kop < 0.99) {
-                k.style.setProperty('opacity', '1', 'important');
-            }
-        }
-    }
-
-    var obs = new MutationObserver(function(muts) {
-        for (var i = 0; i < muts.length; i++) {
-            var m = muts[i];
-            if (m.type === 'attributes' && m.attributeName === 'style') {
-                fix(m.target);
-            } else if (m.type === 'childList') {
-                for (var j = 0; j < m.addedNodes.length; j++) fix(m.addedNodes[j]);
-            }
-        }
-    });
-
-    function start() {
-        if (!document.body) { setTimeout(start, 50); return; }
-        obs.observe(document.body, {
-            attributes: true,
-            attributeFilter: ['style'],
-            childList: true,
-            subtree: true
-        });
-    }
-    start();
-})();
-</script>
 """, unsafe_allow_html=True)
 
 
 _inject_base_css_once()
+
+# Inject JS chặn blink qua components.v1.html — không bị st.markdown strip script tags
+import streamlit.components.v1 as _st_components
+_st_components.html("""<script>
+(function(){
+    if(window.__stNoBlinkInstalled)return;
+    window.__stNoBlinkInstalled=true;
+    var SEL='button,[role="tab"],[data-baseweb="button"],[data-baseweb="segmented-control"]';
+    function fix(el){
+        if(!el||el.nodeType!==1)return;
+        if((el.matches&&el.matches(SEL))||(el.closest&&el.closest(SEL))){
+            var op=parseFloat(el.style.opacity);
+            if(op>0&&op<0.99)el.style.setProperty('opacity','1','important');
+        }
+        var kids=el.querySelectorAll?el.querySelectorAll(SEL):[];
+        for(var i=0;i<kids.length;i++){
+            var kop=parseFloat(kids[i].style.opacity);
+            if(kop>0&&kop<0.99)kids[i].style.setProperty('opacity','1','important');
+        }
+    }
+    var obs=new MutationObserver(function(muts){
+        for(var i=0;i<muts.length;i++){
+            var m=muts[i];
+            if(m.type==='attributes'&&m.attributeName==='style')fix(m.target);
+            else if(m.type==='childList')for(var j=0;j<m.addedNodes.length;j++)fix(m.addedNodes[j]);
+        }
+    });
+    function start(){
+        if(!document.body){setTimeout(start,50);return;}
+        obs.observe(document.body,{attributes:true,attributeFilter:['style'],childList:true,subtree:true});
+        try{
+            var p=window.parent;
+            if(p&&p.document&&p.document.body)
+                obs.observe(p.document.body,{attributes:true,attributeFilter:['style'],childList:true,subtree:true});
+        }catch(e){}
+    }
+    start();
+})();
+</script>""", height=0, scrolling=False)
 
 # === CSS CHO CHẾ ĐỘ TỐI (DARK MODE FORCED) ===
 # Ép giao diện luôn tối kể cả khi Chrome/Hệ thống đang ở chế độ Sáng
