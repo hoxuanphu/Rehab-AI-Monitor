@@ -2461,6 +2461,7 @@ def _quay_lai_ket_qua_cu_da_luu(v, rerun=False):
     st.session_state.pop("_ncv_analysis_loaded_key", None)
     if not dang_chay:
         st.session_state.reanalyze_triggered = False
+        st.session_state.pop("_analysis_started_this_session", None)
 
     ok, v = _nap_bieu_do_nhanh_tu_cloud(v, giu_phan_tich_moi=dang_chay)
     if not ok:
@@ -9753,6 +9754,7 @@ def khoi_dong_phan_tich_lai_video(v, auto_start=True):
         done_key = f"_bg_done_{hashlib.md5(video_path.encode()).hexdigest()}"
         st.session_state.pop(done_key, None)
     st.session_state.reanalyze_triggered = True
+    st.session_state["_analysis_started_this_session"] = True
     st.session_state.current_eval_video = v
     # Luôn xóa dữ liệu cũ khi bắt đầu phân tích mới — người dùng thấy màn hình tiến độ ngay
     st.session_state.view_old_analysis = False
@@ -9948,8 +9950,22 @@ def liet_ke_jobs_vua_xong():
     return _scan_progress_by_status("success")
 
 
+def _thread_dang_chay_thuc_su(video_path=None):
+    """True chỉ khi có thread Python thực sự đang alive trong _running_threads.
+    Không bao giờ dựa vào progress file — tránh auto-refresh do file cũ/crash."""
+    if video_path:
+        t = _running_threads.get(video_path)
+        return bool(t and t.is_alive())
+    # Kiểm tra toàn bộ
+    return any(t.is_alive() for t in _running_threads.values() if t)
+
+
 def _co_job_dang_chay():
-    return bool(liet_ke_jobs_dang_chay() or liet_ke_jobs_vua_xong())
+    # Chỉ trigger auto-refresh khi thread thực sự chạy (không dựa progress file)
+    if _thread_dang_chay_thuc_su():
+        return True
+    # Fallback: jobs mới xong chờ xem kết quả (success)
+    return bool(liet_ke_jobs_vua_xong())
 
 
 def _interval_theo_doi_jobs():
@@ -10385,16 +10401,27 @@ def hien_thi_video_phan_tich_preview_fragment(v, key_suffix):
 
 
 def _interval_khu_vuc_phan_tich(video_path):
-    prog = read_progress(video_path) if video_path else None
-    if prog and prog.get("status") in ("processing", "success"):
+    """Auto-refresh CHỈ khi thread Python thực sự đang chạy hoặc vừa xong.
+    Không dựa vào progress file cũ — tránh nhấp nháy khi tải lại trang."""
+    if not video_path:
+        return None
+    if _thread_dang_chay_thuc_su(video_path):
+        return timedelta(seconds=3.0)
+    # Vừa xong (success) — cần một lần refresh để hiện kết quả
+    prog = read_progress(video_path)
+    if prog and prog.get("status") == "success":
         return timedelta(seconds=3.0)
     return None
 
 
 def _interval_tien_trinh_background(video_path):
-    """Chỉ auto-refresh tiến trình khi đang chạy hoặc vừa xong — tránh rerun vô ích."""
-    prog = read_progress(video_path) if video_path else None
-    if prog and prog.get("status") in ("processing", "success"):
+    """Chỉ auto-refresh tiến trình khi thread thực sự đang chạy hoặc vừa xong."""
+    if not video_path:
+        return None
+    if _thread_dang_chay_thuc_su(video_path):
+        return timedelta(seconds=3.0)
+    prog = read_progress(video_path)
+    if prog and prog.get("status") == "success":
         return timedelta(seconds=3.0)
     return None
 
@@ -10426,11 +10453,20 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
     if prog_data:
         status = prog_data.get("status")
         if status == "processing":
-            is_processing = True
-            p_val = prog_data.get("progress", 0.0)
-            elapsed = prog_data.get("elapsed", 0.0)
-            status_msg = prog_data.get("status_msg", "")
-            heartbeat = float(prog_data.get("heartbeat") or 0)
+            # Kiểm tra thread có thực sự alive không — nếu không, đây là progress file cũ
+            if _thread_dang_chay_thuc_su(video_path):
+                is_processing = True
+                p_val = prog_data.get("progress", 0.0)
+                elapsed = prog_data.get("elapsed", 0.0)
+                status_msg = prog_data.get("status_msg", "")
+                heartbeat = float(prog_data.get("heartbeat") or 0)
+            else:
+                # Progress file cũ từ phiên trước bị crash — hiển thị như lỗi
+                is_error = True
+                err_msg = (
+                    f"⚠️ Phân tích bị gián đoạn (tiến trình nền đã dừng). "
+                    f"Đã đạt {prog_data.get('progress', 0)*100:.0f}% — nhấn 'Thử lại' để chạy lại."
+                )
         elif status == "error":
             is_error = True
             err_msg = prog_data.get("error_msg", "Lỗi không xác định")
@@ -10460,9 +10496,11 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
             return f"~{int(remaining//60)} phút"
         return f"~{int(remaining)}s"
 
-    # Force-stop: xóa khỏi registry + ghi trạng thái cancelled
+    # Force-stop: xóa khỏi registry + ghi trạng thái cancelled + dừng fragment refresh
     def _dung_phan_tich():
         _running_threads.pop(video_path, None)
+        st.session_state.pop("_analysis_started_this_session", None)
+        st.session_state.pop("reanalyze_triggered", None)
         write_progress(video_path, "error", progress=p_val, elapsed=elapsed_live,
                        start_time=start_t,
                        error_msg="⛔ Người dùng đã dừng phân tích. Nhấn 'Thử lại' để chạy lại với cài đặt khác.")
@@ -10513,7 +10551,7 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
         with c1:
             if st.button("⛔ Dừng phân tích", width="stretch", type="primary", key=f"btn_stop_slow_{key_suffix}"):
                 _dung_phan_tich()
-                st.rerun(scope="fragment")
+                st.rerun()  # Full rerun: tạo lại fragment với run_every=None
         with c2:
             if st.button("🔄 Khởi động lại", width="stretch", type="secondary", key=f"btn_restart_slow_{key_suffix}"):
                 clear_analysis_progress(video_path)
@@ -10539,7 +10577,7 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
         with c1:
             if st.button("⛔ Dừng phân tích", width="stretch", type="secondary", key=f"btn_stop_metrics_{key_suffix}"):
                 _dung_phan_tich()
-                st.rerun(scope="fragment")
+                st.rerun()  # Full rerun: tạo lại fragment với run_every=None
         with c2:
             if st.button("⬅️ Quay lại xem kết quả cũ đã lưu", width="stretch", type="secondary", key=f"btn_back_old_{key_suffix}"):
                 _quay_lai_ket_qua_cu_da_luu(v, rerun=False)
@@ -10562,7 +10600,7 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
         with c2:
             if st.button("⛔ Dừng", width="stretch", type="secondary", key=f"btn_stop_plain_{key_suffix}"):
                 _dung_phan_tich()
-                st.rerun(scope="fragment")
+                st.rerun()  # Full rerun: tạo lại fragment với run_every=None
     else:
         if st.button("🚀 PHÂN TÍCH VÀ TRÍCH XUẤT KHUNG XƯƠNG NGAY", width="stretch", type="primary", key=f"btn_analyze_now_{key_suffix}"):
             result = khoi_dong_phan_tich_lai_video(v, auto_start=True)
@@ -13039,6 +13077,7 @@ def _hien_thi_tab_phan_tich_noi_dung(key_suffix="", stats_ext=None, df_ext=None,
             prog_data = read_progress(v.get('video_path'))
             is_processing = bool(
                 prog_data and prog_data.get("status") == "processing"
+                and st.session_state.get("_analysis_started_this_session")
             )
 
             if has_metrics and not st.session_state.get("has_data"):
