@@ -2366,8 +2366,18 @@ def _nap_bieu_do_nhanh_tu_cloud(v, giu_phan_tich_moi=False):
 
 
 def _fragment_tien_do_tai_media(v, key_suffix=""):
-    """Fragment 2s — cập nhật tiến độ tải Cloud + tự hiện biểu đồ khi CSV sẵn sàng."""
-    interval = timedelta(seconds=2) if st.session_state.get("_media_load_slot") else None
+    """Fragment 1s — cập nhật tiến độ tải Cloud + tự hiện biểu đồ khi CSV sẵn sàng."""
+    vp = (v or {}).get("video_path")
+    prog = read_progress(vp) if vp else None
+    dang_phan_tich = bool(prog and prog.get("status") == "processing")
+    status = _trang_thai_tai_media(v) if v else {}
+    can_poll = (
+        st.session_state.get("_media_load_slot")
+        or status.get("running")
+        or not all((status.get("csv"), status.get("json"), status.get("video")))
+        or dang_phan_tich
+    )
+    interval = timedelta(seconds=1) if can_poll else None
 
     @st.fragment(run_every=interval)
     def _poll():
@@ -8529,7 +8539,9 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
                 if callback and tong_frame > 0:
                     if frame_count > tong_frame:
                         tong_frame = frame_count + 100
-                    prog = min(frame_count / tong_frame, 1.0) * 0.5
+                    # Dùng processed_count để % không đứng im khi skip_frame > 0
+                    frames_to_process = max(1, (tong_frame + skip_step) // (skip_step + 1))
+                    prog = min(processed_count / frames_to_process, 1.0) * 0.5
                     callback(prog)
                     if frame_count % 100 == 1 or frame_count == tong_frame:
                         print(f"[AI Process] Pass 1: Frame {frame_count}/{tong_frame} (Tiến độ: {prog*100:.1f}%)")
@@ -9302,22 +9314,35 @@ def clear_all_progress_files():
 def khoi_dong_phan_tich_lai_video(v, auto_start=True):
     """
     Chuẩn bị và khởi chạy phân tích lại: MediaPipe 33 điểm + REF YouTube + ML Classifier.
+    Giữ kết quả đã lưu trên màn hình nếu video đã có metrics — phân tích mới chạy nền.
     """
     if not v:
         return False
+    v = _lam_moi_ban_ghi_video_tu_db(v) or v
     video_path = v.get("video_path")
+    co_ket_qua_cu = bool(v.get("metrics"))
     clear_analysis_progress(video_path)
     if video_path:
         done_key = f"_bg_done_{hashlib.md5(video_path.encode()).hexdigest()}"
         st.session_state.pop(done_key, None)
     st.session_state.reanalyze_triggered = True
-    st.session_state.view_old_analysis = False
-    st.session_state.has_data = False
-    st.session_state.stats = None
-    st.session_state.angle_df = None
-    st.session_state.processed_video_path = None
-    st.session_state.current_df_csv_path = None
-    st.session_state.pop("_ncv_analysis_loaded_key", None)
+    st.session_state.current_eval_video = v
+    if co_ket_qua_cu:
+        # Giữ biểu đồ + video + frames đã lưu — không xóa session
+        st.session_state.view_old_analysis = True
+        if not st.session_state.get("has_data") or st.session_state.get("angle_df") is None:
+            _nap_bieu_do_nhanh_tu_cloud(v, giu_phan_tich_moi=True)
+        else:
+            _gan_session_ket_qua_tu_video(v)
+            _bat_dau_tai_day_du_song_song(v)
+    else:
+        st.session_state.view_old_analysis = False
+        st.session_state.has_data = False
+        st.session_state.stats = None
+        st.session_state.angle_df = None
+        st.session_state.processed_video_path = None
+        st.session_state.current_df_csv_path = None
+        st.session_state.pop("_ncv_analysis_loaded_key", None)
 
     if not auto_start or not video_path:
         return True
@@ -9913,7 +9938,14 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
         except:
             pass
     elif is_processing and st.session_state.get("view_old_analysis") and st.session_state.get("has_data"):
-        st.success("📂 Đang xem kết quả đã lưu. Phân tích mới (nếu có) vẫn chạy nền — xem biểu đồ ở khu vực bên trái.")
+        start_t = prog_data.get("start_time")
+        elapsed_live = (time.time() - float(start_t)) if start_t else elapsed
+        st.progress(p_val)
+        detail = f" — {status_msg}" if status_msg else ""
+        st.caption(
+            f"🔄 Phân tích mới nền: **{p_val*100:.1f}%** | ⏱️ {elapsed_live:.1f}s{detail} — "
+            "biểu đồ đã lưu hiển thị bên trái."
+        )
     else:
         if st.button("🚀 PHÂN TÍCH VÀ TRÍCH XUẤT KHUNG XƯƠNG NGAY", width="stretch", type="primary", key=f"btn_analyze_now_{key_suffix}"):
             if khoi_dong_phan_tich_lai_video(v, auto_start=True):
@@ -10498,8 +10530,8 @@ def bat_dau_phan_tich_background(
                     status_msg = "📦 Đang lưu frames, đóng gói video và hoàn tất kết quả..."
                 
                 percent_tenth = int(prog_val * 1000)
-                # Ghi tiến độ mỗi 0.25s hoặc khi % thay đổi ≥0.1 — UI không bị đứng im.
-                if percent_tenth != last_prog_tenth[0] or (now - last_write_time[0] >= 0.25):
+                # Ghi tiến độ mỗi 1s (heartbeat) hoặc khi % thay đổi — UI không bị đứng im.
+                if percent_tenth != last_prog_tenth[0] or (now - last_write_time[0] >= 1.0):
                     write_progress(progress_video_path, "processing", username=username, video_name=video_name, progress=prog_val, elapsed=elap, start_time=start_t, status_msg=status_msg)
                     last_write_time[0] = now
                     last_prog_tenth[0] = percent_tenth
@@ -12316,17 +12348,13 @@ def _hien_thi_tab_phan_tich_noi_dung(key_suffix="", stats_ext=None, df_ext=None,
                 and st.session_state.get("_ncv_analysis_loaded_key") != slot_v
             ):
                 _xoa_session_phan_tich()
-            # Tự nạp kết quả — không spinner (tải song song nền)
-            if (
-                has_metrics
-                and not (
-                    st.session_state.get("reanalyze_triggered", False)
-                    and not st.session_state.get("view_old_analysis", False)
-                )
-                and (
-                    st.session_state.get("angle_df") is None
-                    or not _session_phan_tich_khop_video(v)
-                )
+            if has_metrics and not st.session_state.get("view_old_analysis", False):
+                st.session_state.view_old_analysis = True
+
+            # Tự nạp kết quả — không spinner (tải song song nền), kể cả khi đang phân tích mới
+            if has_metrics and (
+                st.session_state.get("angle_df") is None
+                or not _session_phan_tich_khop_video(v)
             ):
                 _prog_tmp = read_progress(v.get("video_path"))
                 _dang_chay = bool(_prog_tmp and _prog_tmp.get("status") == "processing")
@@ -12363,15 +12391,10 @@ def _hien_thi_tab_phan_tich_noi_dung(key_suffix="", stats_ext=None, df_ext=None,
                 st.session_state.get("has_data")
                 and st.session_state.get("angle_df") is not None
             )
-            # Hiển thị biểu đồ khi đã nạp dữ liệu — kể cả đang chạy phân tích mới ở nền
-            hien_thi_bieu_do = da_co_du_lieu and not (
-                st.session_state.get('reanalyze_triggered', False)
-                and is_processing
-                and not st.session_state.get("view_old_analysis", False)
-            )
+            # Luôn hiển thị biểu đồ khi đã nạp — phân tích mới chạy nền, không che kết quả cũ
+            hien_thi_bieu_do = da_co_du_lieu
             if not hien_thi_bieu_do and (
                 not has_metrics
-                or (st.session_state.get('reanalyze_triggered', False) and not da_co_du_lieu)
                 or (is_processing and not da_co_du_lieu)
             ):
                 if st.session_state.get('reanalyze_triggered') or is_processing:
