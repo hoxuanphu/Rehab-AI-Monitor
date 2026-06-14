@@ -15794,10 +15794,11 @@ Dòng **Xác suất 3 lớp** (nếu có): tổng ~100%, cho biết mô hình ph
         if cap_recover:
             cap_recover.release()
 
-        # Vẽ lưới bằng cột và container native của Streamlit (Tránh truyền tải Base64 khổng lồ qua WebSocket)
-        cols = st.columns(grid_cols)
+        # Gộp toàn bộ trang thành 1 st.markdown() → 1 ForwardMsg duy nhất, tránh "Cached ForwardMsg MISS"
+        grid_parts = [f'<div style="display:grid;grid-template-columns:repeat({grid_cols},1fr);gap:12px;">']
+        any_missing_img = False
+
         for i, orig_idx in enumerate(page_inds):
-            col_target = cols[i % grid_cols]
             f_data = frame_data_list[orig_idx]
             f_path = get_local_frame_path(f_data.get('path'))
 
@@ -15821,10 +15822,10 @@ Dòng **Xác suất 3 lớp** (nếu có): tổng ~100%, cho biết mô hình ph
                 badge_text = ml_disp.get("badge_text") or ml_label_text
                 footer_text = ml_disp.get("footer_text") or f"ML: {ml_label_text}"
                 prob_text = ml_disp.get("prob_text") or ""
-                ml_badge_html = f'<span class="frame-card-badge" style="background: {ml_color}1f; color: {ml_color}; border-color: {ml_color}40;">ML · {badge_text}</span>'
-                ml_footer_html = f'<div class="frame-card-row"><span>Model ML:</span><span style="color: {ml_color}; font-weight: bold;">{footer_text}</span></div>'
+                ml_badge_html = f'<span class="frame-card-badge" style="background:{ml_color}1f;color:{ml_color};border-color:{ml_color}40;">ML · {badge_text}</span>'
+                ml_footer_html = f'<div class="frame-card-row"><span>Model ML:</span><span style="color:{ml_color};font-weight:bold;">{footer_text}</span></div>'
                 if prob_text:
-                    ml_footer_html += f'<div class="frame-card-row"><span>Xác suất 3 lớp:</span><span style="font-size: 0.72rem;">{prob_text}</span></div>'
+                    ml_footer_html += f'<div class="frame-card-row"><span>Xác suất 3 lớp:</span><span style="font-size:0.72rem;">{prob_text}</span></div>'
 
             gv = f_data.get('goc_vai', 0) or 0
             gk = f_data.get('goc_khuyu', 0) or 0
@@ -15834,7 +15835,7 @@ Dòng **Xác suất 3 lớp** (nếu có): tổng ~100%, cho biết mô hình ph
             diff_v = abs(gv - cv_ref)
             diff_k = abs(gk - ck_ref)
 
-            # Lấy base64: ưu tiên cache từ ZIP (đã đọc một lần ở trên), sau đó đọc từ file
+            # Lấy base64: ưu tiên cache từ ZIP, sau đó đọc từ file
             f_name = os.path.basename(f_path) if f_path else ''
             b64_data = zip_b64_cache.get(f_name, '')
             if not b64_data and f_path and os.path.exists(f_path) and os.path.getsize(f_path) >= 5 * 1024:
@@ -15843,37 +15844,39 @@ Dòng **Xác suất 3 lớp** (nếu có): tổng ~100%, cho biết mô hình ph
                         b64_data = base64.b64encode(img_file.read()).decode("utf-8")
                 except:
                     pass
-            
-            with col_target:
-                if b64_data:
-                    card_html = (
-                        f'<div class="frame-card">'
-                        f'<div class="frame-card-header">'
-                        f'<span class="frame-card-index">#{f_data.get("index")}</span>'
-                        f'<span class="frame-card-badges">'
-                        f'<span class="frame-card-badge" style="background: {bg_alpha}; color: {color}; border-color: {color}40;">{phase_st}</span>'
-                        f'{ml_badge_html}'
-                        f'</span>'
-                        f'</div>'
-                        f'<div class="frame-card-img-wrapper">'
-                        f'<img class="frame-card-img" src="data:image/jpeg;base64,{b64_data}" />'
-                        f'</div>'
-                        f'<div class="frame-card-footer">'
-                        f'<div class="frame-card-row">'
-                        f'<span>Vai: <b>{gv:.0f}°</b> / {cv_ref:.0f}°</span>'
-                        f'<span style="color: {color}; font-weight: bold;">Δ {diff_v:.1f}°</span>'
-                        f'</div>'
-                        f'<div class="frame-card-row">'
-                        f'<span>Khuỷu: <b>{gk:.0f}°</b> / {ck_ref:.0f}°</span>'
-                        f'<span style="color: {color}; font-weight: bold;">Δ {diff_k:.1f}°</span>'
-                        f'</div>'
-                        f'{ml_footer_html}'
-                        f'</div>'
-                        f'</div>'
-                    )
-                    st.markdown(card_html, unsafe_allow_html=True)
-                else:
-                    st.error("Ảnh lỗi")
+
+            if b64_data:
+                grid_parts.append(
+                    f'<div class="frame-card">'
+                    f'<div class="frame-card-header">'
+                    f'<span class="frame-card-index">#{f_data.get("index")}</span>'
+                    f'<span class="frame-card-badges">'
+                    f'<span class="frame-card-badge" style="background:{bg_alpha};color:{color};border-color:{color}40;">{phase_st}</span>'
+                    f'{ml_badge_html}'
+                    f'</span></div>'
+                    f'<div class="frame-card-img-wrapper">'
+                    f'<img class="frame-card-img" src="data:image/jpeg;base64,{b64_data}" />'
+                    f'</div>'
+                    f'<div class="frame-card-footer">'
+                    f'<div class="frame-card-row"><span>Vai: <b>{gv:.0f}°</b> / {cv_ref:.0f}°</span>'
+                    f'<span style="color:{color};font-weight:bold;">Δ {diff_v:.1f}°</span></div>'
+                    f'<div class="frame-card-row"><span>Khuỷu: <b>{gk:.0f}°</b> / {ck_ref:.0f}°</span>'
+                    f'<span style="color:{color};font-weight:bold;">Δ {diff_k:.1f}°</span></div>'
+                    f'{ml_footer_html}'
+                    f'</div></div>'
+                )
+            else:
+                any_missing_img = True
+                grid_parts.append(
+                    f'<div class="frame-card" style="display:flex;align-items:center;justify-content:center;min-height:120px;">'
+                    f'<span style="color:#ef4444;font-size:0.85rem;">⚠ Ảnh lỗi #{f_data.get("index","?")}</span>'
+                    f'</div>'
+                )
+
+        grid_parts.append('</div>')
+        st.markdown(''.join(grid_parts), unsafe_allow_html=True)
+        if any_missing_img:
+            st.caption("⚠ Một số ảnh chưa tải được — thử tải lại trang hoặc chạy lại phân tích.")
 
     if is_gay_ex:
         st.info("📋 **Bài tập với gậy:** Đánh giá động thái khớp vai & khuỷu theo tư thế chuẩn tương đương.")
