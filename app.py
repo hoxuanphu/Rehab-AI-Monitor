@@ -265,13 +265,20 @@ def sync_transcode_to_h264(src_path, dst_path=None, audio_path=None, timeout=180
         return None
     if dst_path is None:
         dst_path = get_final_h264_path(src_path)
-    if os.path.exists(dst_path):
+    has_audio_mux = bool(audio_path and os.path.exists(audio_path))
+    if os.path.exists(dst_path) and not has_audio_mux:
         try:
             mtime, size = os.path.getmtime(dst_path), os.path.getsize(dst_path)
             if _check_video_valid_cached(dst_path, mtime, size):
                 v_codec, _ = get_video_codec(dst_path)
                 if v_codec == 'h264':
                     return dst_path
+        except Exception:
+            pass
+    elif has_audio_mux and os.path.exists(dst_path):
+        # Luôn re-mux khi có audio mới — tránh dùng cache _f.mp4 không có tiếng
+        try:
+            os.remove(dst_path)
         except Exception:
             pass
     tmp_dst = dst_path.replace('_f.mp4', '_ftmp.mp4')
@@ -1159,6 +1166,17 @@ def get_video_codec(path):
     except:
         pass
     return None, None
+
+
+def video_has_audio_track(path):
+    """True nếu file video có track âm thanh."""
+    if not path or not os.path.exists(path):
+        return False
+    try:
+        _, a_codec = get_video_codec(path)
+        return bool(a_codec)
+    except Exception:
+        return False
 
 @st.cache_data(max_entries=300, show_spinner=False)
 def _get_playable_path_fast(video_path, mtime, size):
@@ -2517,11 +2535,7 @@ def hien_thi_nut_tai_lai_va_phan_tich_moi(v_re, key_suffix=""):
             type="secondary",
             use_container_width=True,
         ):
-            if khoi_dong_phan_tich_lai_video(v_re, auto_start=True):
-                st.toast("🚀 Đã khởi chạy phân tích mới — theo dõi tiến độ bên dưới!", icon="⚡")
-                _lam_moi_giao_dien_sau_nut()
-            else:
-                st.error("❌ Không khởi chạy được — kiểm tra đường dẫn video.")
+            _xu_ly_ket_qua_khoi_dong_phan_tich(khoi_dong_phan_tich_lai_video(v_re, auto_start=True))
 
 
 def render_video(video_path, check_h264=True, prefer_raw=False):
@@ -8229,6 +8243,14 @@ def ensure_voice_files():
             except Exception as _ffe:
                 print(f"[Audio] ffmpeg beep fail cho {filename}: {_ffe}")
 
+    missing = [
+        f for f in ("dung.mp3", "gan_dung.mp3", "sai.mp3")
+        if not os.path.exists(os.path.join(sounds_dir, f))
+        or os.path.getsize(os.path.join(sounds_dir, f)) == 0
+    ]
+    if missing:
+        print(f"[Audio] Van thieu file am thanh: {missing}")
+
     return sounds_dir
 
 
@@ -9038,6 +9060,11 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
     if callback:
         try: callback(0.925)
         except: pass
+
+    if not audio_events:
+        warn_audio = "Khong co su kien am thanh — tư thế khong doi hoac khong nhan dien duoc goc khop."
+        print(f"[Audio] {warn_audio}")
+        all_warnings.append(warn_audio)
     
     try:
         from pydub import AudioSegment
@@ -9055,6 +9082,8 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
                 sp = os.path.join(sounds_dir, f"{s}.mp3")
                 if os.path.exists(sp):
                     sounds[s] = AudioSegment.from_mp3(sp)
+            if not sounds:
+                raise RuntimeError("Thieu file am thanh dung/gan_dung/sai trong thu muc sounds/")
                     
             final_audio = AudioSegment.empty()
             last_ms = 0
@@ -9087,7 +9116,9 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
             audio_mixed = True
             gc.collect()
     except Exception as e:
-        print("Lỗi trộn âm thanh:", e)
+        warn_mix = f"Loi tron am thanh: {e}"
+        print(f"[Audio] {warn_mix}")
+        all_warnings.append(warn_mix)
     
     gc.collect()
     
@@ -9127,6 +9158,8 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
         except Exception:
             pass
     audio_aux = mixed_audio_path if (audio_mixed and os.path.exists(mixed_audio_path)) else None
+    if audio_aux:
+        _xoa_cache_h264_video(final_h264)
     start_transcode_time = time.time()
 
     def _transcode_tick():
@@ -9555,6 +9588,39 @@ def clear_all_progress_files():
         print(f"[Reset] Loi xoa progress files: {e}")
     return removed
 
+
+def _don_dep_thread_phan_tich(video_path):
+    """Gỡ thread phân tích đã chết khỏi registry."""
+    if not video_path:
+        return
+    t = _running_threads.get(video_path)
+    if t and not t.is_alive():
+        _running_threads.pop(video_path, None)
+
+
+def _xoa_cache_h264_video(video_path):
+    """Xóa bản H.264 _f.mp4 để buộc tạo lại (kèm âm thanh sau phân tích mới)."""
+    if not video_path:
+        return
+    for p in {video_path, get_final_h264_path(video_path)}:
+        if p and p.endswith("_f.mp4") and os.path.exists(p):
+            try:
+                os.remove(p)
+                print(f"[Reanalyze] Da xoa cache H264: {p}")
+            except Exception as exc:
+                print(f"[Reanalyze] Khong xoa duoc {p}: {exc}")
+
+
+def _chuan_bi_phan_tich_lai(video_path, v=None):
+    """Xóa checkpoint và cache H.264 cũ trước khi chạy phân tích mới."""
+    if video_path:
+        clear_checkpoint(get_checkpoint_path(video_path, PROCESSED_DIR))
+    if v:
+        proc = v.get("processed_path")
+        if proc:
+            _xoa_cache_h264_video(proc)
+
+
 def khoi_dong_phan_tich_lai_video(v, auto_start=True):
     """
     Chuẩn bị và khởi chạy phân tích lại: MediaPipe 33 điểm + REF YouTube + ML Classifier.
@@ -9583,11 +9649,14 @@ def khoi_dong_phan_tich_lai_video(v, auto_start=True):
     st.session_state.pop("_ncv_analysis_loaded_key", None)
     _ = co_ket_qua_cu  # không dùng nữa nhưng giữ để tránh lỗi reference
 
-    if not auto_start or not video_path:
-        return True
+    if not video_path:
+        return {"started": False, "reason": "no_video"}
+    if not auto_start:
+        return {"started": True, "reason": "prepared"}
 
+    _chuan_bi_phan_tich_lai(video_path, v)
     ncv_gd = st.session_state.get("ncv_giai_doan", PHASE_UI_LABELS["g2"])
-    bat_dau_phan_tich_background(
+    return bat_dau_phan_tich_background(
         video_path=video_path,
         username=v.get("username"),
         full_name=v.get("full_name"),
@@ -9599,8 +9668,8 @@ def khoi_dong_phan_tich_lai_video(v, auto_start=True):
         skip_step=st.session_state.get("ncv_skip_frames", 0),
         resize_width=st.session_state.get("ncv_resize_width", 720),
         force_train_classifier=True,
+        force_restart=True,
     )
-    return True
 
 def find_progress_by_video_info(username, video_name):
     """Tìm thông tin tiến trình background cho cặp username và video_name"""
@@ -10163,8 +10232,7 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
         st.error(f"❌ Phân tích thất bại: {err_msg}")
         if st.button("🔄 THỬ LẠI PHÂN TÍCH", width="stretch", type="primary", key=f"btn_retry_bg_{key_suffix}"):
             clear_analysis_progress(video_path)
-            khoi_dong_phan_tich_lai_video(v, auto_start=True)
-            _lam_moi_giao_dien_sau_nut()
+            _xu_ly_ket_qua_khoi_dong_phan_tich(khoi_dong_phan_tich_lai_video(v, auto_start=True))
     elif is_processing and v.get("metrics"):
         start_t = prog_data.get("start_time")
         elapsed_live = (time.time() - float(start_t)) if start_t else elapsed
@@ -10182,7 +10250,7 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
         elapsed_live = (time.time() - float(start_t)) if start_t else elapsed
         st.info(f"🔄 Đang xử lý... **{p_val*100:.1f}%** | ⏱️ {elapsed_live:.1f}s{detail}")
         st.button(
-            "🚀 ĐANG TRÍCH XUẤT KHUNG XƯƠNG...",
+            "⏳ Đang phân tích — không bấm được",
             width="stretch",
             type="primary",
             key=f"btn_analyze_disabled_{key_suffix}",
@@ -10190,9 +10258,12 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
         )
     else:
         if st.button("🚀 PHÂN TÍCH VÀ TRÍCH XUẤT KHUNG XƯƠNG NGAY", width="stretch", type="primary", key=f"btn_analyze_now_{key_suffix}"):
-            if khoi_dong_phan_tich_lai_video(v, auto_start=True):
+            result = khoi_dong_phan_tich_lai_video(v, auto_start=True)
+            if isinstance(result, dict) and result.get("started"):
                 st.toast("🚀 Đã khởi chạy phân tích — tiến độ cập nhật ngay bên dưới!", icon="⚡")
                 _lam_moi_giao_dien_sau_nut()
+            else:
+                _xu_ly_ket_qua_khoi_dong_phan_tich(result)
 
 def download_file_with_progress(file_path, write_progress_fn, start_t, username, video_name):
     """Tải file từ Hugging Face Dataset có cập nhật tiến độ (progress bar) từng chunk"""
@@ -10532,12 +10603,26 @@ def bat_dau_phan_tich_background(
     temp_uploaded_path=None,
     skip_step=None,
     resize_width=None,
-    force_train_classifier=False
+    force_train_classifier=False,
+    force_restart=False,
 ):
-    """Khởi chạy tiến trình phân tích video dưới background thread"""
+    """Khởi chạy tiến trình phân tích video dưới background thread.
+    Trả về dict: started (bool), reason (str)."""
+    if not video_path:
+        return {"started": False, "reason": "no_video"}
+
+    _don_dep_thread_phan_tich(video_path)
+
     ckpt_path = get_checkpoint_path(video_path, PROCESSED_DIR)
     ckpt_existing = load_checkpoint(ckpt_path)
-    has_ckpt = bool(ckpt_existing and ckpt_existing.get("pass1_data") and ckpt_existing.get("phase") in ("pass1_done", "pass2"))
+    has_ckpt = (
+        not force_restart
+        and bool(
+            ckpt_existing
+            and ckpt_existing.get("pass1_data")
+            and ckpt_existing.get("phase") in ("pass1_done", "pass2")
+        )
+    )
 
     if has_ckpt:
         model_type = ckpt_existing.get("model_type") or model_type
@@ -10560,8 +10645,8 @@ def bat_dau_phan_tich_background(
     # Tránh chạy trùng lặp
     if video_path in _running_threads and _running_threads[video_path].is_alive():
         print(f"[BG Process] Thread cho video {video_path} đang chạy.")
-        return
-        
+        return {"started": False, "reason": "already_running"}
+
     job_meta = {
         "full_name": full_name,
         "exercise_name": exercise_name,
@@ -11011,6 +11096,26 @@ def bat_dau_phan_tich_background(
     t = threading.Thread(target=thread_target, daemon=True)
     _running_threads[video_path] = t
     t.start()
+    return {"started": True, "reason": ""}
+
+
+def _xu_ly_ket_qua_khoi_dong_phan_tich(result):
+    """Hiển thị toast/warning sau khi bấm nút phân tích."""
+    if not isinstance(result, dict):
+        result = {"started": bool(result), "reason": ""}
+    if result.get("started"):
+        st.toast("🚀 Đã khởi chạy phân tích mới — theo dõi tiến độ bên dưới!", icon="⚡")
+        _lam_moi_giao_dien_sau_nut()
+    elif result.get("reason") == "already_running":
+        st.warning(
+            "⏳ Video này **đang phân tích**. Chờ hoàn tất hoặc bấm "
+            "**🧹 HỦY TẤT CẢ & LÀM MỚI** ở sidebar rồi thử lại."
+        )
+    elif result.get("reason") == "no_video":
+        st.error("❌ Không khởi chạy được — thiếu đường dẫn video.")
+    else:
+        st.error("❌ Không khởi chạy được phân tích — kiểm tra log hoặc thử lại.")
+
 
 def recalc_metrics(df, ss, exercise_name="codman"):
     if df is None or len(df) == 0:
@@ -15223,6 +15328,20 @@ def _noi_dung_frames_day_du(key_suffix=""):
 
     # 0. HIỂN THỊ VIDEO ĐÃ PHÂN TÍCH
     st.markdown("### 🎬 VIDEO ĐÃ PHÂN TÍCH")
+    st.caption(
+        "🔊 Âm thanh **Đúng / Gần đúng / Sai** được trộn vào video khi bấm **Chạy phân tích mới**."
+    )
+    _play_check = playback_video_path or processed_video_path
+    if (
+        has_video
+        and _play_check
+        and os.path.exists(_play_check)
+        and not video_has_audio_track(_play_check)
+    ):
+        st.info(
+            "ℹ️ Video này chưa có âm thanh phản hồi (có thể là bản phân tích cũ). "
+            "Bấm **🚀 Chạy phân tích mới** ở tab Phân tích để tạo lại video có tiếng."
+        )
     
     # Khung video và thông tin
     v_col1, v_col2 = st.columns([1.3, 1.0], gap='large')
@@ -18082,34 +18201,6 @@ def main():
                              "Full (Complexity 1): cân bằng tốc độ/chính xác — khuyến nghị trên Hugging Face. "
                              "Lite (Complexity 0): nhanh nhất, dashboard gọn nhẹ."
                          ))
-
-            st.markdown("### 🤖 POSE CLASSIFIER")
-            st.caption("Sau khi upload video: trích xuất 33 điểm → đối chiếu YouTube (REF) → train/nạp ML → frame có nhãn REF + ML.")
-            if POSE_CLASSIFIER_IMPORT_ERROR:
-                st.warning("Không tải được pose_classifier_utils.")
-            elif train_pose_classifier and get_pose_classifier_status:
-                _clf = get_pose_classifier_status(DB_DIR)
-                if _clf.get("ready"):
-                    st.success("✅ Model ML sẵn sàng")
-                else:
-                    st.info("Chưa có model — sẽ tự train khi phân tích video (cần CSV trong processed_results/).")
-                _sb1, _sb2 = st.columns(2)
-                with _sb1:
-                    if st.button("🎓 Train", key="sidebar_train_clf", use_container_width=True):
-                        with st.spinner("Huấn luyện..."):
-                            _tr = train_pose_classifier(PROCESSED_DIR, DB_DIR)
-                        st.success(_tr.get("message", "Xong")) if _tr.get("success") else st.error(_tr.get("message", "Lỗi"))
-                        st.rerun()
-                with _sb2:
-                    if st.button("🔄 Apply ML", key="sidebar_apply_clf", use_container_width=True):
-                        with st.spinner("Áp dụng ML + cập nhật ảnh frame..."):
-                            _ap = reprocess_videos_with_classifier(
-                                VIDEOS_FILE, EVALUATIONS_FILE,
-                                processed_dir=PROCESSED_DIR, db_dir=DB_DIR, data_dir=DATA_DIR,
-                                phase_bounds_fn=segment_frames,
-                            )
-                        st.success(f"Cập nhật {_ap.get('updated', 0)} video") if _ap.get("success") else st.error(_ap.get("message", "Lỗi"))
-                        st.rerun()
 
             st.markdown("### 🧹 LÀM MỚI TIẾN TRÌNH")
             st.caption("Hủy tất cả tiến trình đang chạy/đang chờ để bắt đầu phân tích lại từ đầu.")
