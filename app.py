@@ -5098,6 +5098,36 @@ def _inject_base_css_once():
         overflow-y: scroll !important;
     }
 
+    /* === TẮT BLINK/NHẤP NHÁY KHI FRAGMENT AUTO-REFRESH ===
+       Streamlit áp @keyframes pulse lên button/control khi fragment đang re-run.
+       Override thành no-op để loại bỏ hiệu ứng nhấp nháy khó chịu.            */
+    @keyframes pulse { from { opacity: 1; } to { opacity: 1; } }
+    @keyframes border-pulse { from { } to { } }
+
+    /* Nút bấm và toggle: tắt hẳn animation do Streamlit inject trong lúc running */
+    button,
+    [data-baseweb="button"],
+    [data-baseweb="segmented-control"] *,
+    [data-testid^="stBaseButton"],
+    [data-testid="stSegmentedControl"],
+    [data-testid="stSegmentedControl"] *,
+    [role="tab"],
+    [data-testid="stSlider"] [role="slider"] {
+        animation: none !important;
+        transition: background-color 0.12s ease, color 0.12s ease,
+                    border-color 0.12s ease, opacity 0.12s ease !important;
+    }
+
+    /* Xóa viền nhấp nháy (blue outline) Streamlit thêm khi fragment chạy lại */
+    [data-running] button,
+    [data-running] [data-baseweb],
+    [data-stale] button,
+    [data-stale] [data-baseweb] {
+        animation: none !important;
+        border-color: inherit !important;
+        box-shadow: none !important;
+    }
+
     /* Khống chế kích thước ảnh frame để tránh giật/rung lắc giao diện khi load ảnh */
     div[data-testid="stImage"] {
         min-height: 180px !important;
