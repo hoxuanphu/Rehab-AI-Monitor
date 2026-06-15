@@ -10584,8 +10584,9 @@ def hien_thi_video_phan_tich_preview_fragment(v, key_suffix):
 
 
 def _interval_khu_vuc_phan_tich(video_path):
-    """Auto-refresh khi thread đang chạy, vừa xong, hoặc heartbeat còn mới.
-    Heartbeat fallback: thread có thể bị mất khỏi registry sau rerun nhưng vẫn đang chạy thực."""
+    """Auto-refresh khi thread đang chạy, vừa xong, hoặc progress file vẫn là 'processing'.
+    Giữ fragment luôn refresh trong khi status=='processing' — stall detection trong content
+    function (_STALL_SECONDS=180) sẽ hiện cảnh báo nếu thread thực sự đã chết."""
     if not video_path:
         return None
     if _thread_dang_chay_thuc_su(video_path):
@@ -10594,18 +10595,13 @@ def _interval_khu_vuc_phan_tich(video_path):
     if not prog:
         return None
     status = prog.get("status")
-    if status == "success":
+    if status in ("success", "processing"):
         return timedelta(seconds=3.0)
-    if status == "processing":
-        hb = float(prog.get("heartbeat") or prog.get("start_time") or 0)
-        # Thread còn ghi heartbeat gần đây → vẫn đang chạy dù không trong registry
-        if hb and (time.time() - hb) < JOB_ORPHAN_SECONDS:
-            return timedelta(seconds=3.0)
     return None
 
 
 def _interval_tien_trinh_background(video_path):
-    """Chỉ auto-refresh tiến trình khi thread thực sự đang chạy hoặc vừa xong."""
+    """Auto-refresh tiến trình khi thread đang chạy hoặc vừa xong."""
     if not video_path:
         return None
     if _thread_dang_chay_thuc_su(video_path):
@@ -10614,12 +10610,8 @@ def _interval_tien_trinh_background(video_path):
     if not prog:
         return None
     status = prog.get("status")
-    if status == "success":
+    if status in ("success", "processing"):
         return timedelta(seconds=3.0)
-    if status == "processing":
-        hb = float(prog.get("heartbeat") or prog.get("start_time") or 0)
-        if hb and (time.time() - hb) < JOB_ORPHAN_SECONDS:
-            return timedelta(seconds=3.0)
     return None
 
 
@@ -10655,26 +10647,14 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
     if prog_data:
         status = prog_data.get("status")
         if status == "processing":
-            thread_alive = _thread_dang_chay_thuc_su(video_path)
-            _start_t_raw = prog_data.get("start_time")
-            _hb_raw = prog_data.get("heartbeat")
-            # Coi thread còn sống nếu: in registry, hoặc heartbeat mới (< JOB_ORPHAN_SECONDS)
-            # Điều này xử lý trường hợp thread bị mất khỏi registry sau rerun nhưng vẫn đang chạy
-            hb_recent = bool(_hb_raw and (time.time() - float(_hb_raw)) < JOB_ORPHAN_SECONDS)
-            just_started = bool(_start_t_raw and (time.time() - float(_start_t_raw)) < 15)
-            if thread_alive or just_started or hb_recent:
-                is_processing = True
-                p_val = prog_data.get("progress", 0.0)
-                elapsed = prog_data.get("elapsed", 0.0)
-                status_msg = prog_data.get("status_msg", "")
-                heartbeat = float(prog_data.get("heartbeat") or 0)
-            else:
-                # Progress file cũ từ phiên trước bị crash — hiển thị như lỗi
-                is_error = True
-                err_msg = (
-                    f"⚠️ Phân tích bị gián đoạn (tiến trình nền đã dừng). "
-                    f"Đã đạt {prog_data.get('progress', 0)*100:.0f}% — nhấn 'Thử lại' để chạy lại."
-                )
+            # Luôn hiển thị "đang xử lý" khi progress file nói "processing".
+            # Không check heartbeat age ở đây — stall detection (_STALL_SECONDS=180s)
+            # sẽ hiện cảnh báo và nút Khởi động lại nếu thread thực sự đã chết.
+            is_processing = True
+            p_val = prog_data.get("progress", 0.0)
+            elapsed = prog_data.get("elapsed", 0.0)
+            status_msg = prog_data.get("status_msg", "")
+            heartbeat = float(prog_data.get("heartbeat") or 0)
         elif status == "error":
             if _just_retried:
                 # Thread thất bại rất nhanh (race condition) — giữ loading UI 8s sau khi bấm Thử lại
@@ -11524,7 +11504,12 @@ def bat_dau_phan_tich_background(
             )
             
             elap = time.time() - start_t
-            
+            # Heartbeat ngay sau xu_ly_video_day_du: post-processing có thể mất vài phút
+            # (tính metrics, CSV, HF upload) mà không gọi callback → heartbeat cũ → UI đứng im
+            write_progress(progress_video_path, "processing", username=username, video_name=video_name,
+                           progress=0.92, elapsed=elap, start_time=start_t,
+                           status_msg="📊 Đang tính toán metrics và lưu kết quả...")
+
             if valid_frames > 0 and len(angle_data) > 0:
                 df = pd.DataFrame(angle_data)
                 metrics = tinh_metrics_chi_tiet(df, bt_ncv)
@@ -11595,6 +11580,9 @@ def bat_dau_phan_tich_background(
                     except Exception as ml_err:
                         print(f"[Pose Classifier] Bo qua du doan ML cho video hien tai: {ml_err}")
 
+                write_progress(progress_video_path, "processing", username=username, video_name=video_name,
+                               progress=0.95, elapsed=time.time()-start_t, start_time=start_t,
+                               status_msg="💾 Đang ghi CSV và lưu kết quả...")
                 df_csv_path = output_path.replace('.mp4', '_data.csv')
                 df.to_csv(df_csv_path, index=False)
                 
