@@ -2603,6 +2603,13 @@ def render_video(video_path, check_h264=True, prefer_raw=False):
             if _valid_raw_video_local(p) and _render_video_streamlit_native(p, allow_large=True):
                 st.caption(f"📤 Video gốc BN — {os.path.basename(p)}")
                 return
+        # Fallback khi raw không có local: thử _f.mp4 (H.264 đã tải về khi chạy phân tích)
+        _h264_local = get_final_h264_path(_strip_to_original_upload(video_path))
+        if _h264_local and _h264_local != video_path and not _is_scratch_video_path(_h264_local):
+            ensure_local_file(_h264_local, quiet=True, try_fallbacks=False)
+            if _valid_raw_video_local(_h264_local) and _render_video_streamlit_native(_h264_local, allow_large=True):
+                st.caption(f"📤 Video gốc BN — {os.path.basename(_h264_local)}")
+                return
 
     # Ưu tiên phát local qua st.video() — hỗ trợ Range request, không bị màn đen trên HF Space
     if not prefer_raw:
@@ -2621,6 +2628,12 @@ def render_video(video_path, check_h264=True, prefer_raw=False):
     if _is_hf_runtime() and HF_TOKEN and HF_DATASET_ID:
         if _try_render_cloud_video_stream(video_path, key_hint="hf_first", optimistic=True, prefer_raw=prefer_raw):
             return
+        # Fallback Cloud: khi raw không trên HF Dataset, stream _f.mp4 (H.264) thay thế
+        if prefer_raw:
+            _h264_cloud = get_final_h264_path(_strip_to_original_upload(video_path))
+            if _h264_cloud and _h264_cloud != video_path:
+                if _try_render_cloud_video_stream(_h264_cloud, key_hint="hf_h264_fb", optimistic=True, prefer_raw=False):
+                    return
 
     local_ready = None
     if prefer_raw:
@@ -11297,6 +11310,12 @@ def bat_dau_phan_tich_background(
                 )
                 return
             analysis_input_path = resolved_analysis
+            # Báo hiệu đang khởi tạo MediaPipe (có thể mất 10-30s trên HF Space)
+            write_progress(
+                progress_video_path, "processing", username=username, video_name=video_name,
+                progress=0.19, elapsed=time.time() - start_t, start_time=start_t,
+                status_msg="🤖 Đang khởi tạo AI (MediaPipe)... vui lòng đợi ~30s",
+            )
 
             # Bước D: Chạy phân tích AI trích xuất xương
             output_path, ref_name_detected, _, angle_data, total_frames, valid_frames, temp_folder, zip_data, frame_paths, _, all_frames_data, all_warnings = xu_ly_video_day_du(
