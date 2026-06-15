@@ -477,20 +477,32 @@ def get_data_science_logo_base64():
 
 def _html_hang_logo_header():
     """HTML 3 logo nằm TRONG .main-header — viền nháy sáng (dùng chung login & trang chính).
-    Dùng HTTPS URL trực tiếp — tránh data URI bị Streamlit CSP block."""
-    # HUPH logo: thử local data URI trước, fallback về HTTPS
-    school_https = "https://huph.edu.vn/uploads/logo/logo-huph.png"
-    ds_https = DS_LOGO_URL  # GitHub raw
-    pnt_https = "https://benhandientu.moh.gov.vn/storage/uploads/2025/11/bvpntlogo-1763704605.jpg"
+    Ưu tiên base64 từ file local (HF Space /home/user/app/assets/), fallback HTTPS."""
+    import pathlib as _pl
+    def _best_src(filename, fallback_url):
+        for base in (
+            _pl.Path(__file__).resolve().parent,
+            _pl.Path.cwd(),
+            _pl.Path("/home/user/app"),
+            _pl.Path("/app"),
+        ):
+            p = base / "assets" / filename
+            uri = _image_path_to_data_uri(p)
+            if uri:
+                return uri
+        return fallback_url
+
+    school_src = _best_src("abc1.png", "https://raw.githubusercontent.com/quynhphuong1209/Rehab-AI-Monitor/main/assets/abc1.png")
+    ds_src = _best_src("logo_data_science_sm.png", DS_LOGO_URL)
+    pnt_src = "https://benhandientu.moh.gov.vn/storage/uploads/2025/11/bvpntlogo-1763704605.jpg"
     return (
         '<div class="header-logos-row">'
         f'<div class="header-logo-glow header-logo-school" title="Trường ĐH Y tế Công cộng">'
-        f'<img src="{school_https}" alt="HUPH" />'
-        f'<img src="" onerror="this.style.display=\'none\'" style="display:none" /></div>'
+        f'<img src="{school_src}" alt="HUPH" /></div>'
         f'<div class="header-logo-glow header-logo-ds" title="Khoa Khoa học Dữ liệu">'
-        f'<img src="{ds_https}" alt="Data Science" /></div>'
+        f'<img src="{ds_src}" alt="Data Science" /></div>'
         f'<div class="header-logo-glow header-logo-pnt" title="BV Đa khoa Phạm Ngọc Thạch">'
-        f'<img src="{pnt_https}" alt="BV Phạm Ngọc Thạch" /></div>'
+        f'<img src="{pnt_src}" alt="BV Phạm Ngọc Thạch" /></div>'
         '</div>'
     )
 
