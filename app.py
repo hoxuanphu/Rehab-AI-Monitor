@@ -10299,12 +10299,21 @@ def hien_thi_video_goc_fragment(video_or_v, key_suffix, video_name=""):
         vrec = {"video_path": video_or_v, "video_name": video_name}
         video_path = video_or_v
     show_key = f"show_src_video_{key_suffix}"
-    if st.session_state.get(show_key):
+    # Mặc định luôn hiển thị video (True nếu chưa set)
+    if show_key not in st.session_state:
+        st.session_state[show_key] = True
+    if st.session_state[show_key]:
         play_path = _dam_bao_video_san_sang_play(video_path, prefer_raw=True, video_record=vrec)
         if play_path and not _is_scratch_video_path(play_path):
+            st.caption(f"🎬 Video gốc BN — {video_name or ''}")
             render_video(play_path, check_h264=False, prefer_raw=True)
         else:
-            st.warning("⚠️ Chưa tải được video gốc từ Cloud. Tiến trình phân tích vẫn chạy nếu server đã có file.")
+            st.markdown(f"""
+            <div style="background:rgba(30,41,59,0.5);border:1px dashed rgba(148,163,184,0.3);border-radius:12px;padding:28px;text-align:center;">
+                <div style="font-size:2.2rem;margin-bottom:8px;">🎬</div>
+                <div style="color:#94a3b8;font-size:0.9rem;">Video đang tải từ Cloud...</div>
+                <div style="color:#64748b;font-size:0.8rem;margin-top:6px;">Bấm 🔄 trên trang để thử lại nếu không hiện</div>
+            </div>""", unsafe_allow_html=True)
         if st.button("🙈 Ẩn video gốc", key=f"btn_hide_src_video_{key_suffix}", use_container_width=True):
             st.session_state[show_key] = False
             st.rerun(scope="fragment")
@@ -10313,7 +10322,6 @@ def hien_thi_video_goc_fragment(video_or_v, key_suffix, video_name=""):
         <div style="background: rgba(30, 41, 59, 0.35); border: 1px solid rgba(148, 163, 184, 0.18); border-radius: 12px; padding: 18px;">
             <div style="font-weight: 700; color: #e2e8f0; margin-bottom: 6px;">🎬 Video gốc đã chọn</div>
             <div style="color: #94a3b8; font-size: 0.88rem;">{video_name or 'Video bệnh nhân'}</div>
-            <div style="color: #64748b; font-size: 0.82rem; margin-top: 8px;">Bấm để xem video gốc — không ảnh hưởng tiến trình trích xuất.</div>
         </div>
         """, unsafe_allow_html=True)
         if st.button("👁️ Xem video gốc", key=f"btn_show_src_video_{key_suffix}", use_container_width=True):
