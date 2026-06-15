@@ -2,8 +2,10 @@
 # Trigger HF Sync: 2026-05-29
 import os
 import sys
-# Add utils folder to sys.path to allow imports from utils/ subfolder
-sys.path.append(os.path.join(os.path.dirname(__file__), 'utils'))
+
+# Thêm thư mục utils/ vào path để import các module đã dời
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "utils"))
+
 import math
 import json
 import base64
@@ -25,10 +27,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-import sys
-import os
-# Thêm thư mục utils/ vào path để import các module đã dời
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "utils"))
 
 import cv2
 import numpy as np
@@ -10604,13 +10602,13 @@ def _interval_khu_vuc_phan_tich(video_path):
     if not video_path:
         return None
     if _thread_dang_chay_thuc_su(video_path):
-        return timedelta(seconds=3.0)
+        return timedelta(seconds=1.0)
     prog = read_progress(video_path)
     if not prog:
         return None
     status = prog.get("status")
     if status == "processing":
-        return timedelta(seconds=3.0)
+        return timedelta(seconds=1.0)
     return None
 
 
@@ -10620,13 +10618,13 @@ def _interval_tien_trinh_background(video_path):
     if not video_path:
         return None
     if _thread_dang_chay_thuc_su(video_path):
-        return timedelta(seconds=3.0)
+        return timedelta(seconds=1.0)
     prog = read_progress(video_path)
     if not prog:
         return None
     status = prog.get("status")
     if status == "processing":
-        return timedelta(seconds=3.0)
+        return timedelta(seconds=1.0)
     return None
 
 
@@ -10839,10 +10837,25 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
 
     elif is_processing and v.get("metrics"):
         eta = _eta_str()
-        eta_str = f" | ETA {eta}" if eta else ""
         st.progress(p_val)
         detail = f" — {status_msg}" if status_msg else ""
-        st.info(f"🔄 Đang xử lý... **{p_val*100:.1f}%** | ⏱️ {elapsed_live:.0f}s{eta_str}{detail}")
+        _tid = "lt" + hashlib.md5(key_suffix.encode()).hexdigest()[:10]
+        _eta_part = f"&nbsp;|&nbsp;ETA&nbsp;<b>{eta}</b>" if eta else ""
+        _det_part = f'<br><small style="opacity:.75;font-size:.82rem">{detail}</small>' if detail else ""
+        st.markdown(
+            f'<div style="background:rgba(0,100,255,.09);border-left:3px solid #1a6fff;'
+            f'border-radius:6px;padding:10px 14px;margin:4px 0;line-height:1.7">'
+            f'🔄 Đang xử lý...&nbsp;<strong>{p_val*100:.1f}%</strong>'
+            f'&nbsp;|&nbsp;⏱️&nbsp;<span id="{_tid}">…</span>{_eta_part}{_det_part}'
+            f'</div><script>(function(){{'
+            f'var s={int(start_t*1000)},el=document.getElementById("{_tid}");'
+            f'if(!el)return;'
+            f'if(window["_i{_tid}"])clearInterval(window["_i{_tid}"]);'
+            f'function u(){{var d=Math.floor((Date.now()-s)/1000),m=Math.floor(d/60);'
+            f'el.textContent=m>0?m+"m "+(d%60)+"s":(d%60)+"s";}}'
+            f'u();window["_i{_tid}"]=setInterval(u,1000);}})();</script>',
+            unsafe_allow_html=True
+        )
         st.button(
             "🚀 ĐANG TRÍCH XUẤT KHUNG XƯƠNG...",
             width="stretch",
@@ -10861,10 +10874,25 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
 
     elif is_processing:
         eta = _eta_str()
-        eta_str = f" | ETA {eta}" if eta else ""
         st.progress(p_val)
         detail = f" — {status_msg}" if status_msg else ""
-        st.info(f"🔄 Đang xử lý... **{p_val*100:.1f}%** | ⏱️ {elapsed_live:.0f}s{eta_str}{detail}")
+        _tid = "lt" + hashlib.md5(key_suffix.encode()).hexdigest()[:10]
+        _eta_part = f"&nbsp;|&nbsp;ETA&nbsp;<b>{eta}</b>" if eta else ""
+        _det_part = f'<br><small style="opacity:.75;font-size:.82rem">{detail}</small>' if detail else ""
+        st.markdown(
+            f'<div style="background:rgba(0,100,255,.09);border-left:3px solid #1a6fff;'
+            f'border-radius:6px;padding:10px 14px;margin:4px 0;line-height:1.7">'
+            f'🔄 Đang xử lý...&nbsp;<strong>{p_val*100:.1f}%</strong>'
+            f'&nbsp;|&nbsp;⏱️&nbsp;<span id="{_tid}">…</span>{_eta_part}{_det_part}'
+            f'</div><script>(function(){{'
+            f'var s={int(start_t*1000)},el=document.getElementById("{_tid}");'
+            f'if(!el)return;'
+            f'if(window["_i{_tid}"])clearInterval(window["_i{_tid}"]);'
+            f'function u(){{var d=Math.floor((Date.now()-s)/1000),m=Math.floor(d/60);'
+            f'el.textContent=m>0?m+"m "+(d%60)+"s":(d%60)+"s";}}'
+            f'u();window["_i{_tid}"]=setInterval(u,1000);}})();</script>',
+            unsafe_allow_html=True
+        )
         c1, c2 = st.columns([2, 1])
         with c1:
             st.button(
