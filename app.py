@@ -5210,6 +5210,27 @@ def _inject_base_css_once():
     @keyframes fadeIn     { 0%,100% { opacity: 1; } }
     @keyframes spin       { to { transform: rotate(360deg); } } /* giữ spinner hoạt động */
 
+    /* === SHIMMER TRÊN THANH TIẾN TRÌNH ===
+       ::after không bị [data-stale] * { animation: none } bắt vì * không match pseudo-elements.
+       Kết quả: thanh luôn sáng-tối liên tục, không trông như đứng im dù % thay đổi chậm. */
+    @keyframes _prog_shimmer {
+        0%   { transform: translateX(-100%); }
+        100% { transform: translateX(350%); }
+    }
+    .stProgress > div > div {
+        position: relative !important;
+        overflow: hidden !important;
+    }
+    .stProgress > div > div::after {
+        content: '' !important;
+        position: absolute !important;
+        top: 0 !important; left: 0 !important;
+        width: 30% !important; height: 100% !important;
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.22), transparent) !important;
+        animation: _prog_shimmer 1.6s ease-in-out infinite !important;
+        pointer-events: none !important;
+    }
+
     /* 4. Nút bấm, toggle, tab: lock opacity=1, tắt animation, transition chỉ màu */
     button,
     [data-baseweb="button"],
