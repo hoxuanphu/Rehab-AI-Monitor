@@ -8969,7 +8969,7 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
                     frames_to_process = max(1, (tong_frame + skip_step) // (skip_step + 1))
                     prog = min(processed_count / frames_to_process, 1.0) * 0.5
                     callback(prog, frame_count=frame_count, total_frames=tong_frame)
-                    if frame_count % 100 == 1 or frame_count == tong_frame:
+                    if frame_count % 500 == 1 or frame_count == tong_frame:
                         print(f"[AI Process] Pass 1: Frame {frame_count}/{tong_frame} (Tiến độ: {prog*100:.1f}%)")
                 
                 if processed_count % 50 == 0:
@@ -9262,7 +9262,7 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
                 # Pass 2 chỉ đi tới 90%; phần sau dành cho chờ ghi ảnh/ZIP/đóng gói H.264.
                 prog = 0.5 + (min(processed_count / p_len, 1.0) * 0.40 if p_len > 0 else 0.40)
                 callback(prog, frame_count=processed_count, total_frames=p_len)
-                if processed_count % 100 == 1 or processed_count == p_len:
+                if processed_count % 500 == 1 or processed_count == p_len:
                     print(f"[AI Process] Pass 2: Frame {processed_count}/{p_len} (Tiến độ: {prog*100:.1f}%)")
 
             if processed_count % CHECKPOINT_INTERVAL_PASS2 == 0 or processed_count == len(raw_pass1_data):
@@ -10754,25 +10754,45 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
     def _eta_str():
         if p_val < 0.20:
             return None
+        # Ưu tiên: ETA theo frame thực tế — chính xác nhất (biết fps thực)
+        import re as _re_eta
+        _fc_m = _re_eta.search(r'Frame (\d+)/(\d+)', status_msg)
+        if _fc_m and elapsed_live > 15:
+            _fc_cur = int(_fc_m.group(1)); _fc_tot = int(_fc_m.group(2))
+            if _fc_cur > 5 and _fc_tot > 0:
+                # fps "biểu kiến" (bao gồm init time) → an toàn hơn (ETA hơi cao hơn thực)
+                _fps = _fc_cur / elapsed_live
+                _p1_rem_s = max(_fc_tot - _fc_cur, 0) / _fps
+                # Pass 2 thường nhanh hơn Pass 1 ~25% (vẽ frame nhanh hơn detect pose)
+                _p2_est_s = (_fc_tot / _fps) * 0.75
+                remaining = _p1_rem_s + _p2_est_s
+                if remaining > 7200: return f"~{remaining/3600:.1f} giờ"
+                if remaining > 120: return f"~{int(remaining//60)} phút"
+                return f"~{int(remaining)}s"
+
+        # Fallback A: dùng p1_entry rate (rate thực sau init)
         if _p1_entry.get("set"):
             p1_elapsed = time.time() - _p1_entry["t"]
             p1_done = max(p_val - _p1_entry["p"], 0.001)
             if p1_elapsed >= 30 and p1_done >= 0.002:
                 rate = p1_elapsed / p1_done
                 remaining = rate * (1.0 - p_val)
+            elif elapsed_live >= 120:
+                # Trừ ước tính init time (p_val lúc bắt đầu callback ≈ 0.185)
+                _eff_p = max(p_val - 0.185, 0.001)
+                _eff_e = max(elapsed_live * _eff_p / p_val, 5)
+                remaining = _eff_e / _eff_p * (1.0 - p_val)
             else:
-                # p1_entry còn quá mới (session vừa restart) — dùng elapsed_live làm dự phòng
-                if elapsed_live < 120:
-                    return None
-                remaining = elapsed_live / p_val * (1 - p_val)
+                return None
         else:
+            # Fallback B: chưa có p1_entry
             if elapsed_live < 120:
                 return None
-            remaining = elapsed_live / p_val * (1 - p_val)
-        if remaining > 7200:
-            return f"~{remaining/3600:.1f} giờ"
-        if remaining > 120:
-            return f"~{int(remaining//60)} phút"
+            _eff_p = max(p_val - 0.185, 0.001)
+            _eff_e = max(elapsed_live * _eff_p / p_val, 5)
+            remaining = _eff_e / _eff_p * (1.0 - p_val)
+        if remaining > 7200: return f"~{remaining/3600:.1f} giờ"
+        if remaining > 120: return f"~{int(remaining//60)} phút"
         return f"~{int(remaining)}s"
 
     # Force-stop: set cancel flag để thread tự thoát sạch + dừng fragment refresh
