@@ -35,7 +35,20 @@ st.set_page_config(
 )
 
 
-import cv2
+class _LazyCV2:
+    """Lazy-load OpenCV chỉ khi lần đầu tiên gọi cv2.anything() — tránh chậm cold start."""
+    __slots__ = ("_mod",)
+    def __init__(self): object.__setattr__(self, "_mod", None)
+    def _load(self):
+        import cv2 as _m
+        object.__setattr__(self, "_mod", _m)
+        return _m
+    def __getattr__(self, k): return getattr(object.__getattribute__(self,"_mod") or self._load(), k)
+    def __setattr__(self, k, v):
+        m = object.__getattribute__(self,"_mod") or self._load()
+        setattr(m, k, v)
+cv2 = _LazyCV2()
+
 import numpy as np
 import pandas as pd
 import tempfile
@@ -1015,7 +1028,6 @@ def _check_video_valid_cached(path, mtime, size):
         pass
     # Dự phòng: dùng OpenCV — grab() thay cho FRAME_COUNT vì H.264 thường báo 0 frames
     try:
-        import cv2
         cap_check = cv2.VideoCapture(path)
         if cap_check.isOpened() and cap_check.grab():
             cap_check.release()
@@ -1028,7 +1040,6 @@ def _check_video_valid_cached(path, mtime, size):
 @st.cache_data(show_spinner=False)
 def get_video_fps_cached(path, mtime, size):
     try:
-        import cv2
         cap_test = cv2.VideoCapture(path)
         fps = int(cap_test.get(cv2.CAP_PROP_FPS)) or 15
         cap_test.release()
@@ -8514,8 +8525,7 @@ def create_zip_of_frames(frame_data_list, processed_video_path=None):
     import tempfile
     import time
     import os
-    import cv2
-    
+
     if not frame_data_list:
         return None
         
@@ -11022,7 +11032,6 @@ def download_file_with_progress(file_path, write_progress_fn, start_t, username,
 def get_video_frame_count_cached(path, mtime, size):
     """Số khung hình + FPS (cache theo mtime/size)."""
     try:
-        import cv2
         cap = cv2.VideoCapture(path)
         frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
         fps = float(cap.get(cv2.CAP_PROP_FPS)) or 15.0
