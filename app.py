@@ -9478,6 +9478,7 @@ import traceback
 
 _db_lock = threading.Lock()
 _running_threads = {}
+_cancel_flags = {}   # video_path -> threading.Event(); set() = yêu cầu thread dừng
 
 # Số video phân tích chạy SONG SONG. HF Space mặc định 1 (Gậy + Heavy: chạy từng video).
 # Ghi đè: biến môi trường MAX_CONCURRENT_ANALYSIS=2
@@ -10710,8 +10711,11 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
             return f"~{int(remaining//60)} phút"
         return f"~{int(remaining)}s"
 
-    # Force-stop: xóa khỏi registry + ghi trạng thái cancelled + dừng fragment refresh
+    # Force-stop: set cancel flag để thread tự thoát sạch + dừng fragment refresh
     def _dung_phan_tich():
+        flag = _cancel_flags.get(video_path)
+        if flag:
+            flag.set()   # Thread sẽ kiểm tra cờ này và thoát sớm
         _running_threads.pop(video_path, None)
         st.session_state.pop("_analysis_started_this_session", None)
         st.session_state.pop("reanalyze_triggered", None)
@@ -11211,6 +11215,9 @@ def bat_dau_phan_tich_background(
         )
     skip_step = skip_step_theo_model(model_type, skip_step)
 
+    # Đặt lại cancel flag mỗi lần khởi chạy mới (xóa cờ cũ nếu còn)
+    _cancel_flags[video_path] = threading.Event()
+
     if has_ckpt:
         cfg_now = build_config_hash(video_path, model_type, confidence, exercise_name, skip_step, resize_width)
         if ckpt_existing.get("config_hash") != cfg_now:
@@ -11476,6 +11483,10 @@ def bat_dau_phan_tich_background(
                 percent_tenth = int(prog_val * 1000)
                 # Ghi tiến độ mỗi 1s (heartbeat) hoặc khi % thay đổi — UI không bị đứng im.
                 if percent_tenth != last_prog_tenth[0] or (now - last_write_time[0] >= 1.0):
+                    # Kiểm tra cancel flag — người dùng bấm Dừng
+                    _cf = _cancel_flags.get(progress_video_path)
+                    if _cf and _cf.is_set():
+                        raise InterruptedError("⛔ Phân tích bị dừng bởi người dùng.")
                     write_progress(progress_video_path, "processing", username=username, video_name=video_name, progress=prog_val, elapsed=elap, start_time=start_t, status_msg=status_msg)
                     last_write_time[0] = now
                     last_prog_tenth[0] = percent_tenth
@@ -11689,6 +11700,9 @@ def bat_dau_phan_tich_background(
                 write_progress(progress_video_path, "success", username=username, video_name=video_name, progress=1.0, elapsed=elap, start_time=start_t, result=result_data)
             else:
                 write_progress(progress_video_path, "error", username=username, video_name=video_name, progress=1.0, elapsed=elap, start_time=start_t, error_msg="Không thể trích xuất khung xương từ video (0 frame hợp lệ).")
+        except InterruptedError as e:
+            # Người dùng bấm Dừng — progress file đã được set "error" bởi _dung_phan_tich()
+            print(f"[BG Process] Phân tích bị dừng bởi người dùng: {e}")
         except Exception as e:
             tb = traceback.format_exc()
             print(f"[BG Process] Lỗi trong background thread: {e}\n{tb}")
@@ -11697,7 +11711,8 @@ def bat_dau_phan_tich_background(
         finally:
             if sem_acquired:
                 _analysis_slots.release(progress_video_path)
-            
+            _cancel_flags.pop(progress_video_path, None)
+
     t = threading.Thread(target=thread_target, daemon=True)
     _running_threads[video_path] = t
     t.start()
