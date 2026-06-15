@@ -2613,17 +2613,16 @@ def render_video(video_path, check_h264=True, prefer_raw=False):
         for p in video_raw_only_paths(video_path):
             if _is_scratch_video_path(p):
                 continue
-            ensure_local_file(p, quiet=True, try_fallbacks=False)
+            # Không gọi ensure_local_file — tránh download 750MB trong render loop mỗi 3s
             if _valid_raw_video_local(p) and _render_video_streamlit_native(p, allow_large=True):
                 st.caption(f"📤 Video gốc BN — {os.path.basename(p)}")
-                return
+                return True
         # Fallback khi raw không có local: thử _f.mp4 (H.264 đã tải về khi chạy phân tích)
         _h264_local = get_final_h264_path(_strip_to_original_upload(video_path))
         if _h264_local and _h264_local != video_path and not _is_scratch_video_path(_h264_local):
-            ensure_local_file(_h264_local, quiet=True, try_fallbacks=False)
             if _valid_raw_video_local(_h264_local) and _render_video_streamlit_native(_h264_local, allow_large=True):
                 st.caption(f"📤 Video gốc BN — {os.path.basename(_h264_local)}")
-                return
+                return True
 
     # Ưu tiên phát local qua st.video() — hỗ trợ Range request, không bị màn đen trên HF Space
     if not prefer_raw:
@@ -2643,13 +2642,13 @@ def render_video(video_path, check_h264=True, prefer_raw=False):
         # prefer_raw: dùng optimistic=False để không render iframe hỏng khi file chưa có trên HF Dataset
         _cloud_optimistic = not prefer_raw
         if _try_render_cloud_video_stream(video_path, key_hint="hf_first", optimistic=_cloud_optimistic, prefer_raw=prefer_raw):
-            return
+            return True
         # Fallback Cloud: khi raw không trên HF Dataset, stream _f.mp4 (H.264) thay thế
         if prefer_raw:
             _h264_cloud = get_final_h264_path(_strip_to_original_upload(video_path))
             if _h264_cloud and _h264_cloud != video_path:
                 if _try_render_cloud_video_stream(_h264_cloud, key_hint="hf_h264_fb", optimistic=False, prefer_raw=False):
-                    return
+                    return True
             # Không tìm được video gốc ở đâu — hiện placeholder rõ ràng thay vì iframe hỏng
             try:
                 _vprog = read_progress(video_path)
@@ -2659,14 +2658,14 @@ def render_video(video_path, check_h264=True, prefer_raw=False):
             if _vstat == "error":
                 st.warning(
                     "⚠️ **Video gốc BN không còn trên server** — "
-                    "vui lòng **tải lên lại video** để phân tích."
+                    "vui lòng gắn lại hoặc tải lên video bên dưới."
                 )
             else:
                 st.info(
                     "⏳ **Video gốc BN chưa sẵn sàng** — sẽ tự hiện sau khi phân tích hoàn tất "
                     "và file được đồng bộ lên Cloud."
                 )
-            return
+            return False
 
     local_ready = None
     if prefer_raw:
@@ -10361,6 +10360,87 @@ def _noi_dung_tien_trinh_background_home(video_path):
                 pass
             st.rerun()
 
+def _hien_thi_gan_lai_video_ui(v, video_path, key_suffix):
+    """UI gắn lại / tải lên video thay thế khi file gốc BN không còn trên server hoặc Cloud."""
+    # Kiểm tra _f.mp4 có sẵn trên HF Dataset không (cached HEAD request)
+    _has_cloud_h264 = False
+    _cloud_h264_path = get_final_h264_path(_strip_to_original_upload(video_path))
+    if _is_hf_runtime() and HF_TOKEN and HF_DATASET_ID and _cloud_h264_path and _cloud_h264_path != video_path:
+        try:
+            _, _u = _hf_dataset_resolve_urls(_cloud_h264_path, prefer_raw=False)
+            _has_cloud_h264 = bool(_u and check_cloud_file_exists(_u))
+        except Exception:
+            pass
+
+    with st.expander("📎 Gắn lại / tải lên video thay thế", expanded=True):
+        if _has_cloud_h264:
+            st.success(
+                f"✅ **Phát hiện file H.264 trên Cloud Dataset** ({os.path.basename(_cloud_h264_path)}) — "
+                "phân tích có thể tự tải về và chạy lại."
+            )
+            st.caption("Bấm **THỬ LẠI PHÂN TÍCH** bên phải để tải về và phân tích ngay.")
+            st.divider()
+
+        st.markdown("**Tải lên video gốc từ máy tính:**")
+        _new_file = st.file_uploader(
+            "Chọn file video",
+            type=["mp4", "mov", "avi", "mkv", "webm"],
+            key=f"file_relink_{key_suffix}",
+            label_visibility="collapsed",
+        )
+        if _new_file is not None:
+            st.caption(f"Đã chọn: **{_new_file.name}** ({_new_file.size // 1024 // 1024} MB)")
+            if st.button(
+                "✅ Gắn lại video này vào hồ sơ BN",
+                type="primary",
+                key=f"btn_confirm_relink_{key_suffix}",
+                use_container_width=True,
+            ):
+                with st.spinner("Đang lưu video..."):
+                    _saved = False
+                    _save_path = video_path
+                    try:
+                        # Ưu tiên: ghi đè lại đúng video_path cũ (không cần cập nhật DB)
+                        _save_dir = os.path.dirname(_save_path)
+                        if _save_dir:
+                            os.makedirs(_save_dir, exist_ok=True)
+                        with open(_save_path, "wb") as _wf:
+                            _wf.write(_new_file.getbuffer())
+                        push_file_to_hf_async(_save_path, priority=1)
+                        _saved = True
+                    except Exception:
+                        pass
+
+                    if not _saved:
+                        # Fallback: lưu vào path mới và cập nhật DB
+                        try:
+                            _ts = time.strftime("%Y%m%d_%H%M%S")
+                            _pn = (v.get("full_name") or "BN").replace("/", "_")
+                            _ex = (v.get("exercise") or "tap").replace("/", "_")
+                            _new_name = f"{_pn}_{_ts}_{_pn} - {_ex}.mp4"
+                            _save_path = os.path.join(UPLOAD_DIR, _new_name)
+                            os.makedirs(UPLOAD_DIR, exist_ok=True)
+                            with open(_save_path, "wb") as _wf:
+                                _wf.write(_new_file.getbuffer())
+                            # Cập nhật video_path trong DB
+                            _vlist = load_data(VIDEOS_FILE)
+                            for _rec in _vlist:
+                                if _rec.get("video_path") == video_path:
+                                    _rec["video_path"] = _save_path
+                                    break
+                            save_data(VIDEOS_FILE, _vlist)
+                            push_file_to_hf_async(VIDEOS_FILE)
+                            push_file_to_hf_async(_save_path, priority=1)
+                            _saved = True
+                        except Exception as _err2:
+                            st.error(f"❌ Không thể lưu video: {_err2}")
+
+                if _saved:
+                    st.success("✅ Video đã được gắn lại thành công! Đang làm mới trang...")
+                    time.sleep(0.5)
+                    _lam_moi_giao_dien_sau_nut()
+
+
 @st.fragment
 def hien_thi_video_goc_fragment(video_or_v, key_suffix, video_name=""):
     """Hiển thị/ẩn video gốc trong fragment riêng -> bấm nút không làm rerun cả trang,
@@ -10380,7 +10460,9 @@ def hien_thi_video_goc_fragment(video_or_v, key_suffix, video_name=""):
         if video_path:
             # render_video tự xử lý mọi fallback: local → HF Cloud stream → cảnh báo
             st.caption(f"🎬 Video gốc BN — {video_name or ''}")
-            render_video(video_path, check_h264=False, prefer_raw=True)
+            _vid_ok = render_video(video_path, check_h264=False, prefer_raw=True)
+            if not _vid_ok:
+                _hien_thi_gan_lai_video_ui(vrec, video_path, key_suffix)
         else:
             st.markdown(f"""
             <div style="background:rgba(30,41,59,0.5);border:1px dashed rgba(148,163,184,0.3);border-radius:12px;padding:28px;text-align:center;">
