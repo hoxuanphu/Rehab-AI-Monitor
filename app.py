@@ -10837,25 +10837,12 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
 
     elif is_processing and v.get("metrics"):
         eta = _eta_str()
+        eta_str = f" | ETA {eta}" if eta else ""
         st.progress(p_val)
         detail = f" — {status_msg}" if status_msg else ""
-        _tid = "lt" + hashlib.md5(key_suffix.encode()).hexdigest()[:10]
-        _eta_part = f"&nbsp;|&nbsp;ETA&nbsp;<b>{eta}</b>" if eta else ""
-        _det_part = f'<br><small style="opacity:.75;font-size:.82rem">{detail}</small>' if detail else ""
-        st.markdown(
-            f'<div style="background:rgba(0,100,255,.09);border-left:3px solid #1a6fff;'
-            f'border-radius:6px;padding:10px 14px;margin:4px 0;line-height:1.7">'
-            f'🔄 Đang xử lý...&nbsp;<strong>{p_val*100:.1f}%</strong>'
-            f'&nbsp;|&nbsp;⏱️&nbsp;<span id="{_tid}">…</span>{_eta_part}{_det_part}'
-            f'</div><script>(function(){{'
-            f'var s={int(start_t*1000)},el=document.getElementById("{_tid}");'
-            f'if(!el)return;'
-            f'if(window["_i{_tid}"])clearInterval(window["_i{_tid}"]);'
-            f'function u(){{var d=Math.floor((Date.now()-s)/1000),m=Math.floor(d/60);'
-            f'el.textContent=m>0?m+"m "+(d%60)+"s":(d%60)+"s";}}'
-            f'u();window["_i{_tid}"]=setInterval(u,1000);}})();</script>',
-            unsafe_allow_html=True
-        )
+        _em = int(elapsed_live // 60); _es = int(elapsed_live % 60)
+        _elapsed_str = f"{_em}m {_es:02d}s" if _em else f"{_es}s"
+        st.info(f"🔄 Đang xử lý... **{p_val*100:.1f}%** | ⏱️ {_elapsed_str}{eta_str}{detail}")
         st.button(
             "🚀 ĐANG TRÍCH XUẤT KHUNG XƯƠNG...",
             width="stretch",
@@ -10874,25 +10861,12 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
 
     elif is_processing:
         eta = _eta_str()
+        eta_str = f" | ETA {eta}" if eta else ""
         st.progress(p_val)
         detail = f" — {status_msg}" if status_msg else ""
-        _tid = "lt" + hashlib.md5(key_suffix.encode()).hexdigest()[:10]
-        _eta_part = f"&nbsp;|&nbsp;ETA&nbsp;<b>{eta}</b>" if eta else ""
-        _det_part = f'<br><small style="opacity:.75;font-size:.82rem">{detail}</small>' if detail else ""
-        st.markdown(
-            f'<div style="background:rgba(0,100,255,.09);border-left:3px solid #1a6fff;'
-            f'border-radius:6px;padding:10px 14px;margin:4px 0;line-height:1.7">'
-            f'🔄 Đang xử lý...&nbsp;<strong>{p_val*100:.1f}%</strong>'
-            f'&nbsp;|&nbsp;⏱️&nbsp;<span id="{_tid}">…</span>{_eta_part}{_det_part}'
-            f'</div><script>(function(){{'
-            f'var s={int(start_t*1000)},el=document.getElementById("{_tid}");'
-            f'if(!el)return;'
-            f'if(window["_i{_tid}"])clearInterval(window["_i{_tid}"]);'
-            f'function u(){{var d=Math.floor((Date.now()-s)/1000),m=Math.floor(d/60);'
-            f'el.textContent=m>0?m+"m "+(d%60)+"s":(d%60)+"s";}}'
-            f'u();window["_i{_tid}"]=setInterval(u,1000);}})();</script>',
-            unsafe_allow_html=True
-        )
+        _em = int(elapsed_live // 60); _es = int(elapsed_live % 60)
+        _elapsed_str = f"{_em}m {_es:02d}s" if _em else f"{_es}s"
+        st.info(f"🔄 Đang xử lý... **{p_val*100:.1f}%** | ⏱️ {_elapsed_str}{eta_str}{detail}")
         c1, c2 = st.columns([2, 1])
         with c1:
             st.button(
