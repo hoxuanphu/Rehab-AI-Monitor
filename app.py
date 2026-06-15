@@ -2074,9 +2074,9 @@ def _nap_angle_df_tu_video(v):
         except Exception:
             pass
     for jp in _duong_dan_frames_json_candidates(v):
-        if not is_local_file_ready(jp, min_size=2):
-            ensure_local_file(jp, quiet=True, try_fallbacks=False)
-            jp = get_local_frame_path(jp) or jp
+        # Chỉ đọc file nếu đã có sẵn local — không block render bằng download đồng bộ.
+        # Background job (_bat_dau_tai_day_du_song_song) sẽ tải file về và fragment sẽ tự refresh.
+        jp = get_local_frame_path(jp) or jp
         if not is_local_file_ready(jp, min_size=2):
             continue
         df = _dataframe_tu_frames_json(jp)
@@ -2561,6 +2561,7 @@ def _hien_thi_thong_bao_che_do_phan_tich_moi():
 def hien_thi_nut_tai_lai_va_phan_tich_moi(v_re, key_suffix=""):
     """Nút thao tác nhanh: chạy phân tích mới (hiển thị loading ngay khi bấm)."""
     if not v_re:
+        st.warning("⚠️ Chưa chọn video. Vào danh sách bệnh nhân, chọn video rồi bấm **Phân tích**.")
         return
     c1, c2 = st.columns(2)
     with c1:
@@ -13581,28 +13582,18 @@ def _hien_thi_tab_phan_tich_noi_dung(key_suffix="", stats_ext=None, df_ext=None,
                     bt = _bt_new
                 _lam_moi_giao_dien_sau_nut()
         if tk is None or df is None:
-            st.warning("⚠️ Dữ liệu phân tích chi tiết không khả dụng hoặc chưa được tải.")
-            thong_bao_loi_tai_hf()
-            v_dbg = _lam_moi_ban_ghi_video_tu_db(
-                v_re or st.session_state.get("current_eval_video") or _tim_video_phan_tich_moi_nhat()
-            )
-            if v_dbg:
-                csv_cands = _duong_dan_csv_candidates(v_dbg)
-                json_cands = _duong_dan_frames_json_candidates(v_dbg)
-                csv_try = v_dbg.get("df_path") or (csv_cands[0] if csv_cands else "chưa có")
-                json_try = v_dbg.get("all_frames_data_path") or (json_cands[0] if json_cands else "chưa có")
-                st.caption(
-                    f"Video đang tải: **{v_dbg.get('full_name')}** — {v_dbg.get('exercise')} | "
-                    f"CSV: `{csv_try}` | JSON: `{json_try}`"
+            _ok_hf, _msg_hf = kiem_tra_quyen_hf_dataset()
+            if not _ok_hf and _msg_hf:
+                _info_msg = f"🔐 **Lỗi kết nối Cloud:** {_msg_hf}"
+            elif _hf_last_download_error:
+                _info_msg = f"☁️ **Chưa tải được từ Cloud:** {_hf_last_download_error}"
+            else:
+                _info_msg = (
+                    "☁️ **Dữ liệu CSV/JSON chưa tải về.** "
+                    "Bấm **Tải lại** để kéo từ Dataset, hoặc **Phân tích mới** nếu video này chưa từng được phân tích."
                 )
-                if _hf_last_download_error:
-                    st.caption(f"Chi tiết Cloud: {_hf_last_download_error}")
-            st.info(
-                "💡 Bấm **Tải lại kết quả đã lưu** — hệ thống sẽ làm mới `video_list.json` "
-                "và tải CSV/JSON khung xương của **đúng video đang chọn** từ Dataset."
-            )
+            st.info(_info_msg)
             if user_role == "Nghiên cứu viên":
-                st.markdown("<br>", unsafe_allow_html=True)
                 hien_thi_nut_tai_lai_va_phan_tich_moi(v_re, key_suffix=f"missing_{key_suffix}")
             return
 
