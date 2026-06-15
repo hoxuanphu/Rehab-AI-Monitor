@@ -10914,9 +10914,19 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
         detail = f" — {status_msg}" if status_msg else ""
         _em = int(elapsed_live // 60); _es = int(elapsed_live % 60)
         _elapsed_str = f"{_em}m {_es:02d}s" if _em else f"{_es}s"
-        _is_stuck = p_val < 0.185 or p_val >= 0.92
+        _p2_loading = (
+            0.43 <= p_val <= 0.52
+            and status_msg
+            and ("chuẩn bị model ML" in status_msg or ("Pass 2" in status_msg and "/11774 (Tiến" in status_msg and "Frame 1/" in status_msg))
+        )
+        _is_stuck = p_val < 0.185 or p_val >= 0.92 or _p2_loading
         if _is_stuck:
-            _stuck_label = "⏳ Đang tải model AI & khởi động..." if p_val < 0.185 else "📦 Đang mã hóa & đóng gói video..."
+            if p_val < 0.185:
+                _stuck_label = "⏳ Đang tải model AI & khởi động Pass 1..."
+            elif _p2_loading:
+                _stuck_label = "🤖 Đang tải model phân loại ML & khởi động Pass 2..."
+            else:
+                _stuck_label = "📦 Đang mã hóa & đóng gói video..."
             st.markdown(
                 '<style>@keyframes _indet{0%{left:-35%;width:35%}100%{left:100%;width:35%}}'
                 '.indet-w{position:relative;height:8px;background:rgba(0,100,255,.12);border-radius:4px;overflow:hidden;margin:4px 0 8px}'
@@ -10951,9 +10961,19 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
         detail = f" — {status_msg}" if status_msg else ""
         _em = int(elapsed_live // 60); _es = int(elapsed_live % 60)
         _elapsed_str = f"{_em}m {_es:02d}s" if _em else f"{_es}s"
-        _is_stuck = p_val < 0.185 or p_val >= 0.92
+        _p2_loading = (
+            0.43 <= p_val <= 0.52
+            and status_msg
+            and ("chuẩn bị model ML" in status_msg or ("Pass 2" in status_msg and "/11774 (Tiến" in status_msg and "Frame 1/" in status_msg))
+        )
+        _is_stuck = p_val < 0.185 or p_val >= 0.92 or _p2_loading
         if _is_stuck:
-            _stuck_label = "⏳ Đang tải model AI & khởi động..." if p_val < 0.185 else "📦 Đang mã hóa & đóng gói video..."
+            if p_val < 0.185:
+                _stuck_label = "⏳ Đang tải model AI & khởi động Pass 1..."
+            elif _p2_loading:
+                _stuck_label = "🤖 Đang tải model phân loại ML & khởi động Pass 2..."
+            else:
+                _stuck_label = "📦 Đang mã hóa & đóng gói video..."
             st.markdown(
                 '<style>@keyframes _indet{0%{left:-35%;width:35%}100%{left:100%;width:35%}}'
                 '.indet-w{position:relative;height:8px;background:rgba(0,100,255,.12);border-radius:4px;overflow:hidden;margin:4px 0 8px}'

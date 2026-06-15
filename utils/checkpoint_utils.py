@@ -123,7 +123,15 @@ def save_checkpoint(path, data):
     tmp = None
     with lock:
         try:
-            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+            parent = os.path.dirname(path)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            # hf_hub_download đôi khi tạo thư mục tại chính path khi download thất bại.
+            # Phát hiện và dọn sạch trước khi ghi, tránh [Errno 21] IsADirectoryError.
+            if os.path.isdir(path):
+                import shutil as _shutil
+                _shutil.rmtree(path, ignore_errors=True)
+                print(f"[Checkpoint] Da xoa thu muc lam cang duong checkpoint: {path}")
             payload = dict(data)
             payload["version"] = CHECKPOINT_VERSION
             payload["saved_at"] = time.time()
