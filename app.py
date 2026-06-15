@@ -10747,10 +10747,14 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
         if _p1_entry.get("set"):
             p1_elapsed = time.time() - _p1_entry["t"]
             p1_done = max(p_val - _p1_entry["p"], 0.001)
-            if p1_elapsed < 30 or p1_done < 0.002:
-                return None
-            rate = p1_elapsed / p1_done
-            remaining = rate * (1.0 - p_val)
+            if p1_elapsed >= 30 and p1_done >= 0.002:
+                rate = p1_elapsed / p1_done
+                remaining = rate * (1.0 - p_val)
+            else:
+                # p1_entry còn quá mới (session vừa restart) — dùng elapsed_live làm dự phòng
+                if elapsed_live < 120:
+                    return None
+                remaining = elapsed_live / p_val * (1 - p_val)
         else:
             if elapsed_live < 120:
                 return None
@@ -10837,8 +10841,11 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
                 _quay_lai_ket_qua_cu_da_luu(v, rerun=False)
 
     elif is_slow:
+        import re as _re
         eta = _eta_str()
         elapsed_min = int(elapsed_live // 60)
+        _em = int(elapsed_live // 60); _es = int(elapsed_live % 60)
+        _elapsed_str = f"{_em}m {_es:02d}s" if _em else f"{_es}s"
         st.warning(
             f"🐢 **Video đang xử lý rất chậm** — đã chạy **{elapsed_min} phút**, "
             f"mới được **{p_val*100:.1f}%**"
@@ -10846,9 +10853,19 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
             ".\n\n💡 **Gợi ý:** Đổi model sang **MediaPipe Lite** ở sidebar để tăng tốc ~5×, "
             "hoặc nhấn **Dừng** để huỷ và chạy lại."
         )
+        # Thanh tổng thể
         st.progress(p_val)
-        detail = f" — {status_msg}" if status_msg else ""
-        st.caption(f"🔄 {p_val*100:.1f}% | ⏱️ {elapsed_live:.0f}s{detail}")
+        # Thanh Pass 1 riêng (di chuyển nhanh hơn ~2.7× so với thanh tổng)
+        _fc_match = _re.search(r'Frame (\d+)/(\d+)', status_msg)
+        if _fc_match and p_val < 0.46:
+            _fc_cur = int(_fc_match.group(1)); _fc_tot = int(_fc_match.group(2))
+            _p1_frac = min(_fc_cur / _fc_tot, 1.0) if _fc_tot > 0 else 0.0
+            _fps_est = _fc_cur / elapsed_live if elapsed_live > 5 else 0
+            st.progress(_p1_frac)
+            st.caption(f"📊 Pass 1: **{_p1_frac*100:.1f}%** | Frame {_fc_cur:,}/{_fc_tot:,} | ⚡ {_fps_est:.1f} fps | ⏱️ {_elapsed_str}")
+        else:
+            detail = f" — {status_msg}" if status_msg else ""
+            st.caption(f"🔄 {p_val*100:.1f}% | ⏱️ {_elapsed_str}{detail}")
         c1, c2, c3 = st.columns(3)
         with c1:
             if st.button("⛔ Dừng phân tích", width="stretch", type="primary", key=f"btn_stop_slow_{key_suffix}"):
