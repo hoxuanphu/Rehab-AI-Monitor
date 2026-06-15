@@ -9608,7 +9608,7 @@ def doc_lock_save_data(file_path, handle_fn):
         new_data = handle_fn(data)
         save_data(file_path, new_data)
 
-PROGRESS_STALE_SECONDS = 7200  # 2 giờ — không xóa tiến trình sớm (tránh mất % khi HF reload / bước dài)
+PROGRESS_STALE_SECONDS = 28800  # 8 giờ — video nặng (Heavy/720p >5000 frames) có thể mất 3-5h, cần đủ thời gian
 
 def get_progress_file(video_path):
     """Trả về đường dẫn file progress JSON tương ứng với video_path"""
@@ -11153,14 +11153,20 @@ def khoi_phuc_job_phan_tich_sau_deploy(cold_start=False):
         vp = job.get("video_path")
         if not vp:
             continue
-        # Bỏ qua job "ma" quá hạn (heartbeat > 2h): tránh vòng lặp tự chạy lại
-        # MediaPipe Heavy chiếm trọn CPU làm Space treo/500 vĩnh viễn sau crash.
+        # Kiểm tra heartbeat — nhưng ưu tiên checkpoint nếu có dữ liệu hợp lệ
+        # Video Heavy/720p >5000 frames có thể cần 4-6h → không xóa nếu còn checkpoint
         try:
             _hb = float(job.get("heartbeat") or job.get("start_time") or 0)
             if _hb and (time.time() - _hb) > PROGRESS_STALE_SECONDS:
-                print(f"[Resume] Bo qua job qua han 2h: {job.get('video_name')}")
-                clear_analysis_progress(vp)
-                continue
+                # Kiểm tra checkpoint trước khi xóa — nếu còn Pass1 data thì resume thay vì bỏ
+                _ckpt_check = load_checkpoint(get_checkpoint_path(vp, PROCESSED_DIR))
+                if _ckpt_check and _ckpt_check.get("pass1_data"):
+                    print(f"[Resume] Job heartbeat cu nhung co checkpoint hop le — se resume: {job.get('video_name')}")
+                    # Reset heartbeat để tránh bị loop, nhưng KHÔNG xóa progress
+                else:
+                    print(f"[Resume] Bo qua job qua han ({(time.time()-_hb)/3600:.1f}h), khong co checkpoint: {job.get('video_name')}")
+                    clear_analysis_progress(vp)
+                    continue
         except Exception:
             pass
         if vp in _running_threads and _running_threads[vp].is_alive():
