@@ -17,6 +17,13 @@ os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 # CẤU HÌNH GPU CHO MEDIAPIPE
 os.environ['MEDIAPIPE_DISABLE_GPU'] = '0'
 
+# Lọc warning "fragment does not exist anymore" — vô hại, chỉ là lifecycle noise từ run_every
+import logging as _logging
+class _SuppressFragmentWarning(_logging.Filter):
+    def filter(self, record):
+        return "does not exist anymore" not in record.getMessage()
+_logging.getLogger("streamlit").addFilter(_SuppressFragmentWarning())
+
 import streamlit as st
 
 # Gọi sớm nhất có thể — trình duyệt nhận layout ngay, giảm màn hình trống trên HF Space
