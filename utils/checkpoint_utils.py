@@ -159,6 +159,14 @@ def save_checkpoint(path, data):
 def load_checkpoint(path, retries=4, retry_delay=0.2):
     if not path or not os.path.exists(path):
         return None
+    # Dọn sạch nếu path là thư mục (do hf_hub_download tạo khi download thất bại)
+    if os.path.isdir(path):
+        try:
+            import shutil as _shutil
+            _shutil.rmtree(path, ignore_errors=True)
+        except Exception:
+            pass
+        return None
     lock = _ckpt_lock(path)
     last_err = None
     for attempt in range(max(1, retries)):

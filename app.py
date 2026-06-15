@@ -8848,6 +8848,7 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
             try:
                 ok = save_checkpoint(ckpt_path, payload)
                 if ok and phase == "pass1_done":
+                    print(f"[Checkpoint] Da luu Pass 1 ({len(raw_pass1_data)} frame) -> {ckpt_path}")
                     _day_progress_checkpoint_len_hf(
                         checkpoint_video_path or duong_dan_video, force=True, progress=0.5, status="processing"
                     )
@@ -9009,8 +9010,7 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
                 item['goc_khuyu'] = item['goc_khuyu_right']
 
         segment_bounds = segment_frames(raw_pass1_data)
-        _persist_checkpoint("pass1_done", 0)
-        print(f"[Checkpoint] Da luu Pass 1 ({len(raw_pass1_data)} frame) -> {ckpt_path}")
+        _persist_checkpoint("pass1_done", 0)  # print "Da luu" duoc log trong _save_job sau khi ghi thanh cong
     else:
         if not segment_bounds:
             segment_bounds = segment_frames(raw_pass1_data)
@@ -9746,16 +9746,24 @@ def _tai_trang_thai_phan_tich_tu_hf(force=False):
                 # JSON nhỏ — luôn tải lại sau deploy để giữ đúng % hiển thị
                 need = True
             elif base.startswith("checkpoint_") and base.endswith(".pkl.gz"):
-                if os.path.exists(dst) and os.path.getsize(dst) > 100 and load_checkpoint(dst):
+                # Dọn sạch nếu dst là thư mục (hf_hub_download tạo khi download thất bại trước đó)
+                if os.path.isdir(dst):
+                    try:
+                        import shutil as _shutil2
+                        _shutil2.rmtree(dst, ignore_errors=True)
+                    except Exception:
+                        pass
+                if os.path.isfile(dst) and os.path.getsize(dst) > 100 and load_checkpoint(dst):
                     need = False
                 else:
-                    need = force or not os.path.exists(dst) or os.path.getsize(dst) < 100
+                    need = force or not os.path.isfile(dst) or os.path.getsize(dst) < 100
             if need and _hf_download_dataset_file(rel_norm, quiet=True, min_size=2):
                 if base.startswith("checkpoint_") and base.endswith(".pkl.gz"):
                     if load_checkpoint(dst) is None:
                         try:
                             if os.path.exists(dst):
-                                os.remove(dst)
+                                import shutil as _shutil3
+                                (_shutil3.rmtree if os.path.isdir(dst) else os.remove)(dst)
                         except Exception:
                             pass
                         continue
