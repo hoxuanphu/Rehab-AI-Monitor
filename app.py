@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 # Trigger HF Sync: 2026-05-29
 import os
 import sys
@@ -2974,10 +2974,7 @@ OUTPUT_VIDEOS_DIR = "output_videos"
 
 def hien_thi_footer_chung():
     """Hiển thị chân trang (footer) chuyên nghiệp cho dự án Rehab-AI-Monitor"""
-    try:
-        logo_src = get_school_logo_base64()
-    except:
-        logo_src = "https://huph.edu.vn/uploads/logo/logo-huph.png"
+    logo_src = _LOGO_HUPH_URI  # base64 inline - khong phu thuoc file/URL ben ngoai
 
     is_light = st.session_state.get('theme') == 'light'
     footer_bg = "linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)" if is_light else "linear-gradient(135deg, #0d0d1a 0%, #1a1a2e 100%)"
@@ -10648,6 +10645,16 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
             elapsed = prog_data.get("elapsed", 0.0)
             status_msg = prog_data.get("status_msg", "")
             heartbeat = float(prog_data.get("heartbeat") or 0)
+            # Dam bao progress khong di lui trong UI — so sanh start_time de detect restart
+            _prog_track_key = f"_prog_track_{key_suffix}"
+            _prog_track = st.session_state.get(_prog_track_key, {"start_time": 0.0, "max_p": 0.0})
+            _file_start = float(prog_data.get("start_time") or 0)
+            if _file_start > 0 and _prog_track["start_time"] == _file_start:
+                p_val = max(p_val, _prog_track["max_p"])
+            else:
+                _prog_track["start_time"] = _file_start
+            _prog_track["max_p"] = p_val
+            st.session_state[_prog_track_key] = _prog_track
         elif status == "error":
             if _just_retried:
                 # Thread thất bại rất nhanh (race condition) — giữ loading UI 8s sau khi bấm Thử lại
