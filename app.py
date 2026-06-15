@@ -11219,8 +11219,18 @@ def bat_dau_phan_tich_background(
             # kiểm tra xem đã có _f.mp4 trên cloud chưa để tải và phân tích trực tiếp cho nhanh!
             analysis_input_path = video_path
             final_h264 = get_final_h264_path(video_path)
+            orig_video_path = _strip_to_original_upload(video_path)  # stripped path (không có _f)
             is_raw_local = os.path.exists(video_path) and os.path.getsize(video_path) >= 5 * 1024
-            
+
+            # Khi video_path là _f.mp4 mà chưa có local → thử file gốc (user vừa upload, _f chưa tạo)
+            if not is_raw_local and orig_video_path and orig_video_path != video_path:
+                if os.path.exists(orig_video_path) and os.path.getsize(orig_video_path) >= 5 * 1024:
+                    analysis_input_path = orig_video_path
+                    is_raw_local = True
+                    write_progress(progress_video_path, "processing", username=username, video_name=video_name,
+                                   progress=0.10, elapsed=time.time()-start_t, start_time=start_t,
+                                   status_msg="✅ Sử dụng video gốc BN để phân tích (H.264 sẽ được tạo tự động)...")
+
             if not is_raw_local:
                 if final_h264 != video_path:
                     write_progress(progress_video_path, "processing", username=username, video_name=video_name, progress=0.10, elapsed=time.time()-start_t, start_time=start_t, status_msg="⬇️ Kiểm tra video H.264 đã tối ưu...")
@@ -11228,7 +11238,7 @@ def bat_dau_phan_tich_background(
                     if dl_h264_ok:
                         analysis_input_path = final_h264
                         print(f"[BG Process] Chuyển đổi sang phân tích H264 đã tối ưu: {final_h264}")
-            
+
             if analysis_input_path == video_path and not is_raw_local:
                 write_progress(progress_video_path, "processing", username=username, video_name=video_name, progress=0.12, elapsed=time.time()-start_t, start_time=start_t, status_msg="⬇️ Đang tải video gốc từ Cloud về server...")
                 try:
@@ -11236,13 +11246,23 @@ def bat_dau_phan_tich_background(
                     if dl_ok:
                         write_progress(progress_video_path, "processing", username=username, video_name=video_name, progress=0.18, elapsed=time.time()-start_t, start_time=start_t, status_msg="✅ Đã tải video xong, đang chuẩn bị phân tích...")
                     else:
-                        # Thử fallback tải file H264 nếu file gốc không tải được
-                        final_h264 = get_final_h264_path(video_path)
-                        dl_h264_ok = download_file_with_progress(final_h264, write_progress, start_t, username, video_name)
-                        if dl_h264_ok:
-                            analysis_input_path = final_h264
-                            write_progress(progress_video_path, "processing", username=username, video_name=video_name, progress=0.18, elapsed=time.time()-start_t, start_time=start_t, status_msg="✅ Đã tải video H.264 tối ưu, đang chuẩn bị phân tích...")
-                        else:
+                        # Fallback 1: thử tải file gốc (stripped _f) nếu có trên HF Dataset
+                        if orig_video_path and orig_video_path != video_path:
+                            dl_orig_ok = download_file_with_progress(orig_video_path, write_progress, start_t, username, video_name)
+                            if dl_orig_ok:
+                                analysis_input_path = orig_video_path
+                                dl_ok = True
+                                write_progress(progress_video_path, "processing", username=username, video_name=video_name, progress=0.18, elapsed=time.time()-start_t, start_time=start_t, status_msg="✅ Đã tải video gốc BN, đang chuẩn bị phân tích...")
+
+                        # Fallback 2: thử tải _f.mp4 (nếu khác video_path)
+                        if not dl_ok and final_h264 != video_path:
+                            dl_h264_ok = download_file_with_progress(final_h264, write_progress, start_t, username, video_name)
+                            if dl_h264_ok:
+                                analysis_input_path = final_h264
+                                dl_ok = True
+                                write_progress(progress_video_path, "processing", username=username, video_name=video_name, progress=0.18, elapsed=time.time()-start_t, start_time=start_t, status_msg="✅ Đã tải video H.264 tối ưu, đang chuẩn bị phân tích...")
+
+                        if not dl_ok:
                             write_progress(progress_video_path, "error", username=username, video_name=video_name, progress=0.0, elapsed=time.time()-start_t, start_time=start_t, error_msg="❌ Không thể tải video từ Cloud về server.")
                             return
                 except Exception as dl_err:
