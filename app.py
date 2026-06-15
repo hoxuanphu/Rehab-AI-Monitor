@@ -1639,12 +1639,15 @@ def _hf_dataset_resolve_urls(video_path, prefer_raw=False):
         return None, None
     try:
         import urllib.parse
-        rel = get_clean_rel_path(_strip_to_original_upload(video_path))
+        rel = get_clean_rel_path(_strip_to_original_upload(video_path))  # stripped (original)
+        rel_actual = get_clean_rel_path(video_path)                       # actual (might be _f.mp4)
         base = f"https://huggingface.co/datasets/{HF_DATASET_ID}/resolve/main"
         token_q = f"?token={HF_TOKEN}"
-        url_raw = f"{base}/{urllib.parse.quote(rel, safe='/')}{token_q}"
+        url_raw = f"{base}/{urllib.parse.quote(rel, safe='/')}{token_q}"          # URL cho file gốc (stripped)
+        url_actual = f"{base}/{urllib.parse.quote(rel_actual, safe='/')}{token_q}" # URL cho file thực tế
         if prefer_raw or "patient_uploads" in rel.replace("\\", "/"):
-            return None, url_raw
+            # Dùng URL thực tế (không strip _f.mp4) để _f.mp4 có URL đúng trên HF Dataset
+            return None, url_actual
         if rel.endswith("_ffmp.mp4") or rel.endswith("_f.mp4"):
             return None, url_raw
         rel_f = (
@@ -1760,6 +1763,17 @@ def _try_render_cloud_video_stream(video_path, key_hint="", optimistic=False, pr
             if cand_raw and cand_raw not in seen_urls:
                 seen_urls.add(cand_raw)
                 sources.append(f'<source src="{cand_raw}" type="video/mp4">')
+        # Thêm URL _f.mp4 (H.264) làm nguồn dự phòng — file này tồn tại trên HF Dataset
+        # ngay cả khi file gốc chưa được upload lên (chỉ _f.mp4 được sync lên Cloud)
+        try:
+            _h264_fb = get_final_h264_path(_strip_to_original_upload(video_path))
+            if _h264_fb and not _is_scratch_video_path(_h264_fb):
+                _, _h264_url = _hf_dataset_resolve_urls(_h264_fb, prefer_raw=True)
+                if _h264_url and _h264_url not in seen_urls:
+                    seen_urls.add(_h264_url)
+                    sources.append(f'<source src="{_h264_url}" type="video/mp4">')
+        except Exception:
+            pass
         if not sources and raw_ok and url_raw:
             sources.append(f'<source src="{url_raw}" type="video/mp4">')
     else:
