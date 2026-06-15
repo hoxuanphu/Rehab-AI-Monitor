@@ -1,7 +1,9 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 # Trigger HF Sync: 2026-05-29
 import os
 import sys
+# Add utils folder to sys.path to allow imports from utils/ subfolder
+sys.path.append(os.path.join(os.path.dirname(__file__), 'utils'))
 import math
 import json
 import base64
@@ -3047,7 +3049,7 @@ a {{color:{title_color};text-decoration:none}}
 <div class="footer-container">
 <div class="footer-col">
 <div class="school-logo-section">
-<div style="width:95px;height:95px;border-radius:50%;border:2.5px solid rgba(0,198,255,0.75);display:inline-flex;align-items:center;justify-content:center;background:rgba(0,198,255,0.06);animation:footer-logo-glow 3s ease-in-out infinite;margin-bottom:10px">
+<div style="width:95px;height:95px;border-radius:50%;border:2.5px solid rgba(0,198,255,0.75);display:inline-flex;align-items:center;justify-content:center;background:rgba(0,198,255,0.06);animation:footer-logo-glow 3s ease-in-out infinite !important;margin-bottom:10px">
 <img src="{logo_src}" style="width:75px;height:75px;border-radius:50%;object-fit:contain" alt="HUPH Logo">
 </div>
 <div class="school-name-text">TRƯỜNG ĐẠI HỌC<br>Y TẾ CÔNG CỘNG</div>
@@ -3059,7 +3061,7 @@ a {{color:{title_color};text-decoration:none}}
 </div>
 <div class="footer-col medium">
 <div class="school-logo-section" style="margin-bottom:12px;text-align:center">
-<div style="width:95px;height:95px;border-radius:50%;border:2.5px solid rgba(0,198,255,0.75);display:inline-flex;align-items:center;justify-content:center;background:rgba(0,198,255,0.06);animation:footer-logo-glow 3s ease-in-out infinite;margin-bottom:10px">
+<div style="width:95px;height:95px;border-radius:50%;border:2.5px solid rgba(0,198,255,0.75);display:inline-flex;align-items:center;justify-content:center;background:rgba(0,198,255,0.06);animation:footer-logo-glow 3s ease-in-out infinite !important;margin-bottom:10px">
 <img src="https://benhandientu.moh.gov.vn/storage/uploads/2025/11/bvpntlogo-1763704605.jpg" style="width:75px;height:75px;border-radius:50%;object-fit:contain" alt="Logo BV PNT">
 </div>
 <div style="font-weight:bold;font-size:1.05rem;margin-bottom:4px">🏥 BỆNH VIỆN ĐA KHOA<br>PHẠM NGỌC THẠCH</div>
@@ -5650,17 +5652,17 @@ def _inject_base_css_once():
         padding: 3px;
         border: 3px solid rgba(0, 198, 255, 0.9);
         box-shadow: 0 0 12px rgba(0, 198, 255, 0.7), 0 0 0 3px rgba(0, 198, 255, 0.5);
-        animation: header-logo-glow 2.5s ease-in-out infinite;
+        animation: header-logo-glow 2.5s ease-in-out infinite !important;
         flex-shrink: 0;
     }
     .main-header .header-logo-ds {
-        animation-delay: 0.35s;
+        animation-delay: 0.35s !important;
     }
     .main-header .header-logo-pnt {
         border-color: rgba(0, 230, 118, 0.9);
         box-shadow: 0 0 12px rgba(0, 230, 118, 0.7), 0 0 0 3px rgba(0, 230, 118, 0.5);
-        animation: header-logo-glow-green 2.5s ease-in-out infinite;
-        animation-delay: 0.7s;
+        animation: header-logo-glow-green 2.5s ease-in-out infinite !important;
+        animation-delay: 0.7s !important;
     }
     .main-header .header-logo-glow img {
         width: 72px;
@@ -13099,15 +13101,15 @@ st.markdown(f"""
         padding: 3px;
         border: 3px solid rgba(0, 198, 255, 0.9);
         box-shadow: 0 0 12px rgba(0, 198, 255, 0.7), 0 0 0 3px rgba(0, 198, 255, 0.5);
-        animation: header-logo-glow 2.5s ease-in-out infinite;
+        animation: header-logo-glow 2.5s ease-in-out infinite !important;
         flex-shrink: 0;
     }}
-    .main-header .header-logo-ds {{ animation-delay: 0.35s; }}
+    .main-header .header-logo-ds {{ animation-delay: 0.35s !important; }}
     .main-header .header-logo-pnt {{
         border-color: rgba(0, 230, 118, 0.9);
         box-shadow: 0 0 12px rgba(0, 230, 118, 0.7), 0 0 0 3px rgba(0, 230, 118, 0.5);
-        animation: header-logo-glow-green 2.5s ease-in-out infinite;
-        animation-delay: 0.7s;
+        animation: header-logo-glow-green 2.5s ease-in-out infinite !important;
+        animation-delay: 0.7s !important;
     }}
     .main-header .header-logo-glow img {{
         width: 72px;
