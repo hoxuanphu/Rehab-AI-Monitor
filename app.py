@@ -9052,9 +9052,11 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
                     # Dùng processed_count để % không đứng im khi skip_frame > 0
                     frames_to_process = max(1, (tong_frame + skip_step) // (skip_step + 1))
                     prog = min(processed_count / frames_to_process, 1.0) * 0.5
-                    callback(prog, frame_count=frame_count, total_frames=tong_frame)
-                    if frame_count % 500 == 1 or frame_count == tong_frame:
-                        print(f"[AI Process] Pass 1: Frame {frame_count}/{tong_frame} (Tiến độ: {prog*100:.1f}%)")
+                    # Truyền processed_count/frames_to_process thay vì frame_count/tong_frame
+                    # để UI hiện "Frame X/Y đã xử lý" đúng với skip setting
+                    callback(prog, frame_count=processed_count, total_frames=frames_to_process)
+                    if processed_count % 500 == 1 or processed_count == frames_to_process:
+                        print(f"[AI Process] Pass 1: Frame {processed_count}/{frames_to_process} processed (video frame {frame_count}/{tong_frame}, {prog*100:.1f}%)")
                 
                 if processed_count % 200 == 0:
                     gc.collect()
@@ -9102,6 +9104,13 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
                 item['goc_khuyu'] = item['goc_khuyu_right']
 
         segment_bounds = segment_frames(raw_pass1_data)
+        # Báo 100% Pass 1 trước khi lưu checkpoint — UI thấy "Pass 1: 100%" rõ ràng
+        if callback:
+            try:
+                p1_total = max(1, len(raw_pass1_data))
+                callback(0.5, frame_count=p1_total, total_frames=p1_total)
+            except Exception:
+                pass
         _persist_checkpoint("pass1_done", 0)  # print "Da luu" duoc log trong _save_job sau khi ghi thanh cong
     else:
         if not segment_bounds:
@@ -9415,6 +9424,13 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
     # SAU KHI XỬ LÝ XONG, TIẾN HÀNH TRỘN ÂM THANH NẾU CÓ THAY ĐỔI
     audio_mixed = False
     mixed_audio_path = out_path.replace('.mp4', '_audio.wav')
+    # Pass 2 hoàn tất — báo 100% trước khi chuyển sang bước đóng gói
+    if callback:
+        try:
+            _p2_total = len(raw_pass1_data) if raw_pass1_data else 1
+            callback(0.92, frame_count=_p2_total, total_frames=_p2_total)
+        except Exception:
+            pass
     if callback:
         try: callback(0.925)
         except: pass
@@ -11040,7 +11056,7 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
         _p2_loading = (
             0.43 <= p_val <= 0.52
             and status_msg
-            and ("chuẩn bị model ML" in status_msg or ("Pass 2" in status_msg and "/11774 (Tiến" in status_msg and "Frame 1/" in status_msg))
+            and ("chuẩn bị model ML" in status_msg or ("Pass 2" in status_msg and "Frame 1/" in status_msg))
         )
         _is_stuck = (p_val < 0.185 or p_val >= 0.92 or _p2_loading) and not (status_msg and "Frame" in status_msg)
         if _is_stuck:
@@ -11090,7 +11106,7 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
         _p2_loading = (
             0.43 <= p_val <= 0.52
             and status_msg
-            and ("chuẩn bị model ML" in status_msg or ("Pass 2" in status_msg and "/11774 (Tiến" in status_msg and "Frame 1/" in status_msg))
+            and ("chuẩn bị model ML" in status_msg or ("Pass 2" in status_msg and "Frame 1/" in status_msg))
         )
         _is_stuck = (p_val < 0.185 or p_val >= 0.92 or _p2_loading) and not (status_msg and "Frame" in status_msg)
         if _is_stuck:
