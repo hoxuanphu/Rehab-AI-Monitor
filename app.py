@@ -1815,6 +1815,13 @@ def _render_video_static_iframe(target_path, video_key=None):
     if not target_path or not os.path.exists(target_path):
         return False
     try:
+        # Kiểm tra tính tương thích của codec và container với trình duyệt
+        v_codec, _ = get_video_codec(target_path)
+        if v_codec:
+            is_compatible = (v_codec == 'h264' and target_path.lower().endswith('.mp4'))
+            if not is_compatible:
+                return False
+
         import shutil
 
         static_dir = os.path.join(".", "static")
@@ -1872,7 +1879,17 @@ def _render_video_streamlit_native(target_path, allow_large=False):
             return False
         if size > 6 * 1024 * 1024 and not (allow_large or _is_hf_runtime()):
             return False
-        st.video(target_path, format="video/mp4")
+
+        # Kiểm tra tính tương thích của codec và container với trình duyệt
+        v_codec, _ = get_video_codec(target_path)
+        if v_codec:
+            is_compatible = (v_codec == 'h264' and target_path.lower().endswith('.mp4'))
+            if not is_compatible:
+                return False
+
+        # Đọc video thành bytes để phát qua Streamlit (giải quyết lỗi Range Request/màn đen trên HF Space)
+        with open(target_path, "rb") as f:
+            st.video(f.read(), format="video/mp4")
         return True
     except Exception as native_err:
         print(f"[render_video] st.video fail: {native_err}")
@@ -11001,7 +11018,8 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
                 _dung_phan_tich()
                 st.rerun()  # Full rerun: tạo lại fragment với run_every=None
         with c2:
-            if st.button("🔄 Khởi động lại", width="stretch", type="secondary", key=f"btn_restart_slow_{key_suffix}"):
+            _sel_slow_label = st.session_state.get("ncv_model_type", "MediaPipe Heavy").replace("MediaPipe ", "")
+            if st.button(f"⚡ Chạy lại với {_sel_slow_label}", width="stretch", type="secondary", key=f"btn_restart_slow_{key_suffix}"):
                 clear_analysis_progress(video_path)
                 _xu_ly_ket_qua_khoi_dong_phan_tich(khoi_dong_phan_tich_lai_video(v, auto_start=True))
         with c3:
@@ -11054,6 +11072,9 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
         with c2:
             if st.button("⬅️ Quay lại xem kết quả cũ đã lưu", width="stretch", type="secondary", key=f"btn_back_old_{key_suffix}"):
                 _quay_lai_ket_qua_cu_da_luu(v, rerun=False)
+        _sel_model_label = st.session_state.get("ncv_model_type", "MediaPipe Heavy").replace("MediaPipe ", "")
+        if st.button(f"⚡ Dừng & chạy lại với {_sel_model_label}", width="stretch", type="primary", key=f"btn_restart_model_{key_suffix}"):
+            _xu_ly_ket_qua_khoi_dong_phan_tich(khoi_dong_phan_tich_lai_video(v, auto_start=True))
 
     elif is_processing:
         detail = f" — {status_msg}" if status_msg else ""
