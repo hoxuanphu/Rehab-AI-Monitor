@@ -8727,6 +8727,12 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
         try: resize_width = st.session_state.get('ncv_resize_width', RESIZE_WIDTH)
         except: resize_width = RESIZE_WIDTH
 
+    # Pass 1 chỉ cần landmarks (tọa độ chuẩn hóa 0-1) → dùng resolution thấp hơn để nhanh hơn.
+    # Pass 2 giữ nguyên resize_width gốc cho chất lượng hình ảnh overlay.
+    pass1_resize_width = min(int(resize_width), 480)
+    if tong_frame > 10000:
+        pass1_resize_width = min(pass1_resize_width, 360)
+
     ckpt_path = get_checkpoint_path(checkpoint_video_path or duong_dan_video, PROCESSED_DIR)
     cfg_hash = build_config_hash(
         checkpoint_video_path or duong_dan_video, model_type, min_confidence,
@@ -8876,28 +8882,76 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
     # PASS 1: Trích xuất landmarks và tọa độ (bỏ qua nếu đã có checkpoint)
     if not resume_pass1:
         gc.collect()  # giải phóng RAM trước khi MediaPipe bắt đầu xử lý
+
+        # Theo dõi tốc độ để tự động hạ model nếu CPU quá chậm
+        _current_complexity = 2 if "Heavy" in model_type else (1 if "Full" in model_type else 0)
+        _speed_check_done = False   # chỉ check 1 lần sau 30 frames
+        _speed_check_done2 = False  # check lần 2 sau khi đã hạ xuống Full
+        _frame_times = []
+        # Heavy → Full nếu > 70ms/frame; Full → Lite nếu > 45ms/frame
+        _THRESH_HEAVY_TO_FULL = 0.070
+        _THRESH_FULL_TO_LITE  = 0.045
+
+        def _downgrade_model(to_complexity):
+            nonlocal model
+            try:
+                model.close()
+            except Exception:
+                pass
+            import mediapipe as _mp
+            _mp_pose = _mp.solutions.pose
+            _names = {2: "Heavy", 1: "Full", 0: "Lite"}
+            print(f"[AutoModel] Tốc độ chậm — tự động chuyển sang MediaPipe {_names.get(to_complexity, to_complexity)}")
+            model = _mp_pose.Pose(
+                static_image_mode=False,
+                model_complexity=to_complexity,
+                smooth_landmarks=True,
+                min_detection_confidence=min_confidence,
+                min_tracking_confidence=min_confidence,
+            )
+            return to_complexity
+
         try:
             while cap.isOpened():
                 ret, frame = cap.read()
                 if not ret or (MAX_FRAMES and processed_count >= MAX_FRAMES): break
-            
+
                 frame_count += 1
                 if skip_step > 0 and frame_count % (skip_step + 1) != 1:
                     continue
-                
+
                 processed_count += 1
-            
+
                 h_orig, w_orig = frame.shape[:2]
-                if w_orig != resize_width:
-                    scale = resize_width / w_orig
+                if w_orig != pass1_resize_width:
+                    scale = pass1_resize_width / w_orig
                     new_h = int(h_orig * scale)
                     if new_h % 2 != 0: new_h -= 1
-                    frame = cv2.resize(frame, (resize_width, new_h), interpolation=cv2.INTER_LINEAR)
+                    frame = cv2.resize(frame, (pass1_resize_width, new_h), interpolation=cv2.INTER_LINEAR)
             
                 h, w = frame.shape[:2]
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                _t0 = time.time()
                 ket_qua = model.process(rgb)
-            
+                _frame_times.append(time.time() - _t0)
+
+                # Sau 30 frames đầu: đánh giá tốc độ, tự động hạ model nếu cần
+                if not _speed_check_done and len(_frame_times) >= 30:
+                    _speed_check_done = True
+                    _avg = sum(_frame_times) / len(_frame_times)
+                    if _current_complexity == 2 and _avg > _THRESH_HEAVY_TO_FULL:
+                        _current_complexity = _downgrade_model(1)
+                        _frame_times.clear()   # reset để check lần 2 cho Full
+                    elif _current_complexity == 1 and _avg > _THRESH_FULL_TO_LITE:
+                        _current_complexity = _downgrade_model(0)
+
+                # Sau khi đã hạ xuống Full, check thêm 30 frames rồi quyết định xuống Lite không
+                if _speed_check_done and not _speed_check_done2 and _current_complexity == 1 and len(_frame_times) >= 30:
+                    _speed_check_done2 = True
+                    _avg2 = sum(_frame_times) / len(_frame_times)
+                    if _avg2 > _THRESH_FULL_TO_LITE:
+                        _current_complexity = _downgrade_model(0)
+
                 current_landmarks = None
                 detected_this_frame = False
                 filtered_stranger_this_frame = False
@@ -8979,7 +9033,7 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
                     if frame_count % 500 == 1 or frame_count == tong_frame:
                         print(f"[AI Process] Pass 1: Frame {frame_count}/{tong_frame} (Tiến độ: {prog*100:.1f}%)")
                 
-                if processed_count % 50 == 0:
+                if processed_count % 200 == 0:
                     gc.collect()
                 
         except Exception as e:
@@ -9287,7 +9341,7 @@ def xu_ly_video_day_du(duong_dan_video, chuan, callback=None, model_type="MediaP
             if processed_count % CHECKPOINT_INTERVAL_PASS2 == 0 or processed_count == len(raw_pass1_data):
                 _persist_checkpoint("pass2", processed_count)
 
-            if processed_count % 200 == 0:
+            if processed_count % 500 == 0:
                 gc.collect()
     except Exception as e:
         print("Lỗi trong Pass 2:", e)
@@ -10793,8 +10847,8 @@ def _noi_dung_khu_vuc_phan_tich(v, key_suffix, video_path):
                 # fps "biểu kiến" (bao gồm init time) → an toàn hơn (ETA hơi cao hơn thực)
                 _fps = _fc_cur / elapsed_live
                 _p1_rem_s = max(_fc_tot - _fc_cur, 0) / _fps
-                # Pass 2 thường nhanh hơn Pass 1 ~25% (vẽ frame nhanh hơn detect pose)
-                _p2_est_s = (_fc_tot / _fps) * 0.75
+                # Pass 2 thường nhanh hơn Pass 1 ~50% (chỉ vẽ overlay, không chạy AI detect)
+                _p2_est_s = (_fc_tot / _fps) * 0.50
                 remaining = _p1_rem_s + _p2_est_s
                 if remaining > 7200: return f"~{remaining/3600:.1f} giờ"
                 if remaining > 120: return f"~{int(remaining//60)} phút"
@@ -11147,17 +11201,48 @@ def la_bai_tap_gay(exercise_name):
 
 
 def tinh_tham_so_toc_do_phan_tich(video_path, exercise_name, model_type, skip_step, resize_width):
-    """Giữ nguyên cấu hình NCV chọn trên sidebar — không tự giảm 480p/skip/model."""
+    """Tự động tối ưu tốc độ xử lý cho video dài.
+
+    Khi NCV để mặc định (skip=0, resize=720), hàm này tự chỉnh:
+    - Video > 3000 frames (~100s@30fps): skip=1 (2× nhanh hơn)
+    - Video > 6000 frames (~200s@30fps): skip=2 (3× nhanh hơn), resize=480
+    - Video > 12000 frames (~400s@30fps): skip=3 (4× nhanh hơn), resize=480
+    Nếu NCV đã chọn skip > 0 hoặc resize ≠ 720 ở sidebar → giữ nguyên.
+    """
     try:
         frames, fps = lay_so_khung_video(video_path)
         duration = (frames / fps) if fps > 0 else 0.0
-        if frames > 6000 or duration > 240:
-            print(
-                f"[Analysis] Video dai ({frames} frames, {duration:.0f}s) — "
-                f"Heavy/720p/moi frame co the mat nhieu thoi gian."
-            )
     except Exception:
-        pass
+        frames, fps, duration = 0, 30.0, 0.0
+
+    # Chỉ tự điều chỉnh khi NCV dùng mặc định (skip=0 và resize=720)
+    user_chose_skip = (skip_step is not None and int(skip_step) > 0)
+    user_chose_res = (resize_width is not None and int(resize_width) != 720)
+
+    if not user_chose_skip and frames > 0:
+        if frames > 12000 or duration > 420:
+            skip_step = 3
+        elif frames > 6000 or duration > 210:
+            skip_step = 2
+        elif frames > 3000 or duration > 105:
+            skip_step = 1
+        else:
+            skip_step = 0  # Video ngắn — giữ mọi frame
+
+    if not user_chose_res and frames > 0:
+        if frames > 6000 or duration > 210:
+            resize_width = 480  # 480p đủ chính xác cho MediaPipe, nhanh hơn ~2×
+
+    # Ước tính thời gian sau tối ưu
+    eff_skip = int(skip_step or 0)
+    eff_frames = max(1, frames // (eff_skip + 1)) if frames > 0 else 0
+    eff_res = int(resize_width or 720)
+    if frames > 3000:
+        print(
+            f"[Analysis] Video dai ({frames} frames, {duration:.0f}s) — "
+            f"Tu dong toi uu: skip={eff_skip}, resize={eff_res}p, "
+            f"xu ly ~{eff_frames} frames (giam {100 - eff_frames * 100 // max(frames, 1):.0f}%)"
+        )
     return model_type, skip_step, resize_width
 
 
@@ -11712,11 +11797,13 @@ def bat_dau_phan_tich_background(
                 )
                 return
             analysis_input_path = resolved_analysis
-            # Báo hiệu đang khởi tạo MediaPipe (có thể mất 10-30s trên HF Space)
+            # Báo hiệu đang khởi tạo MediaPipe + thông tin tối ưu tốc độ
+            _skip_info = f", bỏ {skip_step} frame" if skip_step and int(skip_step) > 0 else ""
+            _res_info = f", {resize_width}p" if resize_width else ""
             write_progress(
                 progress_video_path, "processing", username=username, video_name=video_name,
                 progress=0.19, elapsed=time.time() - start_t, start_time=start_t,
-                status_msg="🤖 Đang khởi tạo AI (MediaPipe)... vui lòng đợi ~30s",
+                status_msg=f"🤖 Đang khởi tạo AI (MediaPipe{_res_info}{_skip_info})... vui lòng đợi ~30s",
             )
 
             # Bước D: Chạy phân tích AI trích xuất xương
@@ -19027,9 +19114,9 @@ def main():
                          index=([0, 1, 2, 4].index(st.session_state.get("ncv_skip_frames", 0))
                                   if st.session_state.get("ncv_skip_frames", 0) in [0, 1, 2, 4]
                                   else 0),
-                         format_func=lambda x: "Mặc định (Mọi frame)" if x==0 else f"Nhanh (Bỏ qua {x} frame)",
+                         format_func=lambda x: "Tự động (theo độ dài video)" if x==0 else f"Nhanh (Bỏ qua {x} frame)",
                          key="ncv_skip_frames",
-                         help="0 = xử lý mọi khung hình (mặc định). Tăng để phân tích nhanh hơn nhưng thiếu frame.")
+                         help="0 = Tự động tối ưu theo độ dài video (video >100s tự bỏ frame). Chọn giá trị khác để ghi đè.")
             st.selectbox("Độ phân giải video (Video Quality)",
                          options=[480, 720, 1080],
                          index=([480, 720, 1080].index(st.session_state.get("ncv_resize_width", 720))

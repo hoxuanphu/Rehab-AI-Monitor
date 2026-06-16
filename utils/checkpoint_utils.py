@@ -9,7 +9,7 @@ import threading
 import time
 
 CHECKPOINT_VERSION = 1
-CHECKPOINT_INTERVAL_PASS2 = 150
+CHECKPOINT_INTERVAL_PASS2 = 300
 
 _ckpt_locks = {}
 _ckpt_locks_guard = threading.Lock()
