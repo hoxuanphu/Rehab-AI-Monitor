@@ -10213,7 +10213,7 @@ def _co_job_dang_chay():
 
 def _interval_theo_doi_jobs():
     """Chỉ auto-refresh panel job khi thực sự có tiến trình — tránh rerun vô ích."""
-    return timedelta(seconds=2) if _co_job_dang_chay() else None
+    return timedelta(seconds=4) if _co_job_dang_chay() else None
 
 
 def _noi_dung_jobs_dang_chay(key_suffix=""):
@@ -10748,20 +10748,21 @@ def hien_thi_video_phan_tich_preview_fragment(v, key_suffix):
 def _interval_khu_vuc_phan_tich(video_path):
     """Auto-refresh khi thread đang chạy hoặc progress file vẫn là 'processing'.
     Dừng refresh khi status=='success' — kết quả đã hiển thị, không cần tiếp.
-    Stall detection (_STALL_SECONDS=180) sẽ hiện cảnh báo nếu thread thực sự đã chết."""
+    Stall detection (_STALL_SECONDS=180) sẽ hiện cảnh báo nếu thread thực sự đã chết.
+    Dùng 3s thay vì 1s: 4 fragment cùng refresh 1s → server HF ngập request, nút bị bỏ qua."""
     if not video_path:
         return None
     if _thread_dang_chay_thuc_su(video_path):
-        return timedelta(seconds=1.0)
+        return timedelta(seconds=3.0)
     # reanalyze_triggered: vừa bấm nút, thread chưa kịp ghi progress → vẫn refresh để bắt kịp
     if st.session_state.get("reanalyze_triggered"):
-        return timedelta(seconds=1.0)
+        return timedelta(seconds=2.0)
     prog = read_progress(video_path)
     if not prog:
         return None
     status = prog.get("status")
     if status == "processing":
-        return timedelta(seconds=1.0)
+        return timedelta(seconds=3.0)
     return None
 
 
@@ -10771,13 +10772,13 @@ def _interval_tien_trinh_background(video_path):
     if not video_path:
         return None
     if _thread_dang_chay_thuc_su(video_path):
-        return timedelta(seconds=1.0)
+        return timedelta(seconds=3.0)
     prog = read_progress(video_path)
     if not prog:
         return None
     status = prog.get("status")
     if status == "processing":
-        return timedelta(seconds=1.0)
+        return timedelta(seconds=3.0)
     return None
 
 
