@@ -5026,6 +5026,9 @@ if not st.session_state.logged_in:
                 st.session_state._need_home_sync = True
                 for _fk in ("filter_video_patient", "filter_video_status", "vid_list_page", "_vid_filter_heal_rerun"):
                     st.session_state.pop(_fk, None)
+                
+                # Gọi rerun để cập nhật toàn bộ trạng thái và render sạch sẽ
+                st.rerun()
         except Exception:
             pass
 
@@ -10641,6 +10644,18 @@ def _tim_duong_dan_video_phan_tich_hien_tai(v, video_path, prog_data=None):
         if not raw or raw in seen:
             continue
         seen.add(raw)
+        
+        is_processing = prog_data and prog_data.get("status") == "processing"
+        if is_processing:
+            # Nếu đang trong quá trình phân tích, chỉ dùng file đã sẵn sàng cục bộ, tránh gọi hàm tải mạng đồng bộ gây đơ web
+            ready = find_ready_local_video(raw)
+            if ready:
+                pb = resolve_playback_video_path(ready)
+                play = pb if (pb and is_local_file_ready(pb) and os.path.getsize(pb) > 5 * 1024) else ready
+                if play and is_local_file_ready(play) and os.path.getsize(play) > 5 * 1024:
+                    return play
+            continue
+
         play = dam_bao_tai_video_phan_tich(raw, allow_sync_transcode=False)
         if play and is_local_file_ready(play) and os.path.getsize(play) > 5 * 1024:
             return play
