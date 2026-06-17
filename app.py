@@ -11732,22 +11732,22 @@ def tinh_tham_so_toc_do_phan_tich(video_path, exercise_name, model_type, skip_st
     on_hf = _is_hf_runtime()
     if not user_chose_skip and frames > 0:
         if on_hf:
-            # HF Spaces CPU can stall/OOM on long videos; sample more aggressively.
+            # Giu day du frame; HF chi ha resolution/model neu can, khong tu ep bo frame.
             if frames > 9000 or duration > 300:
-                skip_step = 5
+                skip_step = 0
             elif frames > 6000 or duration > 210:
-                skip_step = 4
+                skip_step = 0
             elif frames > 3000 or duration > 105:
-                skip_step = 2
+                skip_step = 0
             else:
-                skip_step = 1 if la_bai_tap_gay(exercise_name) else 0
+                skip_step = 0
         else:
             if frames > 12000 or duration > 420:
-                skip_step = 3
+                skip_step = 0
             elif frames > 6000 or duration > 210:
-                skip_step = 2
+                skip_step = 0
             elif frames > 3000 or duration > 105:
-                skip_step = 1
+                skip_step = 0
             else:
                 skip_step = 0  # Video ngắn — giữ mọi frame
 
@@ -11788,7 +11788,7 @@ def _checkpoint_qua_nang_cho_hf(video_path, ckpt):
         ckpt_resize = int(ckpt.get("resize_width") or 720)
     except Exception:
         ckpt_resize = 720
-    return ckpt_skip < 2 or ckpt_resize > 480
+    return ckpt_resize > 480
 
 
 def _bat_che_do_cuu_ho_hf(video_path):
@@ -11801,7 +11801,7 @@ def _bat_che_do_cuu_ho_hf(video_path):
         frames, duration = 0, 0
     if frames <= 3000 and duration <= 105:
         return False
-    _skip = 5 if (frames > 9000 or duration > 300) else 4
+    _skip = 0
     # KHONG ghi thang vao widget-key (ncv_model_type / ncv_resize_width / ncv_skip_frames):
     # cac selectbox sidebar DA duoc tao trong lan chay nay -> Streamlit nem
     # StreamlitAPIException "cannot be modified after the widget ... is instantiated".
