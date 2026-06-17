@@ -17619,6 +17619,7 @@ Dòng **Xác suất 3 lớp** (nếu có): tổng ~100%, cho biết mô hình ph
         # Phục hồi frame từ video nếu còn thiếu sau khi đã thử ZIP
         any_missing = any(_is_image_missing_or_invalid(get_local_frame_path(frame_data_list[idx].get('path', ''))) for idx in page_inds)
         cap_recover = None
+        _recover_vid_path = None
         if any_missing and processed_video_path:
             # Ưu tiên H.264 (_f.mp4) vì dễ decode hơn MP4V gốc
             _h264_path = get_final_h264_path(processed_video_path)
@@ -17633,9 +17634,24 @@ Dòng **Xác suất 3 lớp** (nếu có): tổng ~100%, cho biết mô hình ph
                     if not cap_recover.isOpened():
                         cap_recover.release()
                         cap_recover = None
+                    else:
+                        _recover_vid_path = _vid_for_recovery
                 except Exception as e:
                     print("[Frame Recovery] Lỗi mở video phục hồi frame:", e)
                     cap_recover = None
+            # Nếu OpenCV không mở được (MP4V không hỗ trợ) → transcode sang H.264 trước
+            if not cap_recover and _vid_for_recovery and not (_h264_path and os.path.exists(_h264_path) and os.path.getsize(_h264_path) > 5 * 1024):
+                try:
+                    _h264_done = sync_transcode_to_h264(_vid_for_recovery)
+                    if _h264_done:
+                        cap_recover = cv2.VideoCapture(_h264_done)
+                        if not cap_recover.isOpened():
+                            cap_recover.release()
+                            cap_recover = None
+                        else:
+                            _recover_vid_path = _h264_done
+                except Exception as _tc_err:
+                    print("[Frame Recovery] Lỗi transcode để recovery:", _tc_err)
 
         for orig_idx in page_inds:
             f_data = frame_data_list[orig_idx]
