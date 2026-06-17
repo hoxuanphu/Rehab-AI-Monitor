@@ -191,11 +191,18 @@ def load_checkpoint(path, retries=4, retry_delay=0.2):
 
 
 def clear_checkpoint(path):
-    if path and os.path.exists(path):
-        try:
+    if not path or not os.path.exists(path):
+        return
+    try:
+        if os.path.isdir(path):
+            # hf_hub_download tao THU MUC tai path khi download that bai -> os.remove se
+            # bao [Errno 21] Is a directory. Dung rmtree (giong save/load_checkpoint).
+            import shutil as _shutil
+            _shutil.rmtree(path, ignore_errors=True)
+        else:
             os.remove(path)
-        except Exception as e:
-            print(f"[Checkpoint] Loi xoa checkpoint: {e}")
+    except Exception as e:
+        print(f"[Checkpoint] Loi xoa checkpoint: {e}")
 
 
 def checkpoint_ui_progress(ckpt):
