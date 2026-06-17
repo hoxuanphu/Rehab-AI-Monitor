@@ -2433,10 +2433,10 @@ def khoi_phuc_ket_qua_cu(v, tai_csv=True, tai_day_du=False):
             dam_bao_tai_video_phan_tich(proc)
         frames_json = v.get("all_frames_data_path")
         if frames_json:
-            ensure_local_file(frames_json)
+            ensure_local_file(frames_json, try_fallbacks=False)
         fz = _frames_zip_path_from_video(v)
         if fz:
-            ensure_local_file(fz)
+            ensure_local_file(fz, try_fallbacks=False)
         if proc:
             check_and_extract_frames_zip(proc)
     if st.session_state.get("angle_df") is not None:
@@ -2635,7 +2635,7 @@ def _bat_dau_tai_day_du_song_song(v):
                 _bg_load_jobs[_key]["video"] = True
 
             fz = _frames_zip_path_from_video(v_local)
-            if fz and ensure_local_file(fz, quiet=True):
+            if fz and ensure_local_file(fz, quiet=True, try_fallbacks=False):
                 _bg_load_jobs[_key]["zip"] = True
             if proc:
                 check_and_extract_frames_zip(proc)
@@ -3865,8 +3865,8 @@ def check_and_extract_frames_zip(processed_video_path):
             pass
         
     # Đảm bảo file ZIP tồn tại cục bộ (nếu chưa có, tự tải về từ Hugging Face Dataset)
-    if not os.path.exists(zip_path):
-        ensure_local_file(zip_path)
+    if not (os.path.exists(zip_path) and os.path.getsize(zip_path) >= 5 * 1024):
+        ensure_local_file(zip_path, try_fallbacks=False)
         
     # Nếu đã có file ZIP cục bộ, tiến hành giải nén ra thư mục frames_dir
     if os.path.exists(zip_path) and os.path.getsize(zip_path) >= 5 * 1024:
@@ -4989,6 +4989,24 @@ def dong_bo_video_list_tu_processed(video_list):
                 if os.path.exists(proc_path):
                     v["processed_path"] = proc_path
                     changed = True
+
+        # Tự động điền các trường null từ processed_path (timestamp)
+        pp = v.get("processed_path") or ""
+        m_ts = re.search(r"processed_(\d+)", os.path.basename(str(pp)))
+        if m_ts:
+            ts = m_ts.group(1)
+            if not v.get("frames_zip"):
+                v["frames_zip"] = os.path.join(PROCESSED_DIR, f"processed_{ts}_frames.zip")
+                changed = True
+            if not v.get("frames_zip_path"):
+                v["frames_zip_path"] = v.get("frames_zip") or os.path.join(PROCESSED_DIR, f"processed_{ts}_frames.zip")
+                changed = True
+            if not v.get("all_frames_data_path"):
+                v["all_frames_data_path"] = os.path.join(PROCESSED_DIR, f"f_{ts}.json")
+                changed = True
+            if not v.get("df_path"):
+                v["df_path"] = os.path.join(PROCESSED_DIR, f"processed_{ts}_f_data.csv")
+                changed = True
 
     proper_sigs = set()
     for v in video_list:
@@ -16912,8 +16930,8 @@ def _noi_dung_frames_day_du(key_suffix=""):
         _got_new_zip = False
         _got_new_vid = False
         with st.spinner("📥 Đang tải ảnh frames từ Cloud..."):
-            if _zip_to_dl and not os.path.exists(_zip_to_dl):
-                if ensure_local_file(_zip_to_dl):
+            if _zip_to_dl and not (os.path.exists(_zip_to_dl) and os.path.getsize(_zip_to_dl) >= 5 * 1024):
+                if ensure_local_file(_zip_to_dl, try_fallbacks=False):
                     _got_new_zip = os.path.exists(_zip_to_dl)
             if _proc_fp and not os.path.exists(_proc_fp):
                 if ensure_local_file(_proc_fp, try_fallbacks=True):
@@ -17052,6 +17070,17 @@ def _noi_dung_frames_day_du(key_suffix=""):
                 g1_v_path, g2_v_path, g3_v_path = cut_video_segments(processed_video_path, n1, n2, total_frames, fps_export)
             
             if sel_giai_doan == "📋 Video Tất cả":
+                # Nếu _f.mp4 chưa tồn tại nhưng video gốc MP4V có sẵn → tự động transcode để phát được trên trình duyệt
+                _play_target = playback_video_path or processed_video_path
+                if _play_target:
+                    _h264_target = get_final_h264_path(_play_target)
+                    if _h264_target and not (os.path.exists(_h264_target) and os.path.getsize(_h264_target) > 5 * 1024):
+                        _raw_src = _play_target.replace('_f.mp4', '.mp4') if _play_target.endswith('_f.mp4') else _play_target
+                        if _raw_src and os.path.exists(_raw_src) and os.path.getsize(_raw_src) > 5 * 1024:
+                            with st.spinner("⏳ Đang chuẩn bị video H.264 để hiển thị (chạy một lần)..."):
+                                _h264_done = sync_transcode_to_h264(_raw_src)
+                            if _h264_done:
+                                playback_video_path = _h264_done
                 render_video(playback_video_path or processed_video_path)
                 d_col1, d_col2 = st.columns(2)
                 with d_col1:
@@ -17533,6 +17562,15 @@ Dòng **Xác suất 3 lớp** (nếu có): tổng ~100%, cho biết mô hình ph
         _fz_alt = get_local_frame_path(st.session_state.get('frames_zip') or "")
         if _fz_alt and _fz_alt not in _zip_candidates:
             _zip_candidates.append(_fz_alt)
+        # Nếu ZIP chưa có local → thử tải về từ HF Dataset (1 lần, try_fallbacks=False để không bỏ ZIP)
+        for _zc in _zip_candidates:
+            if _zc and not (os.path.exists(_zc) and os.path.getsize(_zc) > 1024):
+                try:
+                    with st.spinner("📥 Đang tải file ảnh frames từ Cloud..."):
+                        ensure_local_file(_zc, quiet=True, try_fallbacks=False)
+                except Exception:
+                    pass
+                break
         for _zc in _zip_candidates:
             if _zc and os.path.exists(_zc) and os.path.getsize(_zc) > 1024:
                 zip_path_for_check = _zc
