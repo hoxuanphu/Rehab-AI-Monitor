@@ -10090,6 +10090,92 @@ def clear_analysis_progress(video_path):
     except Exception as exc:
         print(f"[Progress] Khong xoa duoc progress file: {exc}")
 
+def _video_da_co_ket_qua_luu(v):
+    if not v:
+        return False
+    has_metrics = bool(v.get("metrics"))
+    try:
+        acc_ok = float(v.get("accuracy") or 0) > 0
+    except Exception:
+        acc_ok = False
+    status_txt = str(v.get("status") or "").lower()
+    status_ok = "phân tích" in status_txt or "phÃ¢n tÃ­ch" in status_txt
+    has_artifact = bool(v.get("df_path") or v.get("processed_path") or v.get("all_frames_data_path"))
+    return has_metrics or acc_ok or (status_ok and has_artifact)
+
+
+def _tim_video_da_hoan_tat_cho_job(job):
+    vp = (job or {}).get("video_path") or ""
+    uname = (job or {}).get("username") or ""
+    vname = (job or {}).get("video_name") or ""
+    names = {os.path.basename(str(x or "")).lower() for x in (vp, vname)}
+    candidates = []
+    try:
+        candidates.extend(load_data(VIDEOS_FILE) or [])
+    except Exception:
+        pass
+    try:
+        candidates.extend(load_danh_sach_video_nghien_cuu() or [])
+    except Exception:
+        pass
+    seen = set()
+    for v in candidates:
+        key = (v.get("username"), v.get("video_name"), v.get("exercise"), v.get("video_path"))
+        if key in seen:
+            continue
+        seen.add(key)
+        if not _video_da_co_ket_qua_luu(v):
+            continue
+        paths = {str(v.get(k) or "") for k in ("video_path", "processed_path")}
+        if vp and vp in paths:
+            return v
+        if uname and v.get("username") == uname and vname and v.get("video_name") == vname:
+            return v
+        cand_names = {os.path.basename(p).lower() for p in paths if p}
+        cand_names.add(os.path.basename(str(v.get("video_name") or "")).lower())
+        if names and cand_names and names.intersection(cand_names):
+            return v
+    return None
+
+
+def _dong_progress_neu_da_co_ket_qua_luu(job):
+    v_done = _tim_video_da_hoan_tat_cho_job(job)
+    vp = (job or {}).get("video_path") or (v_done or {}).get("video_path")
+    if not (v_done and vp):
+        return False
+    fz = _frames_zip_path_from_video(v_done)
+    result_data = {
+        "stats": v_done.get("metrics") or {},
+        "processed_video_path": v_done.get("processed_path"),
+        "df_path": v_done.get("df_path"),
+        "all_frames_data_path": v_done.get("all_frames_data_path"),
+        "exercise": v_done.get("exercise"),
+        "frames_zip": fz,
+        "frames_zip_path": fz,
+    }
+    write_progress(
+        vp,
+        "success",
+        username=(job or {}).get("username") or v_done.get("username"),
+        video_name=(job or {}).get("video_name") or v_done.get("video_name"),
+        progress=1.0,
+        elapsed=float((job or {}).get("elapsed") or 0),
+        start_time=(job or {}).get("start_time"),
+        result=result_data,
+        status_msg="✅ Đã có kết quả đã lưu, không cần chạy lại.",
+        job_meta={
+            "full_name": ((job or {}).get("job_meta") or {}).get("full_name") or v_done.get("full_name"),
+            "exercise_name": v_done.get("exercise"),
+        },
+    )
+    try:
+        clear_checkpoint(get_checkpoint_path(vp, PROCESSED_DIR))
+    except Exception:
+        pass
+    print(f"[Resume] Bo qua resume vi da co ket qua luu: {v_done.get('video_name') or os.path.basename(vp)}")
+    return True
+
+
 def clear_all_progress_files():
     """Xóa toàn bộ file tiến trình (progress_*.json) để làm mới — không còn job nào hiển thị 'đang tải'.
     Trả về số file đã xóa."""
@@ -11650,6 +11736,8 @@ def job_phan_tich_bi_gian_doan(video_path):
     """Thread đã chết hoặc heartbeat quá cũ — cần khởi động lại."""
     if not video_path:
         return False
+    if _video_da_co_ket_qua_luu(tim_video_trong_db(video_path) or _tim_video_cho_progress(video_path)):
+        return False
     if video_path in _running_threads and _running_threads[video_path].is_alive():
         return False
     prog = _load_progress_file(video_path)
@@ -11665,6 +11753,8 @@ def khoi_phuc_job_phan_tich_sau_deploy(cold_start=False):
     for job in liet_ke_jobs_dang_chay():
         vp = job.get("video_path")
         if not vp:
+            continue
+        if _dong_progress_neu_da_co_ket_qua_luu(job):
             continue
         # Kiểm tra heartbeat — nhưng ưu tiên checkpoint nếu có dữ liệu hợp lệ
         # Video Heavy/720p >5000 frames có thể cần 4-6h → không xóa nếu còn checkpoint
@@ -11781,6 +11871,8 @@ def skip_step_theo_model(model_type, manual_skip=None):
 def video_dang_phan_tich(video_path):
     """Video này đang có job phân tích thật sự chạy (thread sống hoặc heartbeat còn tươi)."""
     if not video_path:
+        return False
+    if _video_da_co_ket_qua_luu(tim_video_trong_db(video_path) or _tim_video_cho_progress(video_path)):
         return False
     if video_path in _running_threads and _running_threads[video_path].is_alive():
         return True
