@@ -37,8 +37,21 @@ for _thr_var in (
 import logging as _logging
 class _SuppressFragmentWarning(_logging.Filter):
     def filter(self, record):
-        return "does not exist anymore" not in record.getMessage()
-_logging.getLogger("streamlit").addFilter(_SuppressFragmentWarning())
+        try:
+            return "does not exist anymore" not in record.getMessage()
+        except Exception:
+            return True
+_frag_log_filter = _SuppressFragmentWarning()
+# Warning nay phat ra tu logger CON "streamlit.runtime.app_session" (muc INFO).
+# Python logging KHONG ap filter cua logger cha cho record cua logger con — no chi
+# goi filter cua chinh logger goc + cua handler. Vi vay gan filter vao logger "streamlit"
+# (cu) khong co tac dung -> log HF Space bi ngap dong "fragment ... does not exist
+# anymore". Gan TRUC TIEP vao logger con (va handler cua "streamlit") moi chan triet de.
+for _lg_name in ("streamlit", "streamlit.runtime.app_session"):
+    _lg = _logging.getLogger(_lg_name)
+    _lg.addFilter(_frag_log_filter)
+    for _h in list(_lg.handlers):
+        _h.addFilter(_frag_log_filter)
 
 import streamlit as st
 
@@ -10037,6 +10050,16 @@ def _chay_khoi_phuc_phan_tich_sau_deploy():
             _tai_trang_thai_phan_tich_tu_hf(force=True)
         except Exception as hf_restore_err:
             print(f"[HF Resume] Loi tai progress tu Dataset: {hf_restore_err}")
+        # Dong bo video_list.json MOI NHAT tu HF TRUOC khi resume. Neu bo qua buoc nay,
+        # guard "_video_da_co_ket_qua_luu" doc ban video_list.json cu (seed git, thieu
+        # metrics moi luu) -> khong nhan ra video DA co ket qua -> resume chay lai phan
+        # tich thua (dung CPU, lam web do va nhay %). Co metrics -> guard danh dau
+        # success va bo qua, khong chay lai.
+        try:
+            dong_bo_json_cau_hinh_tu_hf(force_files=frozenset({"video_list.json"}))
+            _xoa_cache_sau_dong_bo_json(["video_list.json"])
+        except Exception as sync_err:
+            print(f"[HF Resume] Loi dong bo video_list.json truoc resume: {sync_err}")
         try:
             n = khoi_phuc_job_phan_tich_sau_deploy(cold_start=True)
             if n:
@@ -10986,6 +11009,20 @@ def _hien_thi_progress_hai_pass(prog_data, status_msg="", elapsed_text="", show_
         p_val = min(max(float(prog_data.get("progress", 0.0)), 0.0), 1.0)
     except (TypeError, ValueError):
         p_val = 0.0
+    # Chong nhay LUI nho (vd 22% -> 19%) do nhieu fragment/luong cung doc-ghi progress
+    # lech nhau: giu lai % cao nhat da hien cho moi video trong phien. Van cho phep
+    # RESET that su (tut > 12%) khi phan tich chay lai tu dau.
+    if status == "processing":
+        _vp_key = str(prog_data.get("video_path") or "")
+        if _vp_key:
+            try:
+                _store = st.session_state.setdefault("_prog_monotonic", {})
+                _last = _store.get(_vp_key)
+                if _last is not None and 0 < (_last - p_val) < 0.12:
+                    p_val = _last
+                _store[_vp_key] = p_val
+            except Exception:
+                pass
     msg = status_msg or prog_data.get("status_msg", "")
     p1, p2 = _pass_progress_from_total(p_val, msg, status=status)
 
