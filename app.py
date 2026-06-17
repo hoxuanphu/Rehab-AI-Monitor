@@ -5179,7 +5179,8 @@ def thuc_hien_khoi_tao_he_thong_mot_lan():
         except Exception as e:
             print(f"[AutoTranscode] Loi toan cuc: {e}")
 
-    threading.Thread(target=_auto_transcode_all_hevc, daemon=True).start()
+    if os.getenv("REHAB_AUTO_TRANSCODE_ON_BOOT", "0") == "1":
+        threading.Thread(target=_auto_transcode_all_hevc, daemon=True).start()
 
     # FIX 500 trên HF Space: KHÔNG chạy đồng bộ khi boot.
     # Trước đây _chay_khoi_phuc_phan_tich_sau_deploy() chạy ngay trong lần render đầu tiên:
@@ -5192,7 +5193,8 @@ def thuc_hien_khoi_tao_he_thong_mot_lan():
         except Exception as boot_resume_err:
             print(f"[Resume] Loi khoi phuc dong bo luc boot: {boot_resume_err}")
 
-    threading.Thread(target=_khoi_phuc_nen_sau_boot, daemon=True).start()
+    if os.getenv("REHAB_AUTO_RESUME_ON_BOOT", "0") == "1":
+        threading.Thread(target=_khoi_phuc_nen_sau_boot, daemon=True).start()
 
     def _resume_and_watch_analysis_jobs():
         """Theo dõi job bị crash/OOM sau khi Space đã chạy."""
@@ -5205,7 +5207,8 @@ def thuc_hien_khoi_tao_he_thong_mot_lan():
             except Exception as poll_err:
                 print(f"[Resume] Loi poll job: {poll_err}")
 
-    threading.Thread(target=_resume_and_watch_analysis_jobs, daemon=True).start()
+    if os.getenv("REHAB_AUTO_RESUME_WATCHER", "0") == "1":
+        threading.Thread(target=_resume_and_watch_analysis_jobs, daemon=True).start()
     return True
 
 # Khởi tạo trạng thái đăng nhập
@@ -18601,9 +18604,8 @@ def _noi_dung_danh_sach_video_fragment(user_role, video_list_preloaded=None):
                     def is_valid_local_file(path):
                         if path and os.path.exists(path):
                             try:
-                                mtime = os.path.getmtime(path)
                                 size = os.path.getsize(path)
-                                return _check_video_valid_cached(path, mtime, size)
+                                return size >= 5 * 1024
                             except:
                                 pass
                         return False
@@ -18715,8 +18717,10 @@ def _noi_dung_danh_sach_video_fragment(user_role, video_list_preloaded=None):
                                     st.write(f"- Video gốc BN: `{raw_path or '(n/a)'}`")
                                     st.write(f"- Video processed: `{processed_path or '(n/a)'}`")
                                     st.write(f"- Tồn tại cục bộ: {'✅ Có' if local_exists else '☁️ Sẽ stream/tải từ Cloud khi xem'}")
+                                    deep_check = st.button("🔬 Quét sâu codec/ffprobe", key=f"btn_deep_file_check_{idx}")
                                     if active_display_path and os.path.exists(active_display_path):
                                         st.write(f"- Kích thước tệp: `{os.path.getsize(active_display_path)/(1024*1024):.2f} MB`")
+                                    if deep_check and active_display_path and os.path.exists(active_display_path):
                                         try:
                                             v_codec, a_codec = get_video_codec(active_display_path)
                                             st.write(f"- Codec: `{v_codec} / {a_codec}`")
@@ -18731,17 +18735,11 @@ def _noi_dung_danh_sach_video_fragment(user_role, video_list_preloaded=None):
                                             st.write(f"- Lỗi quét ffprobe: `{e}`")
                                 
                                     st.markdown(f"**Tệp nén H.264:** `{final_h264 or '(n/a)'}`")
-                                    h264_exists = False
-                                    if final_h264 and os.path.exists(final_h264) and os.path.getsize(final_h264) >= 5 * 1024:
-                                        try:
-                                            mtime = os.path.getmtime(final_h264)
-                                            size = os.path.getsize(final_h264)
-                                            h264_exists = _check_video_valid_cached(final_h264, mtime, size)
-                                        except:
-                                            pass
+                                    h264_exists = bool(final_h264 and os.path.exists(final_h264) and os.path.getsize(final_h264) >= 5 * 1024)
                                     st.write(f"- Tồn tại cục bộ và hợp lệ: {'✅ Có' if h264_exists else '❌ Không'}")
                                     if final_h264 and os.path.exists(final_h264):
                                         st.write(f"- Kích thước tệp: `{os.path.getsize(final_h264)/(1024*1024):.2f} MB`")
+                                    if deep_check and final_h264 and os.path.exists(final_h264):
                                         try:
                                             v_codec_h, a_codec_h = get_video_codec(final_h264)
                                             st.write(f"- Codec H264: `{v_codec_h} / {a_codec_h}`")
