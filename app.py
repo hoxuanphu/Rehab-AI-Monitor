@@ -17,6 +17,22 @@ os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 # CẤU HÌNH GPU CHO MEDIAPIPE
 os.environ['MEDIAPIPE_DISABLE_GPU'] = '0'
 
+# === GIỚI HẠN THREAD NATIVE ĐỂ WEB KHÔNG BỊ ĐƠ/ĐỨNG KHI PHÂN TÍCH ===
+# Trên HF Spaces CPU (thường 2 vCPU), MediaPipe + OpenCV + BLAS (numpy) mặc định
+# giành HẾT core khi phân tích video → luồng UI của Streamlit bị đói CPU → trang
+# web đơ/đứng/dừng ở mức "đang tải". Chừa tối thiểu 1 core cho UI để trang luôn
+# phản hồi. setdefault: vẫn cho phép ghi đè bằng biến môi trường khi cần.
+try:
+    _cpu_total = os.cpu_count() or 2
+except Exception:
+    _cpu_total = 2
+_compute_threads = max(1, _cpu_total - 1)
+for _thr_var in (
+    "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS",
+):
+    os.environ.setdefault(_thr_var, str(_compute_threads))
+
 # Lọc warning "fragment does not exist anymore" — vô hại, chỉ là lifecycle noise từ run_every
 import logging as _logging
 class _SuppressFragmentWarning(_logging.Filter):
@@ -41,6 +57,12 @@ class _LazyCV2:
     def __init__(self): object.__setattr__(self, "_mod", None)
     def _load(self):
         import cv2 as _m
+        # Giới hạn thread OpenCV — tránh chiếm hết core khi vẽ/resize frame ở Pass 2,
+        # giữ cho luồng UI Streamlit luôn còn CPU để phản hồi (không bị đơ).
+        try:
+            _m.setNumThreads(_compute_threads)
+        except Exception:
+            pass
         object.__setattr__(self, "_mod", _m)
         return _m
     def __getattr__(self, k): return getattr(object.__getattribute__(self,"_mod") or self._load(), k)
@@ -11782,6 +11804,16 @@ def bat_dau_phan_tich_background(
 
     def thread_target():
         nonlocal video_path
+        # Hạ ưu tiên CPU (nice) của luồng phân tích — và các thread con MediaPipe/
+        # OpenCV mà nó tạo ra đều kế thừa mức nice này trên Linux. Nhờ đó scheduler
+        # luôn ưu tiên luồng UI của Streamlit khi tranh chấp CPU → web KHÔNG bị
+        # đơ/đứng khi đang phân tích, hoặc khi job tự chạy lại lúc tải trang.
+        # Khi UI rảnh, phân tích vẫn dùng full CPU nên không làm chậm lúc nhàn rỗi.
+        try:
+            if hasattr(os, "nice"):
+                os.nice(10)
+        except Exception:
+            pass
         progress_video_path = video_path
         start_t = snap["start_time"]
         sem_acquired = False
