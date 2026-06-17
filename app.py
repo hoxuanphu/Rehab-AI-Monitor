@@ -17587,6 +17587,28 @@ Dòng **Xác suất 3 lớp** (nếu có): tổng ~100%, cho biết mô hình ph
                 has_zip = True
                 break
 
+        # ── DEBUG: hiển thị trạng thái ZIP / Video để chẩn đoán ──────────────────
+        _zip_dbg = zip_path_for_check or (_zip_candidates[0] if _zip_candidates else "N/A")
+        _zip_sz = os.path.getsize(_zip_dbg) if (_zip_dbg and os.path.exists(_zip_dbg)) else -1
+        _vid_dbg = processed_video_path or "N/A"
+        _vid_sz = os.path.getsize(_vid_dbg) if (_vid_dbg and os.path.exists(_vid_dbg)) else -1
+        with st.expander("🔍 Debug thông tin frames (bấm để mở)", expanded=False):
+            st.caption(
+                f"**ZIP:** `{_zip_dbg}` — tồn tại: {os.path.exists(_zip_dbg) if _zip_dbg != 'N/A' else False}, "
+                f"kích thước: {_zip_sz/1024/1024:.1f} MB | has_zip={has_zip}\n\n"
+                f"**Video:** `{_vid_dbg}` — tồn tại: {os.path.exists(_vid_dbg) if _vid_dbg != 'N/A' else False}, "
+                f"kích thước: {_vid_sz/1024/1024:.1f} MB"
+            )
+            if has_zip and zip_path_for_check:
+                try:
+                    import zipfile as _zmod
+                    with _zmod.ZipFile(zip_path_for_check, 'r') as _zt:
+                        _zcount = len(_zt.namelist())
+                    st.caption(f"Số frame trong ZIP: **{_zcount}** / {total_f} total")
+                except Exception as _ze:
+                    st.caption(f"⚠️ Không đọc được ZIP: {_ze}")
+        # ── END DEBUG ──────────────────────────────────────────────────────────────
+
         # Đọc trước base64 tất cả frames trang hiện tại từ ZIP (1 lần mở, đọc nhiều)
         zip_b64_cache = {}
         if has_zip:
@@ -17629,13 +17651,12 @@ Dòng **Xác suất 3 lớp** (nếu có): tổng ~100%, cho biết mô hình ph
                       else None)
             )
             if _vid_for_recovery:
+                _recover_vid_path = _vid_for_recovery  # luôn giữ để ffmpeg fallback dùng
                 try:
                     cap_recover = cv2.VideoCapture(_vid_for_recovery)
                     if not cap_recover.isOpened():
                         cap_recover.release()
                         cap_recover = None
-                    else:
-                        _recover_vid_path = _vid_for_recovery
                 except Exception as e:
                     print("[Frame Recovery] Lỗi mở video phục hồi frame:", e)
                     cap_recover = None
@@ -17658,17 +17679,40 @@ Dòng **Xác suất 3 lớp** (nếu có): tổng ~100%, cho biết mô hình ph
             f_path = get_local_frame_path(f_data.get('path'))
 
             # Khôi phục ảnh từ video nếu thiếu (dùng đúng index frame trong video)
-            if f_path and _is_image_missing_or_invalid(f_path) and cap_recover and cap_recover.isOpened():
-                try:
-                    os.makedirs(os.path.dirname(f_path), exist_ok=True)
-                    # Dùng index thực của frame trong video (không phải vị trí trong list)
-                    f_idx = f_data.get('index', orig_idx)
-                    cap_recover.set(cv2.CAP_PROP_POS_FRAMES, f_idx)
-                    ret, frame_img = cap_recover.read()
-                    if ret:
-                        cv2.imwrite(f_path, frame_img, [cv2.IMWRITE_JPEG_QUALITY, 60])
-                except Exception as e:
-                    print(f"[Frame Recovery] Lỗi trích xuất frame {orig_idx}: {e}")
+            if f_path and _is_image_missing_or_invalid(f_path):
+                f_idx = f_data.get('index', orig_idx)
+                _recovered = False
+                # Thử OpenCV trước
+                if cap_recover and cap_recover.isOpened():
+                    try:
+                        os.makedirs(os.path.dirname(f_path), exist_ok=True)
+                        cap_recover.set(cv2.CAP_PROP_POS_FRAMES, f_idx)
+                        ret, frame_img = cap_recover.read()
+                        if ret:
+                            cv2.imwrite(f_path, frame_img, [cv2.IMWRITE_JPEG_QUALITY, 60])
+                            _recovered = os.path.exists(f_path)
+                    except Exception as e:
+                        print(f"[Frame Recovery] Lỗi trích xuất frame {orig_idx}: {e}")
+                # Fallback: dùng ffmpeg nếu OpenCV thất bại
+                if not _recovered and _recover_vid_path and os.path.exists(_recover_vid_path):
+                    try:
+                        os.makedirs(os.path.dirname(f_path), exist_ok=True)
+                        fps_v = 30.0
+                        try:
+                            _cap_tmp = cv2.VideoCapture(_recover_vid_path)
+                            if _cap_tmp.isOpened():
+                                fps_v = _cap_tmp.get(cv2.CAP_PROP_FPS) or 30.0
+                            _cap_tmp.release()
+                        except Exception:
+                            pass
+                        t_sec = f_idx / max(fps_v, 1.0)
+                        subprocess.run(
+                            ["ffmpeg", "-y", "-ss", f"{t_sec:.4f}", "-i", _recover_vid_path,
+                             "-vframes", "1", "-q:v", "5", f_path],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15
+                        )
+                    except Exception as e_ff:
+                        print(f"[Frame Recovery ffmpeg] frame {orig_idx}: {e_ff}")
 
         if cap_recover:
             cap_recover.release()
