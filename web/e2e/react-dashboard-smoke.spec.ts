@@ -74,7 +74,9 @@ async function stopServer(child: ChildProcessWithoutNullStreams | undefined) {
 test.beforeAll(async () => {
   rmSync(scratchRoot, { recursive: true, force: true });
   const databaseDir = path.join(scratchRoot, 'database');
+  const processedDir = path.join(scratchRoot, 'processed_results');
   mkdirSync(databaseDir, { recursive: true });
+  mkdirSync(processedDir, { recursive: true });
 
   writeJson(path.join(databaseDir, 'users.json'), {
     patient01: {
@@ -95,7 +97,16 @@ test.beforeAll(async () => {
       stored_filename: 'patient01_clip.mp4',
       exercise: 'Codman',
       status: 'Chờ NCV phân tích',
-      accuracy: 0,
+      accuracy: 91.2,
+      metrics: {
+        do_chinh_xac: 91.2,
+        f1_score: 0.88,
+        metrics_g1: { do_chinh_xac: 100, mae_tong: 4.5, f1_score: 0.98, icc: 0.9 },
+        metrics_g2: { do_chinh_xac: 72, mae_tong: 18, f1_score: 0.78, icc: 0.72 },
+        metrics_g3: { do_chinh_xac: 0, mae_tong: 64, f1_score: 0, icc: 0.5 },
+      },
+      df_path: 'processed_results/patient01_clip_data.csv',
+      all_frames_data_path: 'processed_results/patient01_clip_frames.json',
       time: '2026-06-19T07:00:00Z',
     },
   ]);
@@ -104,8 +115,21 @@ test.beforeAll(async () => {
       patient_username: 'patient01',
       video_name: 'patient01_clip.mp4',
       exercise: 'Codman',
+      doctor_username: 'AI_Researcher',
+      doctor_name: 'NCV: Researcher',
+      doctor_result: 'Gần đúng',
+      comments: 'Báo cáo AI chính thức',
+      plan: 'Tiếp tục',
+      time: '2026-06-19T07:04:00Z',
+    },
+    {
+      patient_username: 'patient01',
+      video_name: 'patient01_clip.mp4',
+      exercise: 'Codman',
+      doctor_username: 'doctor',
       doctor_result: 'Gần đúng',
       comments: 'Tiếp tục theo dõi',
+      plan: 'Tiếp tục',
       time: '2026-06-19T07:05:00Z',
     },
   ]);
@@ -129,6 +153,48 @@ test.beforeAll(async () => {
     },
   ]);
   writeJson(path.join(databaseDir, 'research_data.json'), []);
+  writeFileSync(path.join(processedDir, 'patient01_clip_data.csv'), 'frame,goc_vai\n1,90\n', 'utf8');
+  writeJson(path.join(processedDir, 'patient01_clip_frames.json'), [
+    {
+      index: 1,
+      timestamp: '00:01',
+      path: 'processed_results/f_000001.jpg',
+      goc_vai: 90,
+      goc_khuyu: 170,
+      dung: true,
+      gan_dung: false,
+      eval_info: { shoulder_ref: 90, elbow_ref: 170 },
+      ml_label: 'dung',
+      ml_label_text: 'Đúng',
+      ml_confidence: 0.82,
+    },
+    {
+      index: 2,
+      timestamp: '00:02',
+      path: 'processed_results/f_000002.jpg',
+      goc_vai: 125,
+      goc_khuyu: 135,
+      dung: false,
+      gan_dung: true,
+      ml_label: 'gan_dung',
+      ml_label_text: 'Gần đúng',
+      ml_confidence: 0.42,
+      ml_probabilities: { Sai: 0.2, 'Gần đúng': 0.42, Đúng: 0.38 },
+    },
+    {
+      index: 3,
+      timestamp: '00:03',
+      path: 'processed_results/f_000003.jpg',
+      goc_vai: 145,
+      goc_khuyu: 120,
+      dung: false,
+      gan_dung: false,
+    },
+  ]);
+  const tinyJpeg = Buffer.from('/9j/4AAQSkZJRgABAQAAAQABAAD/2w==', 'base64');
+  writeFileSync(path.join(processedDir, 'f_000001.jpg'), tinyJpeg);
+  writeFileSync(path.join(processedDir, 'f_000002.jpg'), tinyJpeg);
+  writeFileSync(path.join(processedDir, 'f_000003.jpg'), tinyJpeg);
 
   backendProcess = spawnServer(
     path.join(repoRoot, '.venv', 'Scripts', 'python.exe'),
@@ -175,6 +241,28 @@ test('patient can log in and see scoped dashboard data', async ({ page }) => {
   await navigation.getByRole('button', { name: /Video tập luyện/ }).click();
   await expect(page.getByText('patient01_clip.mp4')).toBeVisible();
   await expect(page.getByText('Codman')).toBeVisible();
+  await page.getByRole('button', { name: 'Kết quả' }).click();
+  await expect(page.getByRole('heading', { name: 'Kết quả chi tiết' })).toBeVisible();
+  await expect(page.getByText('Bác sĩ đánh giá bài tập: Gần đúng')).toBeVisible();
+  await expect(page.getByText('Tập Codman')).toBeVisible();
+  await expect(page.getByText('F1-score')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Biểu đồ góc khớp' })).toBeVisible();
+  await expect(page.getByText('Góc vai TB')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Frame PASS / NEAR / FAIL' })).toBeVisible();
+  await expect(page.getByText('PASS').first()).toBeVisible();
+  await expect(page.getByText(/ML · Đúng/).first()).toBeVisible();
+  await page.getByTitle('Xem frame lớn').first().click();
+  await expect(page.getByRole('dialog', { name: 'Frame 1' })).toBeVisible();
+  await page.getByRole('button', { name: 'Đóng' }).click();
+  await expect(page.getByText('NEAR').first()).toBeVisible();
+  await expect(page.getByText(/ML · Gần đúng/).first()).toBeVisible();
+  await page.getByRole('button', { name: 'G2', exact: true }).click();
+  await expect(page.getByText('1 frame trong bộ lọc')).toBeVisible();
+  await expect(page.getByText('G2 · NEAR')).toBeVisible();
+  await page.getByRole('button', { name: 'G3', exact: true }).click();
+  await expect(page.getByText('G3 · FAIL')).toBeVisible();
+  await page.getByRole('button', { name: 'PASS', exact: true }).click();
+  await expect(page.getByText('1 frame trong bộ lọc')).toBeVisible();
 
   await navigation.getByRole('button', { name: /Lịch của tôi/ }).click();
   await expect(page.getByText('Tập Codman')).toBeVisible();

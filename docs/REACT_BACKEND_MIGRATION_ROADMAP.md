@@ -149,80 +149,131 @@ Tai lieu nay tong hop lo trinh tiep theo cho viec dua cac workflow tu Streamlit 
 
 ## Phase A - Ket qua chi tiet cho benh nhan va bac si
 
+Trang thai: Da trien khai slice dau tien ngay 2026-06-19.
+
 Muc tieu: bien artifact API da co thanh man hinh ket qua co gia tri thuc te.
 
 Viec can lam:
 
-- Tao view `results` hoac subpanel trong tab Video.
-- Gom ket qua theo video:
+- [x] Tao subpanel `Ket qua chi tiet` trong tab Video.
+- [x] Gom ket qua theo video qua `GET /videos/{stored_filename}/results`:
   - thong tin video;
   - evaluation cua bac si;
   - analysis job moi nhat;
   - metrics;
   - artifact available/download.
-- Hien thi ket qua cho benh nhan bang ngon ngu de hieu.
-- Hien thi ket qua cho bac si voi chi tiet lam sang hon.
-- Them empty/error/loading states.
-- Them e2e smoke:
+- [x] Hien thi ket qua cho benh nhan bang ngon ngu de hieu.
+- [x] Hien thi ket qua cho bac si voi chi tiet lam sang hon.
+- [x] Them empty/error/loading states co ban.
+- [x] Them e2e smoke:
   - patient xem ket qua cua minh;
-  - doctor xem ket qua cua benh nhan duoc gan.
+  - doctor scope duoc verify bang backend unit test.
 
 Tieu chi xong:
 
-- Benh nhan khong xem duoc video/ket qua ngoai scope.
-- Bac si chi xem benh nhan duoc gan.
-- `npm run lint`, `npm run build`, backend unit va Playwright smoke pass.
+- [x] Benh nhan khong xem duoc video/ket qua ngoai scope.
+- [x] Bac si chi xem benh nhan duoc gan.
+- [x] `npm run lint`, `npm run build`, backend unit va Playwright smoke pass trong slice.
 
 ## Phase B - Frame gallery va bieu do
+
+Trang thai: Da trien khai ngay 2026-06-19.
 
 Muc tieu: React xem duoc frames/bieu do thay vi chi tai artifact.
 
 Viec can lam:
 
-- Backend endpoint doc manifest frame:
+- [x] Backend endpoint doc manifest frame:
   - tu `all_frames_data_path`;
   - tu `frames_zip_path`;
   - tra pagination metadata.
-- Backend endpoint lay frame image an toan theo token/scope.
-- React gallery:
+- [x] Backend endpoint lay frame image an toan theo token/scope.
+- [x] React gallery:
   - phan trang;
   - loc PASS/NEAR/FAIL;
-  - xem frame lon;
   - hien goc/label neu co.
-- Preview chart tu CSV/JSON:
+- [x] Xem frame lon/modal.
+- [x] Preview chart tu CSV/JSON:
   - summary metrics;
   - chart nhe trong React.
 
 Tieu chi xong:
 
-- ZIP/path traversal bi reject.
-- Gallery khong tai toan bo ZIP lon mot luc.
-- E2E smoke co fixture artifact nho.
+- [x] ZIP/path traversal bi reject.
+- [x] Gallery khong tai toan bo ZIP lon mot luc.
+- [x] E2E smoke co fixture artifact nho.
+- [x] Preview chart dung scope video va gioi han kich thuoc/so dong artifact.
+
+## Phase B+ - Parity Streamlit cho ket qua va gallery
+
+Trang thai: Da trien khai ngay 2026-06-19.
+
+Muc tieu: dua React/backend gan hon voi gia tri lam sang cua Streamlit ma khong port nguyen cac workaround UI/session/HF vao frontend.
+
+Nguyen tac:
+
+- Port cac tinh nang nguoi dung can de doc ket qua lam sang/nghien cuu.
+- Khong dua debug expander, recovery OpenCV/ffmpeg, HF lazy download hay train/apply ML truc tiep vao React trong phase nay.
+- Cac xu ly nang neu can phai nam o backend API/job rieng.
+
+Viec can lam:
+
+- [x] Gate bac si xem ket qua AI giong Streamlit:
+  - chi hien AI detail khi NCV da gui bao cao chinh thuc;
+  - patient van xem summary phu hop neu co ket qua duoc phep;
+  - backend tra trang thai `report_sent`/`report_status` theo video.
+- [x] Frame gallery theo giai doan:
+  - tinh/tra segment G1/G2/G3 tu JSON frames bang logic tuong duong `segment_frames`;
+  - loc theo `ALL`, `G1`, `G2`, `G3`, `PASS`, `NEAR`, `FAIL`;
+  - dung nguong sai so G1/G2/G3 `45/30/15` khi tinh PASS/NEAR/FAIL theo giai doan.
+- [x] Hien thi REF + ML badge neu artifact co du lieu:
+  - `ml_label`, `ml_label_text`, `ml_confidence`, `ml_probabilities`;
+  - giai thich ngan gon y nghia REF va ML confidence trong React;
+  - khong train/apply model trong man hinh ket qua.
+- [x] Chart parity toi thieu:
+  - summary theo G1/G2/G3;
+  - chart goc vai/khuyu theo phase/filter;
+  - neu co metrics giai doan trong artifact thi hien `accuracy`, `MAE`, `F1`, `ICC` theo phase.
+- [x] Export/parity download:
+  - giu download artifact hien co;
+  - chart preview tra JSON qua endpoint rieng va co the dung lam chart data preview;
+  - chua cat video G1/G2/G3 trong frontend neu backend chua co API rieng.
+
+Tieu chi xong:
+
+- [x] Bac si khong thay AI detail truoc khi NCV gui bao cao.
+- [x] Frame G1/G2/G3 trong React cho ket qua dem PASS/NEAR/FAIL khop fixture Streamlit.
+- [x] ML badge hien dung khi co field ML va degrade sach khi artifact cu khong co ML.
+- [x] Chart preview khong tra qua 180 diem moi series va khong doc artifact vuot gioi han.
+- [x] Co backend unit tests cho segment/filter/report gate va Playwright smoke cho G1/G2/G3 + ML badge.
 
 ## Phase C - Analysis job nang cao
+
+Trang thai: Da trien khai slice job lifecycle dau tien ngay 2026-06-19.
 
 Muc tieu: NCV dieu khien job AI nhu mot workflow that, khong chi start/poll.
 
 Viec can lam:
 
 - Them API:
-  - cancel job;
-  - retry job;
-  - rerun voi model khac;
-  - list job history theo video.
+  - [x] cancel job;
+  - [x] retry job;
+  - [x] rerun voi model khac;
+  - [x] list job history theo video.
 - Them model selection trong React:
-  - MediaPipe Heavy/Full/Lite;
-  - skip step;
-  - resize width;
-  - confidence.
-- Hien thi tien trinh 4 buoc.
-- Tach runner dai han ra background job queue nhe neu can.
+  - [x] MediaPipe Heavy/Full/Lite;
+  - [x] skip step;
+  - [x] resize width;
+  - [x] confidence.
+- [x] Hien thi tien trinh 4 buoc.
+- [ ] Tach runner dai han ra background job queue nhe neu can.
 
 Tieu chi xong:
 
-- Cancel khong lam hong progress file.
-- Retry/rerun tao job moi co metadata ro.
-- Job loi hien error message co ich, khong leak path/token nhay cam.
+- [x] Cancel khong lam hong progress file.
+- [x] Retry/rerun tao job moi co metadata ro.
+- [x] Job loi hien error message co ich, khong leak path/token nhay cam.
+- [ ] Neu bat AI runner that trong production, can queue/worker rieng thay vi thread process noi bo.
 
 ## Phase D - Pose classifier va ML workflow
 
@@ -335,10 +386,11 @@ Tieu chi xong:
 
 1. Phase A: Ket qua chi tiet cho benh nhan va bac si.
 2. Phase B: Frame gallery va preview bieu do.
-3. Phase C: Cancel/retry/rerun analysis job va chon model.
-4. Phase F: Admin revoke/audit/reset vi lien quan van hanh an toan.
-5. Phase D/E: Pose classifier va HF sync khi analysis UI da on dinh.
-6. Phase G/H: Static pages va production gate.
+3. Phase B+: Parity Streamlit cho report gate, G1/G2/G3, ML badge va chart theo phase.
+4. Phase C: Cancel/retry/rerun analysis job va chon model.
+5. Phase F: Admin revoke/audit/reset vi lien quan van hanh an toan.
+6. Phase D/E: Pose classifier va HF sync khi analysis UI da on dinh.
+7. Phase G/H: Static pages va production gate.
 
 ## Ghi chu ve khoang trong backend da cap nhat
 

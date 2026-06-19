@@ -2,6 +2,7 @@ import json
 import subprocess
 import sys
 import time
+import zipfile
 
 from starlette.testclient import TestClient
 
@@ -89,9 +90,13 @@ def _configure_tmp_backend(tmp_path, monkeypatch):
 
     config = BackendConfig(repo_root=tmp_path, database_dir=db)
     monkeypatch.setattr("backend.main.repo", JsonRepository(config))
+    analysis_jobs.configure(repo_root=tmp_path, upload_dir=tmp_path / "patient_uploads", processed_dir=tmp_path / "processed_results")
+    analysis_jobs.runner = analysis_jobs._validate_transcode_runner
     analysis_jobs.ai_runner = None
     analysis_jobs.result_handler = None
     analysis_jobs.command_runner = subprocess.run
+    analysis_jobs._running.clear()
+    analysis_jobs._cancel_events.clear()
     tokens._tokens.clear()
 
 
@@ -476,7 +481,11 @@ def test_backend_analysis_job_success_updates_video_metadata(tmp_path, monkeypat
     job = None
     while time.time() < deadline:
         if progress_path.exists():
-            job = json.loads(progress_path.read_text(encoding="utf-8"))
+            try:
+                job = json.loads(progress_path.read_text(encoding="utf-8"))
+            except PermissionError:
+                time.sleep(0.01)
+                continue
             if job.get("status") == "success":
                 break
         time.sleep(0.01)
@@ -527,6 +536,145 @@ def test_backend_analysis_job_start_requires_role_and_scope(tmp_path, monkeypatc
     assert out_of_scope.status_code == 404
 
 
+def test_backend_analysis_job_lifecycle_history_retry_rerun_options(tmp_path, monkeypatch):
+    _configure_tmp_backend(tmp_path, monkeypatch)
+    upload_dir = tmp_path / "patient_uploads"
+    upload_dir.mkdir()
+    (upload_dir / "patient01_clip.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 128)
+    _write(
+        tmp_path / "database" / "video_list.json",
+        [
+            {
+                "username": "patient01",
+                "full_name": "Patient One",
+                "video_name": "clip.mp4",
+                "stored_filename": "patient01_clip.mp4",
+                "video_path": "patient_uploads/patient01_clip.mp4",
+                "exercise": "Codman",
+            }
+        ],
+    )
+
+    def command_runner(cmd, **kwargs):
+        if "-show_entries" in cmd:
+            return type("Result", (), {"returncode": 0, "stdout": "12.5\n", "stderr": ""})()
+        return type(
+            "Result",
+            (),
+            {
+                "returncode": 0,
+                "stdout": json.dumps({"streams": [{"codec_type": "video", "codec_name": "h264"}]}),
+                "stderr": "",
+            },
+        )()
+
+    monkeypatch.setattr(analysis_jobs, "command_runner", command_runner)
+    client = TestClient(app)
+    researcher_login = client.post("/auth/login", json={"username": "researcher", "password": "researchpass"})
+    headers = {"Authorization": f"Bearer {researcher_login.json()['access_token']}"}
+
+    rerun = client.post(
+        "/videos/patient01_clip.mp4/analysis-jobs/rerun",
+        headers=headers,
+        json={
+            "model_type": "MediaPipe Lite",
+            "min_confidence": 0.7,
+            "skip_step": 3,
+            "resize_width": 640,
+        },
+    )
+
+    assert rerun.status_code == 202
+    first_run_id = rerun.json()["job"]["run_id"]
+    deadline = time.time() + 2
+    latest_job = None
+    while time.time() < deadline:
+        latest = client.get("/videos/patient01_clip.mp4/analysis-jobs/latest", headers=headers)
+        latest_job = latest.json()["job"]
+        if latest_job and latest_job["status"] == "ready_for_ai_worker":
+            break
+        time.sleep(0.01)
+
+    assert latest_job["job_meta"]["action"] == "rerun"
+    assert latest_job["job_meta"]["options"] == {
+        "model_type": "MediaPipe Lite",
+        "min_confidence": 0.7,
+        "skip_step": 3,
+        "resize_width": 640,
+    }
+    assert latest_job["steps"][0]["status"] == "done"
+
+    retry = client.post("/videos/patient01_clip.mp4/analysis-jobs/retry", headers=headers)
+    assert retry.status_code == 202
+    second_run_id = retry.json()["job"]["run_id"]
+    assert second_run_id != first_run_id
+    deadline = time.time() + 2
+    while time.time() < deadline:
+        latest = client.get("/videos/patient01_clip.mp4/analysis-jobs/latest", headers=headers)
+        latest_job = latest.json()["job"]
+        if latest_job and latest_job["run_id"] == second_run_id and latest_job["status"] == "ready_for_ai_worker":
+            break
+        time.sleep(0.01)
+
+    history = client.get("/videos/patient01_clip.mp4/analysis-jobs/history", headers=headers)
+    assert history.status_code == 200
+    body = history.json()
+    assert body["count"] == 2
+    assert [item["run_id"] for item in body["items"]] == [first_run_id, second_run_id]
+    assert body["items"][1]["job_meta"]["action"] == "retry"
+    assert body["items"][1]["job_meta"]["options"]["model_type"] == "MediaPipe Lite"
+
+
+def test_backend_analysis_job_cancel_requires_role_and_marks_running_job(tmp_path, monkeypatch):
+    _configure_tmp_backend(tmp_path, monkeypatch)
+    upload_dir = tmp_path / "patient_uploads"
+    upload_dir.mkdir()
+    (upload_dir / "patient01_clip.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 128)
+    _write(
+        tmp_path / "database" / "video_list.json",
+        [
+            {
+                "username": "patient01",
+                "full_name": "Patient One",
+                "video_name": "clip.mp4",
+                "stored_filename": "patient01_clip.mp4",
+                "video_path": "patient_uploads/patient01_clip.mp4",
+                "exercise": "Codman",
+            }
+        ],
+    )
+    started = False
+
+    def slow_runner(request, progress):
+        nonlocal started
+        started = True
+        progress(status="processing", progress=0.21, status_msg="Đang chuẩn bị.")
+        time.sleep(0.2)
+        progress(status="processing", progress=0.60, status_msg="Không nên hoàn tất.")
+        return {"status": "ready_for_ai_worker", "progress": 0.65, "result": {"analysis_input_path": request.video_path}}
+
+    monkeypatch.setattr(analysis_jobs, "runner", slow_runner)
+    client = TestClient(app)
+    researcher_login = client.post("/auth/login", json={"username": "researcher", "password": "researchpass"})
+    patient_login = client.post("/auth/login", json={"username": "patient01", "password": "patientpass"})
+    researcher_headers = {"Authorization": f"Bearer {researcher_login.json()['access_token']}"}
+    patient_headers = {"Authorization": f"Bearer {patient_login.json()['access_token']}"}
+
+    response = client.post("/videos/patient01_clip.mp4/analysis-jobs", headers=researcher_headers)
+    assert response.status_code == 202
+    deadline = time.time() + 1
+    while not started and time.time() < deadline:
+        time.sleep(0.01)
+
+    forbidden = client.post("/videos/patient01_clip.mp4/analysis-jobs/cancel", headers=patient_headers)
+    canceled = client.post("/videos/patient01_clip.mp4/analysis-jobs/cancel", headers=researcher_headers)
+
+    assert forbidden.status_code == 403
+    assert canceled.status_code == 200
+    assert canceled.json()["job"]["status"] == "canceled"
+    assert canceled.json()["job"]["job_meta"]["canceled_by"] == "researcher"
+
+
 def test_backend_lists_and_downloads_analysis_artifacts_for_visible_video(tmp_path, monkeypatch):
     _configure_tmp_backend(tmp_path, monkeypatch)
     upload_dir = tmp_path / "patient_uploads"
@@ -559,6 +707,22 @@ def test_backend_lists_and_downloads_analysis_artifacts_for_visible_video(tmp_pa
                 "accuracy": 91.2,
                 "metrics": {"do_chinh_xac": 91.2, "f1_score": 0.88},
                 "status": "Đã phân tích",
+            }
+        ],
+    )
+    _write(
+        tmp_path / "database" / "doctor_evaluations.json",
+        [
+            {
+                "patient_username": "patient01",
+                "video_name": "clip.mp4",
+                "exercise": "Codman",
+                "doctor_username": "AI_Researcher",
+                "doctor_name": "NCV: Researcher",
+                "doctor_result": "Đúng",
+                "comments": "AI report sent",
+                "plan": "Tiếp tục",
+                "time": "2026-06-19T07:15:00Z",
             }
         ],
     )
@@ -620,6 +784,458 @@ def test_backend_analysis_artifacts_reject_out_of_scope_and_unknown_kind(tmp_pat
 
     assert out_of_scope.status_code == 404
     assert unknown.status_code == 404
+
+
+def test_backend_analysis_chart_previews_csv_and_falls_back_to_frames_json(tmp_path, monkeypatch):
+    _configure_tmp_backend(tmp_path, monkeypatch)
+    processed_dir = tmp_path / "processed_results"
+    processed_dir.mkdir()
+    (processed_dir / "patient01_clip_data.csv").write_text(
+        "frame,goc_vai,goc_khuyu,vai_chuan,khuyu_chuan,dung,gan_dung\n"
+        "1,90,170,95,165,true,false\n"
+        "2,110,150,95,165,false,true\n",
+        encoding="utf-8",
+    )
+    _write(
+        processed_dir / "patient01_json_only_frames.json",
+        [
+            {"index": 1, "goc_vai": 80, "goc_khuyu": 160, "dung": True},
+            {"index": 2, "goc_vai": 130, "goc_khuyu": 120, "dung": False, "gan_dung": False},
+        ],
+    )
+    _write(
+        tmp_path / "database" / "video_list.json",
+        [
+            {
+                "username": "patient01",
+                "video_name": "clip.mp4",
+                "stored_filename": "patient01_clip.mp4",
+                "video_path": "patient_uploads/patient01_clip.mp4",
+                "df_path": "processed_results/patient01_clip_data.csv",
+                "exercise": "Codman",
+                "metrics": {"do_chinh_xac": 91.2},
+            },
+            {
+                "username": "patient01",
+                "video_name": "json-only.mp4",
+                "stored_filename": "patient01_json_only.mp4",
+                "video_path": "patient_uploads/patient01_json_only.mp4",
+                "all_frames_data_path": "processed_results/patient01_json_only_frames.json",
+                "exercise": "Codman",
+            },
+        ],
+    )
+    _write(
+        tmp_path / "database" / "doctor_evaluations.json",
+        [
+            {
+                "patient_username": "patient01",
+                "video_name": "clip.mp4",
+                "exercise": "Codman",
+                "doctor_username": "AI_Researcher",
+                "doctor_name": "NCV: Researcher",
+                "doctor_result": "Đúng",
+                "comments": "AI report sent",
+                "plan": "Tiếp tục",
+                "time": "2026-06-19T07:15:00Z",
+            },
+            {
+                "patient_username": "patient01",
+                "video_name": "json-only.mp4",
+                "exercise": "Codman",
+                "doctor_username": "AI_Researcher",
+                "doctor_name": "NCV: Researcher",
+                "doctor_result": "Gần đúng",
+                "comments": "AI report sent",
+                "plan": "Tiếp tục",
+                "time": "2026-06-19T07:20:00Z",
+            },
+        ],
+    )
+    client = TestClient(app)
+    patient_login = client.post("/auth/login", json={"username": "patient01", "password": "patientpass"})
+    headers = {"Authorization": f"Bearer {patient_login.json()['access_token']}"}
+
+    csv_response = client.get("/videos/patient01_clip.mp4/analysis-chart", headers=headers)
+    json_response = client.get("/videos/patient01_json_only.mp4/analysis-chart", headers=headers)
+
+    assert csv_response.status_code == 200
+    csv_body = csv_response.json()
+    assert csv_body["source"] == "csv"
+    assert csv_body["total_rows"] == 2
+    assert csv_body["filtered_rows"] == 2
+    assert csv_body["sampled_rows"] == 2
+    assert csv_body["columns"] == ["goc_vai", "goc_khuyu", "vai_chuan", "khuyu_chuan"]
+    assert csv_body["summary"]["series"]["goc_vai"]["avg"] == 100.0
+    assert csv_body["summary"]["labels"] == {"total": 2, "PASS": 2, "NEAR": 0, "FAIL": 0}
+    assert csv_body["phase_summary"]["phases"]["G1"]["threshold"] == 45.0
+    assert csv_body["series"][0]["goc_khuyu"] == 170.0
+    assert csv_body["metrics"]["do_chinh_xac"] == 91.2
+
+    assert json_response.status_code == 200
+    json_body = json_response.json()
+    assert json_body["source"] == "frames-json"
+    assert json_body["summary"]["labels"]["FAIL"] == 1
+    assert json_body["series"][1]["goc_vai"] == 130.0
+
+
+def test_backend_analysis_chart_rejects_out_of_scope(tmp_path, monkeypatch):
+    _configure_tmp_backend(tmp_path, monkeypatch)
+    processed_dir = tmp_path / "processed_results"
+    processed_dir.mkdir()
+    (processed_dir / "patient02_clip_data.csv").write_text("frame,goc_vai\n1,90\n", encoding="utf-8")
+    _write(
+        tmp_path / "database" / "video_list.json",
+        [
+            {
+                "username": "patient02",
+                "video_name": "clip.mp4",
+                "stored_filename": "patient02_clip.mp4",
+                "video_path": "patient_uploads/patient02_clip.mp4",
+                "df_path": "processed_results/patient02_clip_data.csv",
+                "exercise": "Codman",
+            }
+        ],
+    )
+    client = TestClient(app)
+    doctor_login = client.post("/auth/login", json={"username": "doctor", "password": "doctorpass"})
+
+    response = client.get(
+        "/videos/patient02_clip.mp4/analysis-chart",
+        headers={"Authorization": f"Bearer {doctor_login.json()['access_token']}"},
+    )
+
+    assert response.status_code == 404
+
+
+def test_backend_video_result_detail_combines_scoped_clinical_and_ai_data(tmp_path, monkeypatch):
+    _configure_tmp_backend(tmp_path, monkeypatch)
+    processed_dir = tmp_path / "processed_results"
+    processed_dir.mkdir()
+    (processed_dir / "patient01_clip_data.csv").write_text("frame,goc_vai\n1,90\n", encoding="utf-8")
+    _write(
+        tmp_path / "database" / "video_list.json",
+        [
+            {
+                "username": "patient01",
+                "full_name": "Patient One",
+                "video_name": "clip.mp4",
+                "stored_filename": "patient01_clip.mp4",
+                "video_path": "patient_uploads/patient01_clip.mp4",
+                "df_path": "processed_results/patient01_clip_data.csv",
+                "exercise": "Codman",
+                "accuracy": 91.2,
+                "metrics": {"do_chinh_xac": 91.2, "f1_score": 0.88},
+                "status": "Đã phân tích",
+            },
+            {
+                "username": "patient02",
+                "full_name": "Patient Two",
+                "video_name": "other.mp4",
+                "stored_filename": "patient02_clip.mp4",
+                "video_path": "patient_uploads/patient02_clip.mp4",
+                "exercise": "Codman",
+            },
+        ],
+    )
+    _write(
+        tmp_path / "database" / "doctor_evaluations.json",
+        [
+            {
+                "patient_username": "patient01",
+                "video_name": "clip.mp4",
+                "exercise": "Codman",
+                "doctor_username": "doctor",
+                "doctor_name": "Doctor",
+                "doctor_result": "Gần đúng",
+                "comments": "Tập chậm hơn",
+                "comments_ncv": "private research note",
+                "plan": "Tiếp tục",
+                "time": "2026-06-19T07:05:00Z",
+            }
+        ],
+    )
+    _write(
+        tmp_path / "database" / "patient_symptoms.json",
+        [
+            {
+                "username": "patient01",
+                "video_name": "clip.mp4",
+                "exercise": "Codman",
+                "symptoms": "Đau nhẹ",
+                "vas": 3,
+                "time": "2026-06-19T07:00:00Z",
+            }
+        ],
+    )
+    client = TestClient(app)
+    patient_login = client.post("/auth/login", json={"username": "patient01", "password": "patientpass"})
+    doctor_login = client.post("/auth/login", json={"username": "doctor", "password": "doctorpass"})
+    patient_headers = {"Authorization": f"Bearer {patient_login.json()['access_token']}"}
+    doctor_headers = {"Authorization": f"Bearer {doctor_login.json()['access_token']}"}
+
+    patient_response = client.get("/videos/patient01_clip.mp4/results", headers=patient_headers)
+    doctor_response = client.get("/videos/patient01_clip.mp4/results", headers=doctor_headers)
+    patient_out_of_scope = client.get("/videos/patient02_clip.mp4/results", headers=patient_headers)
+    doctor_out_of_scope = client.get("/videos/patient02_clip.mp4/results", headers=doctor_headers)
+
+    assert patient_response.status_code == 200
+    patient_body = patient_response.json()
+    assert patient_body["summary"]["doctor_result"] == "Gần đúng"
+    assert patient_body["summary"]["doctor_plan"] == "Tiếp tục"
+    assert patient_body["metrics"]["f1_score"] == 0.88
+    assert {item["kind"] for item in patient_body["artifacts"]} == {
+        "processed-video",
+        "angle-csv",
+        "frames-json",
+        "frames-zip",
+    }
+    assert any(item["kind"] == "symptom" for item in patient_body["timeline"])
+    assert "comments_ncv" not in patient_body["evaluation"]
+
+    assert doctor_response.status_code == 200
+    assert doctor_response.json()["evaluation"]["comments_ncv"] == "private research note"
+    assert patient_out_of_scope.status_code == 404
+    assert doctor_out_of_scope.status_code == 404
+
+
+def test_backend_doctor_ai_detail_is_gated_until_researcher_report_is_sent(tmp_path, monkeypatch):
+    _configure_tmp_backend(tmp_path, monkeypatch)
+    processed_dir = tmp_path / "processed_results"
+    processed_dir.mkdir()
+    (processed_dir / "patient01_clip_data.csv").write_text("frame,goc_vai,goc_khuyu\n1,90,170\n", encoding="utf-8")
+    _write(
+        processed_dir / "patient01_clip_frames.json",
+        [{"index": 1, "goc_vai": 90, "goc_khuyu": 170, "path": "processed_results/f_000001.jpg"}],
+    )
+    _write(
+        tmp_path / "database" / "video_list.json",
+        [
+            {
+                "username": "patient01",
+                "full_name": "Patient One",
+                "video_name": "clip.mp4",
+                "stored_filename": "patient01_clip.mp4",
+                "video_path": "patient_uploads/patient01_clip.mp4",
+                "df_path": "processed_results/patient01_clip_data.csv",
+                "all_frames_data_path": "processed_results/patient01_clip_frames.json",
+                "exercise": "Codman",
+                "accuracy": 91.2,
+                "metrics": {"do_chinh_xac": 91.2, "f1_score": 0.88},
+                "status": "Đã phân tích",
+            },
+        ],
+    )
+    _write(
+        tmp_path / "database" / "doctor_evaluations.json",
+        [
+            {
+                "patient_username": "patient01",
+                "video_name": "clip.mp4",
+                "exercise": "Codman",
+                "doctor_username": "doctor",
+                "doctor_name": "Doctor",
+                "doctor_result": "Gần đúng",
+                "comments": "Tập chậm hơn",
+                "plan": "Tiếp tục",
+                "time": "2026-06-19T07:05:00Z",
+            }
+        ],
+    )
+    client = TestClient(app)
+    doctor_login = client.post("/auth/login", json={"username": "doctor", "password": "doctorpass"})
+    headers = {"Authorization": f"Bearer {doctor_login.json()['access_token']}"}
+
+    result = client.get("/videos/patient01_clip.mp4/results", headers=headers)
+    chart = client.get("/videos/patient01_clip.mp4/analysis-chart", headers=headers)
+    frames = client.get("/videos/patient01_clip.mp4/analysis-frames", headers=headers)
+
+    assert result.status_code == 200
+    body = result.json()
+    assert body["report_sent"] is False
+    assert body["ai_detail_allowed"] is False
+    assert body["report_status"]["report_status"] == "blocked_for_doctor"
+    assert body["metrics"] == {}
+    assert body["artifacts"] == []
+    assert body["summary"]["doctor_result"] == "Gần đúng"
+    assert chart.status_code == 403
+    assert frames.status_code == 403
+
+    _write(
+        tmp_path / "database" / "doctor_evaluations.json",
+        [
+            {
+                "patient_username": "patient01",
+                "video_name": "clip.mp4",
+                "exercise": "Codman",
+                "doctor_username": "AI_Researcher",
+                "doctor_name": "NCV: Researcher",
+                "doctor_result": "Đúng",
+                "comments": "Báo cáo AI chính thức",
+                "plan": "Tiếp tục",
+                "time": "2026-06-19T07:15:00Z",
+            }
+        ],
+    )
+
+    opened = client.get("/videos/patient01_clip.mp4/results", headers=headers)
+    assert opened.status_code == 200
+    assert opened.json()["ai_detail_allowed"] is True
+    assert opened.json()["metrics"]["f1_score"] == 0.88
+    assert client.get("/videos/patient01_clip.mp4/analysis-chart", headers=headers).status_code == 200
+
+
+def test_backend_lists_paginated_analysis_frames_and_serves_zip_image(tmp_path, monkeypatch):
+    _configure_tmp_backend(tmp_path, monkeypatch)
+    processed_dir = tmp_path / "processed_results"
+    processed_dir.mkdir()
+    frames_json = processed_dir / "patient01_clip_frames.json"
+    frames_zip = processed_dir / "patient01_clip_frames.zip"
+    jpg_bytes = b"\xff\xd8\xff\xe0frame-one\xff\xd9"
+    png_bytes = b"\x89PNG\r\n\x1a\nframe-two"
+    _write(
+        frames_json,
+        [
+            {
+                "index": 1,
+                "timestamp": "00:01",
+                "path": "processed_results/f_000001.jpg",
+                "goc_vai": 90,
+                "goc_khuyu": 170,
+                "dung": True,
+                "gan_dung": False,
+                "eval_info": {"shoulder_ref": 90, "elbow_ref": 170},
+            },
+            {
+                "index": 2,
+                "timestamp": "00:02",
+                "path": "processed_results/f_000002.png",
+                "goc_vai": 125,
+                "goc_khuyu": 135,
+                "dung": False,
+                "gan_dung": True,
+                "ml_label": "near",
+                "ml_label_text": "Gần đúng",
+                "ml_confidence": 0.42,
+                "ml_probabilities": {"Sai": 0.2, "Gần đúng": 0.42, "Đúng": 0.38},
+            },
+            {
+                "index": 3,
+                "timestamp": "00:03",
+                "path": "processed_results/f_000003.jpg",
+                "goc_vai": 140,
+                "goc_khuyu": 120,
+                "dung": False,
+                "gan_dung": False,
+            },
+        ],
+    )
+    with zipfile.ZipFile(frames_zip, "w") as zf:
+        zf.writestr("f_000001.jpg", jpg_bytes)
+        zf.writestr("f_000002.png", png_bytes)
+    _write(
+        tmp_path / "database" / "video_list.json",
+        [
+            {
+                "username": "patient01",
+                "video_name": "clip.mp4",
+                "stored_filename": "patient01_clip.mp4",
+                "video_path": "patient_uploads/patient01_clip.mp4",
+                "all_frames_data_path": "processed_results/patient01_clip_frames.json",
+                "frames_zip_path": "processed_results/patient01_clip_frames.zip",
+                "exercise": "Codman",
+            }
+        ],
+    )
+    client = TestClient(app)
+    patient_login = client.post("/auth/login", json={"username": "patient01", "password": "patientpass"})
+    headers = {"Authorization": f"Bearer {patient_login.json()['access_token']}"}
+
+    page = client.get(
+        "/videos/patient01_clip.mp4/analysis-frames?page=1&page_size=2",
+        headers=headers,
+    )
+    filtered = client.get(
+        "/videos/patient01_clip.mp4/analysis-frames?label=PASS&page_size=12",
+        headers=headers,
+    )
+
+    assert page.status_code == 200
+    body = page.json()
+    assert body["summary"]["total"] == 3
+    assert body["summary"]["PASS"] == 1
+    assert body["summary"]["NEAR"] == 1
+    assert body["summary"]["FAIL"] == 1
+    assert body["summary"]["phases"]["G2"]["NEAR"] == 1
+    assert body["pagination"]["total"] == 3
+    assert body["pagination"]["total_pages"] == 2
+    assert [item["label"] for item in body["items"]] == ["PASS", "NEAR"]
+    assert body["items"][0]["image_id"] == "frame:0"
+    assert body["items"][1]["phase"] == "G2"
+    assert body["items"][1]["phase_threshold"] == 30.0
+    assert body["items"][1]["ml"]["label_text"] == "Gần đúng"
+    assert body["items"][1]["ml"]["confidence"] == 0.42
+
+    image = client.get(
+        f"/videos/patient01_clip.mp4/analysis-frames/{body['items'][0]['image_id']}",
+        headers=headers,
+    )
+    assert image.status_code == 200
+    assert image.content == jpg_bytes
+    assert image.headers["content-type"].startswith("image/jpeg")
+
+    assert filtered.status_code == 200
+    assert filtered.json()["pagination"]["total"] == 1
+    assert filtered.json()["items"][0]["label"] == "PASS"
+
+    g2 = client.get(
+        "/videos/patient01_clip.mp4/analysis-frames?label=G2&page_size=12",
+        headers=headers,
+    )
+    assert g2.status_code == 200
+    assert g2.json()["pagination"]["total"] == 1
+    assert g2.json()["items"][0]["label"] == "NEAR"
+
+
+def test_backend_analysis_frames_reject_out_of_scope_and_unsafe_zip(tmp_path, monkeypatch):
+    _configure_tmp_backend(tmp_path, monkeypatch)
+    processed_dir = tmp_path / "processed_results"
+    processed_dir.mkdir()
+    _write(
+        processed_dir / "patient02_clip_frames.json",
+        [{"index": 1, "path": "processed_results/f_000001.jpg", "dung": True}],
+    )
+    with zipfile.ZipFile(processed_dir / "patient02_clip_frames.zip", "w") as zf:
+        zf.writestr("../escape.jpg", b"bad")
+    _write(
+        tmp_path / "database" / "video_list.json",
+        [
+            {
+                "username": "patient02",
+                "video_name": "clip.mp4",
+                "stored_filename": "patient02_clip.mp4",
+                "video_path": "patient_uploads/patient02_clip.mp4",
+                "all_frames_data_path": "processed_results/patient02_clip_frames.json",
+                "frames_zip_path": "processed_results/patient02_clip_frames.zip",
+                "exercise": "Codman",
+            }
+        ],
+    )
+    client = TestClient(app)
+    patient_login = client.post("/auth/login", json={"username": "patient01", "password": "patientpass"})
+    researcher_login = client.post("/auth/login", json={"username": "researcher", "password": "researchpass"})
+
+    out_of_scope = client.get(
+        "/videos/patient02_clip.mp4/analysis-frames",
+        headers={"Authorization": f"Bearer {patient_login.json()['access_token']}"},
+    )
+    unsafe_zip = client.get(
+        "/videos/patient02_clip.mp4/analysis-frames",
+        headers={"Authorization": f"Bearer {researcher_login.json()['access_token']}"},
+    )
+
+    assert out_of_scope.status_code == 404
+    assert unsafe_zip.status_code == 400
 
 
 def test_backend_lists_patients_without_passwords_and_scopes_by_role(tmp_path, monkeypatch):

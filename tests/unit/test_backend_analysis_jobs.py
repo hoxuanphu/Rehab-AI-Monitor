@@ -1,4 +1,5 @@
 import json
+import threading
 import time
 from types import SimpleNamespace
 
@@ -130,6 +131,106 @@ def test_start_runs_injected_ai_runner_after_video_is_ready(tmp_path):
     assert progress["result"]["metrics"]["do_chinh_xac"] == 91.25
     assert handled
     assert handled[0][0].options["analysis_input_path"] == str(video_path)
+
+
+def test_cancel_marks_running_job_and_writes_history(tmp_path):
+    video_path = tmp_path / "patient_uploads" / "clip.mp4"
+    video_path.parent.mkdir()
+    video_path.write_bytes(b"video")
+    runner_started = threading.Event()
+    release_runner = threading.Event()
+
+    def slow_runner(request, progress):
+        runner_started.set()
+        progress(status="processing", progress=0.12, status_msg="Đang chờ worker.")
+        release_runner.wait(1)
+        progress(status="processing", progress=0.50, status_msg="Không nên tới đây.")
+        return {"status": "ready_for_ai_worker", "progress": 0.55, "result": {"analysis_input_path": str(video_path)}}
+
+    jobs = BackendAnalysisJobs(
+        repo_root=tmp_path,
+        upload_dir=tmp_path / "patient_uploads",
+        runner=slow_runner,
+    )
+
+    start = jobs.start(_request(video_path))
+    assert start["started"] is True
+    assert runner_started.wait(1)
+
+    canceled = jobs.cancel(_request(video_path), canceled_by="researcher")
+    release_runner.set()
+    deadline = time.time() + 2
+    while jobs.is_running(str(video_path)) and time.time() < deadline:
+        time.sleep(0.01)
+
+    assert canceled["ok"] is True
+    progress = jobs.read_progress(str(video_path))
+    assert progress["status"] == "canceled"
+    assert progress["job_meta"]["canceled_by"] == "researcher"
+    history = jobs.read_history(str(video_path))
+    assert len(history) == 1
+    assert history[0]["run_id"] == progress["run_id"]
+    assert history[0]["status"] == "canceled"
+
+
+def test_rerun_creates_new_run_id_and_preserves_public_options(tmp_path):
+    video_path = tmp_path / "patient_uploads" / "clip.mp4"
+    video_path.parent.mkdir()
+    video_path.write_bytes(b"video")
+
+    def command_runner(cmd, **kwargs):
+        if "-show_entries" in cmd:
+            return SimpleNamespace(returncode=0, stdout="12.5\n", stderr="")
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps({"streams": [{"codec_type": "video", "codec_name": "h264"}]}),
+            stderr="",
+        )
+
+    jobs = BackendAnalysisJobs(
+        repo_root=tmp_path,
+        upload_dir=tmp_path / "patient_uploads",
+        command_runner=command_runner,
+    )
+    first = _request(video_path)
+    second = AnalysisJobRequest(
+        actor_username=first.actor_username,
+        username=first.username,
+        video_name=first.video_name,
+        video_path=first.video_path,
+        exercise=first.exercise,
+        options={
+            "model_type": "MediaPipe Lite",
+            "min_confidence": 0.7,
+            "skip_step": 2,
+            "resize_width": 480,
+            "media_path": str(video_path),
+        },
+        action="rerun",
+    )
+
+    assert jobs.start(first)["started"] is True
+    deadline = time.time() + 2
+    while jobs.is_running(str(video_path)) and time.time() < deadline:
+        time.sleep(0.01)
+    first_run_id = jobs.read_progress(str(video_path))["run_id"]
+
+    assert jobs.start(second)["started"] is True
+    deadline = time.time() + 2
+    while jobs.is_running(str(video_path)) and time.time() < deadline:
+        time.sleep(0.01)
+    progress = jobs.read_progress(str(video_path))
+    history = jobs.read_history(str(video_path))
+
+    assert progress["run_id"] != first_run_id
+    assert progress["job_meta"]["action"] == "rerun"
+    assert progress["job_meta"]["options"] == {
+        "model_type": "MediaPipe Lite",
+        "min_confidence": 0.7,
+        "skip_step": 2,
+        "resize_width": 480,
+    }
+    assert len(history) == 2
 
 
 def test_backend_mediapipe_ai_runner_wraps_processing_result(tmp_path):

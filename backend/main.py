@@ -22,7 +22,7 @@ from auth.passwords import password_record_update, verify_password_record
 from starlette.applications import Starlette
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
-from starlette.responses import FileResponse, JSONResponse
+from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route
 
 from auth.permissions import (
@@ -31,7 +31,7 @@ from auth.permissions import (
     researcher_view_records_for_actor,
     scope_records_for_actor,
 )
-from models.schemas import ADMIN_ROLE, DOCTOR_ROLE, PATIENT_ROLE, RESEARCHER_ROLE
+from models.schemas import ADMIN_ROLE, DOCTOR_ROLE, PATIENT_ROLE, RESEARCHER_ROLE, AI_RESEARCHER
 from storage.app_json import update_app_json
 from video.validation import (
     ALLOWED_UPLOAD_VIDEO_EXTENSIONS,
@@ -43,6 +43,8 @@ from video.serving import allowed_media_file_path, video_media_allowed_roots
 
 from backend.access import patient_records_for_actor, scoped_records_for_response
 from backend.analysis_jobs import AnalysisJobRequest, BackendAnalysisJobs
+from backend.artifact_preview import analysis_chart_preview
+from backend.analysis_parity import phase_metrics_from_record
 from backend.auth import (
     RegistrationError,
     TokenStore,
@@ -52,6 +54,7 @@ from backend.auth import (
     register_patient_user,
 )
 from backend.config import BackendConfig
+from backend.frame_gallery import frame_gallery_page, resolve_gallery_image
 from backend.repository import JsonRepository
 
 
@@ -257,6 +260,14 @@ def _bounded_int(value: Any, *, default: int, minimum: int, maximum: int) -> int
     return max(minimum, min(maximum, number))
 
 
+def _bounded_float(value: Any, *, default: float, minimum: float, maximum: float) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        number = default
+    return max(minimum, min(maximum, number))
+
+
 def _now_compact() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -267,6 +278,14 @@ def _now_display() -> str:
 
 def _now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
+
+
+async def _json_payload_or_empty(request: Request) -> dict[str, Any]:
+    try:
+        payload = await request.json()
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def _patient_name_from_users(patient_username: str) -> str:
@@ -549,6 +568,7 @@ def _sync_analysis_jobs_config() -> None:
         upload_dir=repo.config.upload_dir,
         processed_dir=repo.config.processed_dir,
     )
+    analysis_jobs.ffmpeg_threads = max(1, int(repo.config.ai_ffmpeg_threads or 1))
     analysis_jobs.result_handler = _apply_analysis_result_to_video_list
     if repo.config.enable_ai_runner:
         analysis_jobs.ai_runner = _build_backend_ai_runner()
@@ -561,6 +581,215 @@ def _visible_video_record(actor: dict[str, Any], stored_filename: str) -> dict[s
     return next((item for item in visible_videos if _video_record_media_filename(item) == stored_filename), None)
 
 
+def _video_identity_values(record: dict[str, Any]) -> set[str]:
+    values = {
+        _clean_text(record.get("video_name")),
+        _clean_text(record.get("original_filename")),
+        _clean_text(record.get("stored_filename")),
+        _clean_text(_video_record_media_filename(record)),
+        _path_basename(record.get("video_path")),
+        _path_basename(record.get("processed_path")),
+    }
+    return {value for value in values if value}
+
+
+def _record_matches_video(record: dict[str, Any], video: dict[str, Any]) -> bool:
+    video_patient = _clean_text(video.get("username") or video.get("patient_username"))
+    record_patient = _clean_text(record.get("patient_username") or record.get("username") or record.get("subject_code"))
+    if video_patient and record_patient and video_patient != record_patient:
+        return False
+
+    video_names = _video_identity_values(video)
+    record_names = {
+        _clean_text(record.get("video_name")),
+        _clean_text(record.get("video_code")),
+        _clean_text(record.get("stored_filename")),
+        _path_basename(record.get("video_path")),
+        _path_basename(record.get("processed_path")),
+    }
+    record_names = {value for value in record_names if value}
+    if record_names and video_names and not record_names.intersection(video_names):
+        return False
+
+    video_exercise = _clean_text(video.get("exercise"))
+    record_exercise = _clean_text(record.get("exercise") or record.get("exercise_name"))
+    if video_exercise and record_exercise and video_exercise != record_exercise:
+        return False
+    return True
+
+
+def _latest_matching_record(records: list[dict[str, Any]], video: dict[str, Any]) -> dict[str, Any] | None:
+    matches = [record for record in records if _record_matches_video(record, video)]
+    return matches[-1] if matches else None
+
+
+def _ai_report_record_for_video(video: dict[str, Any]) -> dict[str, Any] | None:
+    for evaluation in reversed(repo.evaluations()):
+        if _clean_text(evaluation.get("doctor_username")) == AI_RESEARCHER and _record_matches_video(evaluation, video):
+            return evaluation
+    return None
+
+
+def _result_report_status(actor: dict[str, Any], video: dict[str, Any]) -> dict[str, Any]:
+    report = _ai_report_record_for_video(video)
+    sent = bool(report)
+    role = actor.get("role")
+    blocked = role == DOCTOR_ROLE and not sent
+    status = "sent" if sent else "pending"
+    return {
+        "report_sent": sent,
+        "report_status": "blocked_for_doctor" if blocked else status,
+        "ai_detail_allowed": not blocked,
+        "sent_at": _clean_text((report or {}).get("time")),
+        "sent_by": _clean_text((report or {}).get("doctor_name") or (report or {}).get("doctor_username")),
+        "message": (
+            "NCV đã gửi báo cáo AI chính thức."
+            if sent
+            else "NCV chưa gửi báo cáo AI chính thức cho video này."
+        ),
+    }
+
+
+def _evaluation_for_results(actor: dict[str, Any], video: dict[str, Any]) -> dict[str, Any] | None:
+    visible = scope_records_for_actor(repo.evaluations(), actor, repo.users())
+    non_ai = [record for record in visible if _clean_text(record.get("doctor_username")) != AI_RESEARCHER]
+    evaluation = _latest_matching_record(non_ai, video)
+    if not evaluation:
+        evaluation = _latest_matching_record(visible, video)
+    if not evaluation:
+        return None
+    if actor.get("role") == PATIENT_ROLE:
+        allowed_keys = {
+            "patient_username",
+            "video_name",
+            "exercise",
+            "doctor_name",
+            "doctor_result",
+            "errors",
+            "comments",
+            "plan",
+            "time",
+        }
+        return {key: value for key, value in evaluation.items() if key in allowed_keys}
+    return researcher_view_records_for_actor([evaluation], actor)[0]
+
+
+def _analysis_artifacts_payload(record: dict[str, Any], filename: str) -> dict[str, Any]:
+    items = [_artifact_manifest_item(record, filename, kind) for kind in ARTIFACT_DEFINITIONS]
+    metrics = record.get("metrics") if isinstance(record.get("metrics"), dict) else {}
+    return {
+        "video": {
+            "stored_filename": filename,
+            "video_name": record.get("video_name") or record.get("original_filename") or filename,
+            "exercise": record.get("exercise") or "",
+            "status": record.get("status") or "",
+            "accuracy": record.get("accuracy"),
+        },
+        "metrics": metrics,
+        "items": items,
+        "count": len(items),
+    }
+
+
+def _empty_artifacts_payload(filename: str, record: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "video": {
+            "stored_filename": filename,
+            "video_name": record.get("video_name") or record.get("original_filename") or filename,
+            "exercise": record.get("exercise") or "",
+            "status": record.get("status") or "",
+            "accuracy": record.get("accuracy"),
+        },
+        "metrics": {},
+        "items": [],
+        "count": 0,
+    }
+
+
+def _metric_values_for_result(record: dict[str, Any], job: dict[str, Any] | None) -> dict[str, Any]:
+    metrics = record.get("metrics") if isinstance(record.get("metrics"), dict) else {}
+    if metrics:
+        return metrics
+    job_result = job.get("result") if isinstance(job, dict) and isinstance(job.get("result"), dict) else {}
+    if isinstance(job_result.get("metrics"), dict):
+        return job_result["metrics"]
+    if isinstance(job_result.get("stats"), dict):
+        return job_result["stats"]
+    return {}
+
+
+def _timeline_item(kind: str, label: str, *, time_value: Any = "", detail: Any = "", status: Any = "") -> dict[str, Any]:
+    return {
+        "kind": kind,
+        "label": label,
+        "time": _clean_text(time_value),
+        "detail": _clean_text(detail),
+        "status": _clean_text(status),
+    }
+
+
+def _result_timeline_for_video(
+    actor: dict[str, Any],
+    video: dict[str, Any],
+    evaluation: dict[str, Any] | None,
+    job: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    events = [
+        _timeline_item(
+            "video",
+            "Video tập luyện",
+            time_value=video.get("time"),
+            detail=video.get("video_name") or video.get("original_filename"),
+            status=video.get("status"),
+        )
+    ]
+    visible_symptoms = scope_records_for_actor(repo.symptoms(), actor, repo.users())
+    for symptom in visible_symptoms:
+        if _record_matches_video(symptom, video):
+            events.append(
+                _timeline_item(
+                    "symptom",
+                    "Khai báo triệu chứng",
+                    time_value=symptom.get("time") or symptom.get("timestamp") or symptom.get("created_at"),
+                    detail=symptom.get("symptoms"),
+                    status=f"VAS {symptom.get('vas')}" if symptom.get("vas") not in (None, "") else "",
+                )
+            )
+    if evaluation:
+        events.append(
+            _timeline_item(
+                "evaluation",
+                "Nhận xét bác sĩ",
+                time_value=evaluation.get("time"),
+                detail=evaluation.get("comments"),
+                status=evaluation.get("doctor_result"),
+            )
+        )
+    if job:
+        events.append(
+            _timeline_item(
+                "analysis",
+                "Phân tích AI",
+                time_value=job.get("updated_at") or job.get("heartbeat") or job.get("start_time"),
+                detail=job.get("status_msg") or job.get("error_msg"),
+                status=job.get("status"),
+            )
+        )
+    visible_schedules = scope_records_for_actor(repo.schedules(), actor, repo.users())
+    for schedule in visible_schedules:
+        if _record_matches_video(schedule, video):
+            events.append(
+                _timeline_item(
+                    "schedule",
+                    "Lịch/nhắc tập tiếp theo",
+                    time_value=schedule.get("datetime") or schedule.get("date") or schedule.get("time"),
+                    detail=schedule.get("title") or schedule.get("exercise_name") or schedule.get("notes"),
+                    status=schedule.get("status"),
+                )
+            )
+    return [event for event in events if event["detail"] or event["time"] or event["status"]]
+
+
 def _analysis_request_from_record(actor: dict[str, Any], record: dict[str, Any]) -> AnalysisJobRequest:
     filename = _video_record_media_filename(record)
     video_path = str(record.get("video_path") or (Path("patient_uploads") / filename))
@@ -571,6 +800,65 @@ def _analysis_request_from_record(actor: dict[str, Any], record: dict[str, Any])
         video_path=video_path,
         exercise=_clean_text(record.get("exercise")),
         options={},
+    )
+
+
+def _analysis_options_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    allowed_models = {"MediaPipe Heavy", "MediaPipe Full", "MediaPipe Lite"}
+    model_type = _clean_text(payload.get("model_type")) or repo.config.ai_model_type
+    if model_type not in allowed_models:
+        raise ValueError("model_type must be MediaPipe Heavy, MediaPipe Full, or MediaPipe Lite")
+
+    options: dict[str, Any] = {
+        "model_type": model_type,
+        "skip_step": _bounded_int(payload.get("skip_step"), default=repo.config.ai_skip_step or 0, minimum=0, maximum=30),
+        "resize_width": _bounded_int(payload.get("resize_width"), default=repo.config.ai_resize_width or 720, minimum=240, maximum=2160),
+        "min_confidence": round(
+            _bounded_float(payload.get("min_confidence"), default=repo.config.ai_min_confidence, minimum=0.1, maximum=0.95),
+            2,
+        ),
+    }
+    if "exercise_key" in payload:
+        options["exercise_key"] = _clean_text(payload.get("exercise_key"))
+    if "phase" in payload or "giai_doan" in payload:
+        options["phase"] = _clean_text(payload.get("phase") or payload.get("giai_doan"))
+    if payload.get("force_train_classifier") is not None:
+        options["force_train_classifier"] = bool(payload.get("force_train_classifier"))
+    return options
+
+
+async def _analysis_job_request_for_actor(
+    request: Request,
+    actor: dict[str, Any],
+    *,
+    parse_options: bool = False,
+    action: str = "start",
+) -> tuple[AnalysisJobRequest | None, JSONResponse | None]:
+    filename = _safe_media_filename(request.path_params.get("stored_filename"))
+    if not filename:
+        return None, json_error("invalid media filename", 400)
+    record = _visible_video_record(actor, filename)
+    if record is None:
+        return None, json_error("video not found", 404)
+
+    payload = await _json_payload_or_empty(request) if parse_options else {}
+    try:
+        options = _analysis_options_from_payload(payload) if parse_options else {}
+    except ValueError as exc:
+        return None, json_error(str(exc), 400)
+
+    job_request = _analysis_request_from_record(actor, record)
+    return (
+        AnalysisJobRequest(
+            actor_username=job_request.actor_username,
+            username=job_request.username,
+            video_name=job_request.video_name,
+            video_path=job_request.video_path,
+            exercise=job_request.exercise,
+            options=options,
+            action=action,
+        ),
+        None,
     )
 
 
@@ -650,15 +938,11 @@ async def start_analysis_job(request: Request) -> JSONResponse:
     except PermissionError as exc:
         return json_error(str(exc), 403)
 
-    filename = _safe_media_filename(request.path_params.get("stored_filename"))
-    if not filename:
-        return json_error("invalid media filename", 400)
-    record = _visible_video_record(actor, filename)
-    if record is None:
-        return json_error("video not found", 404)
+    job_request, error = await _analysis_job_request_for_actor(request, actor, parse_options=True, action="start")
+    if error:
+        return error
 
     _sync_analysis_jobs_config()
-    job_request = _analysis_request_from_record(actor, record)
     result = analysis_jobs.start(job_request)
     return JSONResponse(result, status_code=202 if result.get("started") else 200)
 
@@ -684,6 +968,98 @@ async def latest_analysis_job(request: Request) -> JSONResponse:
     return JSONResponse({"job": job})
 
 
+async def analysis_job_history(request: Request) -> JSONResponse:
+    actor = current_actor(request)
+    auth_error = auth_error_if_missing(actor)
+    if auth_error:
+        return auth_error
+
+    job_request, error = await _analysis_job_request_for_actor(request, actor)
+    if error:
+        return error
+
+    _sync_analysis_jobs_config()
+    history = analysis_jobs.read_history(job_request.video_path)
+    return JSONResponse({"items": history, "count": len(history)})
+
+
+async def cancel_analysis_job(request: Request) -> JSONResponse:
+    actor = current_actor(request)
+    auth_error = auth_error_if_missing(actor)
+    if auth_error:
+        return auth_error
+    try:
+        require_actor_role(actor, [ADMIN_ROLE, RESEARCHER_ROLE])
+    except PermissionError as exc:
+        return json_error(str(exc), 403)
+
+    job_request, error = await _analysis_job_request_for_actor(request, actor, action="cancel")
+    if error:
+        return error
+
+    _sync_analysis_jobs_config()
+    result = analysis_jobs.cancel(job_request, canceled_by=_clean_text(actor.get("username")))
+    status_code = 200 if result.get("ok") else 409
+    return JSONResponse(result, status_code=status_code)
+
+
+async def retry_analysis_job(request: Request) -> JSONResponse:
+    actor = current_actor(request)
+    auth_error = auth_error_if_missing(actor)
+    if auth_error:
+        return auth_error
+    try:
+        require_actor_role(actor, [ADMIN_ROLE, RESEARCHER_ROLE])
+    except PermissionError as exc:
+        return json_error(str(exc), 403)
+
+    job_request, error = await _analysis_job_request_for_actor(request, actor, action="retry")
+    if error:
+        return error
+
+    _sync_analysis_jobs_config()
+    latest = analysis_jobs.read_progress(job_request.video_path)
+    if latest and str(latest.get("status") or "") == "processing" and analysis_jobs.is_running(job_request.video_path):
+        return json_error("analysis job is already running", 409)
+    previous_options = {}
+    if isinstance(latest, dict) and isinstance(latest.get("job_meta"), dict):
+        maybe_options = latest["job_meta"].get("options")
+        if isinstance(maybe_options, dict):
+            previous_options = maybe_options
+    retry_request = AnalysisJobRequest(
+        actor_username=job_request.actor_username,
+        username=job_request.username,
+        video_name=job_request.video_name,
+        video_path=job_request.video_path,
+        exercise=job_request.exercise,
+        options=previous_options,
+        action="retry",
+    )
+    result = analysis_jobs.start(retry_request)
+    return JSONResponse(result, status_code=202 if result.get("started") else 200)
+
+
+async def rerun_analysis_job(request: Request) -> JSONResponse:
+    actor = current_actor(request)
+    auth_error = auth_error_if_missing(actor)
+    if auth_error:
+        return auth_error
+    try:
+        require_actor_role(actor, [ADMIN_ROLE, RESEARCHER_ROLE])
+    except PermissionError as exc:
+        return json_error(str(exc), 403)
+
+    job_request, error = await _analysis_job_request_for_actor(request, actor, parse_options=True, action="rerun")
+    if error:
+        return error
+
+    _sync_analysis_jobs_config()
+    if analysis_jobs.is_running(job_request.video_path):
+        return json_error("analysis job is already running", 409)
+    result = analysis_jobs.start(job_request)
+    return JSONResponse(result, status_code=202 if result.get("started") else 200)
+
+
 async def list_analysis_artifacts(request: Request) -> JSONResponse:
     actor = current_actor(request)
     auth_error = auth_error_if_missing(actor)
@@ -696,23 +1072,168 @@ async def list_analysis_artifacts(request: Request) -> JSONResponse:
     record = _visible_video_record(actor, filename)
     if record is None:
         return json_error("video not found", 404)
+    if not _result_report_status(actor, record)["ai_detail_allowed"]:
+        return json_error("AI report has not been sent for this video", 403)
 
-    items = [_artifact_manifest_item(record, filename, kind) for kind in ARTIFACT_DEFINITIONS]
-    metrics = record.get("metrics") if isinstance(record.get("metrics"), dict) else {}
+    return JSONResponse(_analysis_artifacts_payload(record, filename))
+
+
+async def video_result_detail(request: Request) -> JSONResponse:
+    actor = current_actor(request)
+    auth_error = auth_error_if_missing(actor)
+    if auth_error:
+        return auth_error
+
+    filename = _safe_media_filename(request.path_params.get("stored_filename"))
+    if not filename:
+        return json_error("invalid media filename", 400)
+    record = _visible_video_record(actor, filename)
+    if record is None:
+        return json_error("video not found", 404)
+
+    _sync_analysis_jobs_config()
+    job_request = _analysis_request_from_record(actor, record)
+    report_status = _result_report_status(actor, record)
+    ai_detail_allowed = bool(report_status["ai_detail_allowed"])
+    latest_job = analysis_jobs.read_progress(job_request.video_path) if ai_detail_allowed else None
+    artifacts = _analysis_artifacts_payload(record, filename) if ai_detail_allowed else _empty_artifacts_payload(filename, record)
+    evaluation = _evaluation_for_results(actor, record)
+    metrics = _metric_values_for_result(record, latest_job) if ai_detail_allowed else {}
+    public_video = researcher_view_records_for_actor([record], actor)[0]
+    summary = {
+        "patient": public_video.get("full_name") or public_video.get("subject_code") or public_video.get("username") or public_video.get("patient_username") or "",
+        "video_name": record.get("video_name") or record.get("original_filename") or filename,
+        "exercise": record.get("exercise") or "",
+        "status": record.get("status") or "",
+        "accuracy": record.get("accuracy") if ai_detail_allowed else None,
+        "doctor_result": (evaluation or {}).get("doctor_result"),
+        "doctor_plan": (evaluation or {}).get("plan"),
+        "doctor_comment": (evaluation or {}).get("comments"),
+        "analysis_status": (latest_job or {}).get("status"),
+        "analysis_message": (latest_job or {}).get("status_msg") or (latest_job or {}).get("error_msg"),
+    }
     return JSONResponse(
         {
             "video": {
+                **public_video,
                 "stored_filename": filename,
                 "video_name": record.get("video_name") or record.get("original_filename") or filename,
-                "exercise": record.get("exercise") or "",
-                "status": record.get("status") or "",
-                "accuracy": record.get("accuracy"),
             },
+            "evaluation": evaluation,
+            "latest_job": latest_job,
             "metrics": metrics,
-            "items": items,
-            "count": len(items),
+            "artifacts": artifacts["items"],
+            "artifact_count": artifacts["count"],
+            "report_sent": report_status["report_sent"],
+            "report_status": report_status,
+            "ai_detail_allowed": ai_detail_allowed,
+            "phase_metrics": phase_metrics_from_record(record) if ai_detail_allowed else {},
+            "summary": summary,
+            "timeline": _result_timeline_for_video(actor, record, evaluation, latest_job),
         }
     )
+
+
+async def list_analysis_frames(request: Request) -> JSONResponse:
+    actor = current_actor(request)
+    auth_error = auth_error_if_missing(actor)
+    if auth_error:
+        return auth_error
+
+    filename = _safe_media_filename(request.path_params.get("stored_filename"))
+    if not filename:
+        return json_error("invalid media filename", 400)
+    record = _visible_video_record(actor, filename)
+    if record is None:
+        return json_error("video not found", 404)
+    if not _result_report_status(actor, record)["ai_detail_allowed"]:
+        return json_error("AI report has not been sent for this video", 403)
+
+    page = _bounded_int(request.query_params.get("page"), default=1, minimum=1, maximum=100000)
+    page_size = _bounded_int(request.query_params.get("page_size"), default=12, minimum=1, maximum=48)
+    label_filter = _clean_text(request.query_params.get("label") or "ALL").upper()
+    try:
+        payload = frame_gallery_page(
+            record,
+            repo_root=repo.config.repo_root,
+            processed_dir=repo.config.processed_dir,
+            page=page,
+            page_size=page_size,
+            label_filter=label_filter,
+        )
+    except ValueError as exc:
+        return json_error(str(exc), 400)
+    except OSError:
+        return json_error("frames are not available", 404)
+    return JSONResponse(payload)
+
+
+async def analysis_chart(request: Request) -> JSONResponse:
+    actor = current_actor(request)
+    auth_error = auth_error_if_missing(actor)
+    if auth_error:
+        return auth_error
+
+    filename = _safe_media_filename(request.path_params.get("stored_filename"))
+    if not filename:
+        return json_error("invalid media filename", 400)
+    record = _visible_video_record(actor, filename)
+    if record is None:
+        return json_error("video not found", 404)
+    if not _result_report_status(actor, record)["ai_detail_allowed"]:
+        return json_error("AI report has not been sent for this video", 403)
+
+    csv_path = _resolve_artifact_path(record, "angle-csv")
+    frames_json_path = _resolve_artifact_path(record, "frames-json")
+    if not csv_path and not frames_json_path:
+        return json_error("chart artifact not found", 404)
+    try:
+        payload = analysis_chart_preview(
+            record,
+            csv_path=csv_path,
+            frames_json_path=frames_json_path,
+            label_filter=_clean_text(request.query_params.get("label") or "ALL").upper(),
+        )
+    except ValueError as exc:
+        return json_error(str(exc), 400)
+    except (OSError, json.JSONDecodeError):
+        return json_error("chart artifact is not readable", 404)
+    return JSONResponse(payload)
+
+
+async def analysis_frame_image(request: Request) -> JSONResponse | FileResponse | Response:
+    actor = current_actor(request)
+    auth_error = auth_error_if_missing(actor)
+    if auth_error:
+        return auth_error
+
+    filename = _safe_media_filename(request.path_params.get("stored_filename"))
+    image_id = _clean_text(request.path_params.get("image_id"))
+    if not filename:
+        return json_error("invalid media filename", 400)
+    if not image_id:
+        return json_error("frame image id is required", 400)
+    record = _visible_video_record(actor, filename)
+    if record is None:
+        return json_error("video not found", 404)
+    if not _result_report_status(actor, record)["ai_detail_allowed"]:
+        return json_error("AI report has not been sent for this video", 403)
+
+    try:
+        resolved = resolve_gallery_image(
+            record,
+            image_id=image_id,
+            repo_root=repo.config.repo_root,
+            processed_dir=repo.config.processed_dir,
+        )
+    except (ValueError, OSError, KeyError):
+        resolved = None
+    if not resolved:
+        return json_error("frame image not found", 404)
+    kind, payload, media_type = resolved
+    if kind == "file":
+        return FileResponse(str(payload), media_type=media_type, filename=os.path.basename(str(payload)))
+    return Response(payload, media_type=media_type)
 
 
 async def download_analysis_artifact(request: Request) -> JSONResponse | FileResponse:
@@ -730,6 +1251,8 @@ async def download_analysis_artifact(request: Request) -> JSONResponse | FileRes
     record = _visible_video_record(actor, filename)
     if record is None:
         return json_error("video not found", 404)
+    if not _result_report_status(actor, record)["ai_detail_allowed"]:
+        return json_error("AI report has not been sent for this video", 403)
 
     artifact_path = _resolve_artifact_path(record, kind)
     if not artifact_path:
@@ -1358,6 +1881,14 @@ routes = [
     Route("/videos/upload", upload_video, methods=["POST"]),
     Route("/videos/{stored_filename}/analysis-jobs", start_analysis_job, methods=["POST"]),
     Route("/videos/{stored_filename}/analysis-jobs/latest", latest_analysis_job, methods=["GET"]),
+    Route("/videos/{stored_filename}/analysis-jobs/history", analysis_job_history, methods=["GET"]),
+    Route("/videos/{stored_filename}/analysis-jobs/cancel", cancel_analysis_job, methods=["POST"]),
+    Route("/videos/{stored_filename}/analysis-jobs/retry", retry_analysis_job, methods=["POST"]),
+    Route("/videos/{stored_filename}/analysis-jobs/rerun", rerun_analysis_job, methods=["POST"]),
+    Route("/videos/{stored_filename}/results", video_result_detail, methods=["GET"]),
+    Route("/videos/{stored_filename}/analysis-frames", list_analysis_frames, methods=["GET"]),
+    Route("/videos/{stored_filename}/analysis-frames/{image_id}", analysis_frame_image, methods=["GET"]),
+    Route("/videos/{stored_filename}/analysis-chart", analysis_chart, methods=["GET"]),
     Route("/videos/{stored_filename}/analysis-artifacts", list_analysis_artifacts, methods=["GET"]),
     Route("/videos/{stored_filename}/analysis-artifacts/{artifact_kind}", download_analysis_artifact, methods=["GET"]),
     Route("/evaluations", list_evaluations, methods=["GET"]),

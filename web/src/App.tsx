@@ -6,15 +6,19 @@ import {
   CheckCircle2,
   ClipboardList,
   Cpu,
+  Download,
   Eye,
   EyeOff,
   FileVideo,
   FlaskConical,
   KeyRound,
+  LineChart,
   LogOut,
+  Maximize2,
   RefreshCw,
   Shield,
   Trash2,
+  X,
   UserPlus,
   UserRound,
   UsersRound,
@@ -25,7 +29,6 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import {
   api,
   ApiError,
-  AnalysisArtifactsResult,
   CreateEvaluationPayload,
   CreateResearchPayload,
   CreateSchedulePayload,
@@ -37,6 +40,12 @@ import {
   ScheduleRecord,
   SymptomRecord,
   AnalysisJob,
+  AnalysisJobOptions,
+  AnalysisChartPreview,
+  AnalysisFrameItem,
+  AnalysisFramesResult,
+  FrameLabel,
+  VideoResultDetail,
   User,
   VideoRecord,
 } from './api';
@@ -52,6 +61,11 @@ type VideoPreview = {
   label: string;
 };
 
+type FocusedFrame = {
+  frame: AnalysisFrameItem;
+  url: string;
+};
+
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
 type AuthMode = 'login' | 'register';
 type ViewId = 'home' | 'videos' | 'patients' | 'symptoms' | 'schedules' | 'research' | 'users';
@@ -64,6 +78,10 @@ const ADMIN_ROLE = 'Quản trị viên';
 
 function canStartAnalysis(role: string) {
   return role === ADMIN_ROLE || role === RESEARCHER_ROLE;
+}
+
+function canViewClinicalResult(role: string) {
+  return role === ADMIN_ROLE || role === DOCTOR_ROLE;
 }
 
 function canViewSchedules(role: string) {
@@ -216,6 +234,9 @@ function statusClass(value: unknown) {
   if (text.includes('lỗi') || text.includes('fail') || text.includes('hủy')) {
     return 'danger';
   }
+  if (text.includes('near') || text.includes('gần') || text.includes('gan')) {
+    return 'warning';
+  }
   return 'neutral';
 }
 
@@ -237,7 +258,37 @@ function analysisStatusLabel(status: unknown) {
   if (text === 'error') {
     return 'Lỗi';
   }
+  if (text === 'canceled') {
+    return 'Đã hủy';
+  }
   return text || 'Chưa chạy';
+}
+
+function analysisActionLabel(action: unknown) {
+  const text = String(action || '');
+  if (text === 'rerun') {
+    return 'Rerun';
+  }
+  if (text === 'retry') {
+    return 'Retry';
+  }
+  if (text === 'cancel') {
+    return 'Hủy';
+  }
+  return 'Start';
+}
+
+function analysisRunLabel(job: AnalysisJob | null | undefined) {
+  const runId = String(job?.run_id || '');
+  return runId ? runId.replace(/^run_/, '') : 'N/A';
+}
+
+function jobTimeLabel(job: AnalysisJob | null | undefined) {
+  const value = job?.updated_at || job?.heartbeat || job?.start_time;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return new Date(value * 1000).toLocaleString('vi-VN');
+  }
+  return textValue(value);
 }
 
 function fileSizeLabel(size: unknown) {
@@ -257,6 +308,8 @@ function fileSizeLabel(size: unknown) {
 function metricLabel(key: string) {
   const labels: Record<string, string> = {
     do_chinh_xac: 'Độ chính xác',
+    ty_le_tong_the: 'Tỷ lệ tổng thể',
+    ai_accuracy: 'AI accuracy',
     f1_score: 'F1-score',
     mae_tong: 'MAE',
     icc: 'ICC',
@@ -266,6 +319,207 @@ function metricLabel(key: string) {
     tb_goc_khuyu: 'Góc khuỷu TB',
   };
   return labels[key] || key;
+}
+
+function metricValueLabel(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    if (Math.abs(value) <= 1 && value !== 0) {
+      return value.toFixed(2);
+    }
+    return Number.isInteger(value) ? String(value) : value.toFixed(1);
+  }
+  return textValue(value);
+}
+
+function accuracyLabel(value: unknown) {
+  const number = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(number)) {
+    return 'Chưa có';
+  }
+  return `${number.toFixed(1)}%`;
+}
+
+function patientResultMessage(result: VideoResultDetail) {
+  if (!result.ai_detail_allowed && result.report_status.message) {
+    return result.report_status.message;
+  }
+  const doctorResult = textValue(result.summary.doctor_result, result.evaluation?.doctor_result);
+  const plan = textValue(result.summary.doctor_plan, result.evaluation?.plan);
+  if (doctorResult !== 'N/A' && plan !== 'N/A') {
+    return `Bác sĩ đánh giá bài tập: ${doctorResult}. Kế hoạch tiếp theo: ${plan}.`;
+  }
+  if (String(result.summary.status || '').includes('Đã phân tích')) {
+    return 'AI đã phân tích video. Bác sĩ sẽ bổ sung nhận xét lâm sàng khi cần.';
+  }
+  if (result.latest_job?.status === 'processing') {
+    return 'Video đang được phân tích. Bạn có thể quay lại sau vài phút để xem kết quả mới.';
+  }
+  return 'Chưa có kết quả chi tiết cho video này.';
+}
+
+function reportStatusLabel(result: VideoResultDetail) {
+  if (result.report_sent) {
+    const suffix = result.report_status.sent_at ? ` · ${result.report_status.sent_at}` : '';
+    return `Đã gửi báo cáo${suffix}`;
+  }
+  return 'Chờ NCV gửi báo cáo';
+}
+
+function phaseLabel(label: FrameLabel) {
+  const labels: Record<FrameLabel, string> = {
+    ALL: 'Tất cả',
+    G1: 'G1',
+    G2: 'G2',
+    G3: 'G3',
+    PASS: 'PASS',
+    NEAR: 'NEAR',
+    FAIL: 'FAIL',
+  };
+  return labels[label];
+}
+
+function mlConfidenceLabel(value: unknown) {
+  const number = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(number)) {
+    return '';
+  }
+  const percent = number <= 1 ? number * 100 : number;
+  return `${percent.toFixed(0)}%`;
+}
+
+function mlBadgeClass(label: unknown) {
+  const text = String(label || '').toLowerCase();
+  if ((text.includes('đúng') || text.includes('dung')) && !text.includes('gần') && !text.includes('gan')) {
+    return 'success';
+  }
+  if (text.includes('gần') || text.includes('gan') || text.includes('near')) {
+    return 'warning';
+  }
+  if (text.includes('sai') || text.includes('fail')) {
+    return 'danger';
+  }
+  return 'neutral';
+}
+
+function phaseMetricValue(metrics: VideoResultDetail['phase_metrics'] | AnalysisChartPreview['phase_metrics'] | undefined, phase: 'G1' | 'G2' | 'G3', key: 'accuracy' | 'mae' | 'f1' | 'icc') {
+  const value = metrics?.[phase]?.[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function defaultPhaseThreshold(phase: 'G1' | 'G2' | 'G3') {
+  if (phase === 'G1') {
+    return 45;
+  }
+  if (phase === 'G2') {
+    return 30;
+  }
+  return 15;
+}
+
+function metricPercentLabel(value: number | null) {
+  if (value === null) {
+    return 'N/A';
+  }
+  return `${value.toFixed(1)}%`;
+}
+
+const chartSeriesConfig = [
+  { key: 'goc_vai', label: 'Góc vai', color: '#0284c7', dashed: false },
+  { key: 'goc_khuyu', label: 'Góc khuỷu', color: '#059669', dashed: false },
+  { key: 'vai_chuan', label: 'Chuẩn vai', color: '#7c3aed', dashed: true },
+  { key: 'khuyu_chuan', label: 'Chuẩn khuỷu', color: '#dc2626', dashed: true },
+] as const;
+
+type ChartKey = (typeof chartSeriesConfig)[number]['key'];
+
+function chartNumberLabel(value: unknown, suffix = '') {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return `${Number.isInteger(value) ? value : value.toFixed(1)}${suffix}`;
+  }
+  return 'N/A';
+}
+
+function chartPointValue(point: AnalysisChartPreview['series'][number], key: ChartKey) {
+  const value = point[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function chartPath(points: AnalysisChartPreview['series'], key: ChartKey, minY: number, maxY: number, width: number, height: number, pad: number) {
+  const drawableWidth = width - pad * 2;
+  const drawableHeight = height - pad * 2;
+  const range = Math.max(1, maxY - minY);
+  const usablePoints = points
+    .map((point, index) => {
+      const value = chartPointValue(point, key);
+      if (value === null) {
+        return null;
+      }
+      const x = pad + (points.length <= 1 ? 0 : (index / (points.length - 1)) * drawableWidth);
+      const y = pad + ((maxY - value) / range) * drawableHeight;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .filter((value): value is string => Boolean(value));
+  if (!usablePoints.length) {
+    return '';
+  }
+  return `M ${usablePoints.join(' L ')}`;
+}
+
+function AngleChart({ chart }: { chart: AnalysisChartPreview }) {
+  const width = 720;
+  const height = 260;
+  const pad = 34;
+  const visibleSeries = chartSeriesConfig.filter((series) => chart.columns.includes(series.key));
+  const values = chart.series.flatMap((point) =>
+    visibleSeries
+      .map((series) => chartPointValue(point, series.key))
+      .filter((value): value is number => value !== null),
+  );
+  if (!values.length) {
+    return <div className="empty-gallery">Dữ liệu CSV/JSON chưa có cột góc phù hợp để vẽ biểu đồ.</div>;
+  }
+  const minY = Math.min(0, Math.floor(Math.min(...values) / 10) * 10);
+  const maxY = Math.max(180, Math.ceil(Math.max(...values) / 10) * 10);
+  const gridValues = [minY, Math.round((minY + maxY) / 2), maxY];
+  return (
+    <div className="angle-chart-wrap">
+      <svg className="angle-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Biểu đồ góc khớp">
+        <rect x="0" y="0" width={width} height={height} rx="8" />
+        {gridValues.map((value) => {
+          const y = pad + ((maxY - value) / Math.max(1, maxY - minY)) * (height - pad * 2);
+          return (
+            <g key={value}>
+              <line className="chart-grid-line" x1={pad} x2={width - pad} y1={y} y2={y} />
+              <text className="chart-axis-label" x="8" y={y + 4}>
+                {value}°
+              </text>
+            </g>
+          );
+        })}
+        <line className="chart-axis-line" x1={pad} x2={width - pad} y1={height - pad} y2={height - pad} />
+        {visibleSeries.map((series) => {
+          const path = chartPath(chart.series, series.key, minY, maxY, width, height, pad);
+          return path ? (
+            <path
+              className="chart-line"
+              d={path}
+              key={series.key}
+              stroke={series.color}
+              strokeDasharray={series.dashed ? '7 5' : undefined}
+            />
+          ) : null;
+        })}
+      </svg>
+      <div className="chart-legend">
+        {visibleSeries.map((series) => (
+          <span key={series.key}>
+            <i style={{ background: series.color }} />
+            {series.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 type TableColumn<T extends RecordLike> = {
@@ -347,18 +601,36 @@ export function App() {
   const [previewState, setPreviewState] = useState<LoadState>('idle');
   const [previewTargetKey, setPreviewTargetKey] = useState('');
   const [analysisJobs, setAnalysisJobs] = useState<Record<string, AnalysisJob | null>>({});
+  const [analysisHistories, setAnalysisHistories] = useState<Record<string, AnalysisJob[]>>({});
+  const [analysisOptions, setAnalysisOptions] = useState<AnalysisJobOptions>({
+    model_type: 'MediaPipe Heavy',
+    skip_step: 0,
+    resize_width: 720,
+    min_confidence: 0.5,
+  });
   const [analysisState, setAnalysisState] = useState<LoadState>('idle');
   const [analysisTargetKey, setAnalysisTargetKey] = useState('');
   const [artifactState, setArtifactState] = useState<LoadState>('idle');
   const [artifactTargetKey, setArtifactTargetKey] = useState('');
   const [artifactMessage, setArtifactMessage] = useState('');
-  const [analysisArtifacts, setAnalysisArtifacts] = useState<AnalysisArtifactsResult | null>(null);
+  const [selectedResult, setSelectedResult] = useState<VideoResultDetail | null>(null);
+  const [framesState, setFramesState] = useState<LoadState>('idle');
+  const [framesMessage, setFramesMessage] = useState('');
+  const [framesPage, setFramesPage] = useState(1);
+  const [framesLabel, setFramesLabel] = useState<FrameLabel>('ALL');
+  const [analysisFrames, setAnalysisFrames] = useState<AnalysisFramesResult | null>(null);
+  const [frameImageUrls, setFrameImageUrls] = useState<Record<string, string>>({});
+  const [focusedFrame, setFocusedFrame] = useState<FocusedFrame | null>(null);
+  const [chartState, setChartState] = useState<LoadState>('idle');
+  const [chartMessage, setChartMessage] = useState('');
+  const [analysisChart, setAnalysisChart] = useState<AnalysisChartPreview | null>(null);
   const [videoPreview, setVideoPreview] = useState<VideoPreview | null>(null);
   const [message, setMessage] = useState('');
   const [formMessage, setFormMessage] = useState('');
   const [previewMessage, setPreviewMessage] = useState('');
   const [analysisMessage, setAnalysisMessage] = useState('');
   const previewUrlRef = useRef<string | null>(null);
+  const frameUrlMapRef = useRef<Record<string, string>>({});
   const completedAnalysisRefreshRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -376,6 +648,7 @@ export function App() {
     window.localStorage.removeItem('rehab_token');
     window.localStorage.removeItem('rehab_user');
     clearVideoPreview();
+    resetFrameGallery();
     setSession(null);
     setVideos([]);
     setEvaluations([]);
@@ -385,15 +658,45 @@ export function App() {
     setSchedules([]);
     setResearchRecords([]);
     setAnalysisJobs({});
+    setAnalysisHistories({});
     setAnalysisState('idle');
     setAnalysisTargetKey('');
     setAnalysisMessage('');
     setArtifactState('idle');
     setArtifactTargetKey('');
     setArtifactMessage('');
-    setAnalysisArtifacts(null);
+    setSelectedResult(null);
+    resetChartPreview();
     completedAnalysisRefreshRef.current.clear();
     setMessage(nextMessage);
+  }
+
+  function clearFrameImages() {
+    Object.values(frameUrlMapRef.current).forEach((url) => URL.revokeObjectURL(url));
+    frameUrlMapRef.current = {};
+    setFrameImageUrls({});
+  }
+
+  function resetFrameGallery() {
+    setFocusedFrame(null);
+    clearFrameImages();
+    setFramesState('idle');
+    setFramesMessage('');
+    setFramesPage(1);
+    setFramesLabel('ALL');
+    setAnalysisFrames(null);
+  }
+
+  function resetChartPreview() {
+    setChartState('idle');
+    setChartMessage('');
+    setAnalysisChart(null);
+  }
+
+  function clearSelectedResult() {
+    setSelectedResult(null);
+    resetFrameGallery();
+    resetChartPreview();
   }
 
   async function loadDashboard(nextSession = session) {
@@ -804,6 +1107,15 @@ export function App() {
     }
   }
 
+  function selectedAnalysisOptions(): AnalysisJobOptions {
+    return {
+      model_type: analysisOptions.model_type,
+      skip_step: Math.max(0, Math.min(30, Number(analysisOptions.skip_step) || 0)),
+      resize_width: Math.max(240, Math.min(2160, Number(analysisOptions.resize_width) || 720)),
+      min_confidence: Math.max(0.1, Math.min(0.95, Number(analysisOptions.min_confidence) || 0.5)),
+    };
+  }
+
   async function handleStartAnalysis(video: VideoRecord, index: number) {
     if (!session) {
       return;
@@ -819,7 +1131,7 @@ export function App() {
     setAnalysisTargetKey(key);
     setAnalysisMessage('');
     try {
-      const result = await api.startAnalysisJob(session.token, mediaFilename);
+      const result = await api.startAnalysisJob(session.token, mediaFilename, selectedAnalysisOptions());
       if (result.job?.job_id) {
         completedAnalysisRefreshRef.current.delete(result.job.job_id);
       }
@@ -833,6 +1145,125 @@ export function App() {
         return;
       }
       setAnalysisMessage(error instanceof Error ? error.message : 'Không tạo được job phân tích.');
+    }
+  }
+
+  async function handleRerunAnalysis(video: VideoRecord, index: number) {
+    if (!session) {
+      return;
+    }
+    const mediaFilename = mediaFilenameForVideo(video);
+    if (!mediaFilename) {
+      setAnalysisState('error');
+      setAnalysisMessage('Video này chưa có file media để chạy lại.');
+      return;
+    }
+    const key = videoKey(video, index);
+    setAnalysisState('loading');
+    setAnalysisTargetKey(key);
+    setAnalysisMessage('');
+    try {
+      const result = await api.rerunAnalysisJob(session.token, mediaFilename, selectedAnalysisOptions());
+      if (result.job?.job_id) {
+        completedAnalysisRefreshRef.current.delete(result.job.job_id);
+      }
+      setAnalysisJobs((current) => ({ ...current, [key]: result.job }));
+      setAnalysisState('ready');
+      setAnalysisMessage('Đã tạo job chạy lại với cấu hình model hiện tại.');
+    } catch (error) {
+      setAnalysisState('error');
+      if (error instanceof ApiError && error.status === 401) {
+        clearLocalSession('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+        return;
+      }
+      setAnalysisMessage(error instanceof Error ? error.message : 'Không chạy lại được job phân tích.');
+    }
+  }
+
+  async function handleRetryAnalysis(video: VideoRecord, index: number) {
+    if (!session) {
+      return;
+    }
+    const mediaFilename = mediaFilenameForVideo(video);
+    if (!mediaFilename) {
+      setAnalysisState('error');
+      setAnalysisMessage('Video này chưa có file media để retry.');
+      return;
+    }
+    const key = videoKey(video, index);
+    setAnalysisState('loading');
+    setAnalysisTargetKey(key);
+    setAnalysisMessage('');
+    try {
+      const result = await api.retryAnalysisJob(session.token, mediaFilename);
+      if (result.job?.job_id) {
+        completedAnalysisRefreshRef.current.delete(result.job.job_id);
+      }
+      setAnalysisJobs((current) => ({ ...current, [key]: result.job }));
+      setAnalysisState('ready');
+      setAnalysisMessage('Đã retry job phân tích với cấu hình lần chạy gần nhất.');
+    } catch (error) {
+      setAnalysisState('error');
+      if (error instanceof ApiError && error.status === 401) {
+        clearLocalSession('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+        return;
+      }
+      setAnalysisMessage(error instanceof Error ? error.message : 'Không retry được job phân tích.');
+    }
+  }
+
+  async function handleCancelAnalysis(video: VideoRecord, index: number) {
+    if (!session) {
+      return;
+    }
+    const mediaFilename = mediaFilenameForVideo(video);
+    if (!mediaFilename) {
+      setAnalysisState('error');
+      setAnalysisMessage('Video này chưa có file media để hủy job.');
+      return;
+    }
+    const key = videoKey(video, index);
+    setAnalysisState('loading');
+    setAnalysisTargetKey(key);
+    setAnalysisMessage('');
+    try {
+      const result = await api.cancelAnalysisJob(session.token, mediaFilename);
+      setAnalysisJobs((current) => ({ ...current, [key]: result.job }));
+      setAnalysisState('ready');
+      setAnalysisMessage(result.ok ? 'Đã hủy job phân tích.' : 'Không có job đang chạy để hủy.');
+    } catch (error) {
+      setAnalysisState('error');
+      if (error instanceof ApiError && error.status === 401) {
+        clearLocalSession('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+        return;
+      }
+      setAnalysisMessage(error instanceof Error ? error.message : 'Không hủy được job phân tích.');
+    }
+  }
+
+  async function handleLoadAnalysisHistory(video: VideoRecord, index: number) {
+    if (!session) {
+      return;
+    }
+    const mediaFilename = mediaFilenameForVideo(video);
+    if (!mediaFilename) {
+      return;
+    }
+    const key = videoKey(video, index);
+    setAnalysisState('loading');
+    setAnalysisTargetKey(key);
+    setAnalysisMessage('');
+    try {
+      const result = await api.analysisJobHistory(session.token, mediaFilename);
+      setAnalysisHistories((current) => ({ ...current, [key]: result.items }));
+      setAnalysisState('ready');
+    } catch (error) {
+      setAnalysisState('error');
+      if (error instanceof ApiError && error.status === 401) {
+        clearLocalSession('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+        return;
+      }
+      setAnalysisMessage(error instanceof Error ? error.message : 'Không tải được lịch sử job.');
     }
   }
 
@@ -872,10 +1303,16 @@ export function App() {
     setArtifactTargetKey(key);
     setArtifactMessage('');
     try {
-      const result = await api.analysisArtifacts(session.token, mediaFilename);
-      setAnalysisArtifacts(result);
+      const result = await api.videoResult(session.token, mediaFilename);
+      setSelectedResult(result);
+      resetFrameGallery();
+      resetChartPreview();
       setArtifactState('ready');
       setArtifactMessage('');
+      if (result.ai_detail_allowed) {
+        void loadAnalysisFrames(result.video.stored_filename, 1, 'ALL');
+        void loadAnalysisChart(result.video.stored_filename, 'ALL');
+      }
     } catch (error) {
       setArtifactState('error');
       if (error instanceof ApiError && error.status === 401) {
@@ -886,14 +1323,110 @@ export function App() {
     }
   }
 
+  async function loadAnalysisChart(storedFilename: string, label: FrameLabel = framesLabel) {
+    if (!session) {
+      return;
+    }
+    setChartState('loading');
+    setChartMessage('');
+    try {
+      const chart = await api.analysisChart(session.token, storedFilename, label);
+      setAnalysisChart(chart);
+      setChartState('ready');
+    } catch (error) {
+      setAnalysisChart(null);
+      if (error instanceof ApiError && error.status === 401) {
+        clearLocalSession('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+        return;
+      }
+      if (error instanceof ApiError && error.status === 404) {
+        setChartState('idle');
+        setChartMessage('');
+        return;
+      }
+      setChartState('error');
+      setChartMessage(error instanceof Error ? error.message : 'Không tải được dữ liệu biểu đồ.');
+    }
+  }
+
+  async function loadAnalysisFrames(storedFilename: string, page = framesPage, label = framesLabel) {
+    if (!session) {
+      return;
+    }
+    setFramesState('loading');
+    setFramesMessage('');
+    try {
+      const result = await api.analysisFrames(session.token, storedFilename, {
+        page,
+        pageSize: 12,
+        label,
+      });
+      clearFrameImages();
+      const imageEntries = await Promise.all(
+        result.items
+          .filter((item) => item.has_image && item.image_id)
+          .map(async (item) => {
+            try {
+              const blob = await api.analysisFrameBlob(session.token, storedFilename, item.image_id);
+              return [item.image_id, URL.createObjectURL(blob)] as const;
+            } catch {
+              return null;
+            }
+          }),
+      );
+      const nextUrls = Object.fromEntries(imageEntries.filter((entry): entry is readonly [string, string] => Boolean(entry)));
+      frameUrlMapRef.current = nextUrls;
+      setFrameImageUrls(nextUrls);
+      setFocusedFrame(null);
+      setAnalysisFrames(result);
+      setFramesPage(result.pagination.page);
+      setFramesLabel(result.filter);
+      setFramesState('ready');
+    } catch (error) {
+      clearFrameImages();
+      setFramesState('error');
+      if (error instanceof ApiError && error.status === 401) {
+        clearLocalSession('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+        return;
+      }
+      setFramesMessage(error instanceof Error ? error.message : 'Không tải được gallery frame.');
+    }
+  }
+
+  function handleFrameLabelChange(nextLabel: FrameLabel) {
+    setFramesLabel(nextLabel);
+    setFramesPage(1);
+    if (selectedResult?.video.stored_filename) {
+      void loadAnalysisFrames(selectedResult.video.stored_filename, 1, nextLabel);
+      void loadAnalysisChart(selectedResult.video.stored_filename, nextLabel);
+    }
+  }
+
+  function handleFramePageChange(nextPage: number) {
+    if (!selectedResult?.video.stored_filename || !analysisFrames) {
+      return;
+    }
+    const boundedPage = Math.max(1, Math.min(analysisFrames.pagination.total_pages, nextPage));
+    setFramesPage(boundedPage);
+    void loadAnalysisFrames(selectedResult.video.stored_filename, boundedPage, framesLabel);
+  }
+
+  function openFocusedFrame(frame: AnalysisFrameItem) {
+    const url = frame.image_id ? frameImageUrls[frame.image_id] : '';
+    if (!url) {
+      return;
+    }
+    setFocusedFrame({ frame, url });
+  }
+
   async function handleDownloadArtifact(kind: string, filename: string) {
-    if (!session || !analysisArtifacts?.video.stored_filename) {
+    if (!session || !selectedResult?.video.stored_filename) {
       return;
     }
     setArtifactState('loading');
     setArtifactMessage('');
     try {
-      const blob = await api.artifactBlob(session.token, analysisArtifacts.video.stored_filename, kind);
+      const blob = await api.artifactBlob(session.token, selectedResult.video.stored_filename, kind);
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -985,6 +1518,8 @@ export function App() {
         URL.revokeObjectURL(previewUrlRef.current);
         previewUrlRef.current = null;
       }
+      Object.values(frameUrlMapRef.current).forEach((url) => URL.revokeObjectURL(url));
+      frameUrlMapRef.current = {};
     };
   }, []);
 
@@ -1276,30 +1811,81 @@ export function App() {
       render: (video, index) => {
         const key = videoKey(video, index);
         const job = analysisJobs[key];
+        const history = analysisHistories[key] || [];
         const progress = Math.round(Math.max(0, Math.min(1, job?.progress ?? 0)) * 100);
         const isLoading = analysisState === 'loading' && analysisTargetKey === key;
         const hasMedia = Boolean(mediaFilenameForVideo(video));
+        const isProcessing = job?.status === 'processing';
+        const canRetry = Boolean(job && job.status !== 'processing');
         return (
           <div className="analysis-cell">
             <div className="analysis-status">
               <span className={`pill ${statusClass(job?.status || video.status)}`}>{analysisStatusLabel(job?.status)}</span>
               <span>{job ? `${progress}%` : 'N/A'}</span>
             </div>
+            {job ? (
+              <div className="analysis-meta">
+                <span>{analysisActionLabel(job.job_meta?.action)}</span>
+                <span>{analysisRunLabel(job)}</span>
+                <span>{textValue(job.job_meta?.options?.model_type)}</span>
+              </div>
+            ) : null}
             <div className="progress-track" aria-label="Tiến độ phân tích">
               <span className={`progress-fill ${statusClass(job?.status)}`} style={{ width: `${job ? progress : 0}%` }} />
             </div>
+            {job?.steps?.length ? (
+              <div className="analysis-steps" aria-label="Bốn bước xử lý AI">
+                {job.steps.map((step) => (
+                  <span className={step.status} key={step.key} title={step.label}>
+                    {step.label}
+                  </span>
+                ))}
+              </div>
+            ) : null}
             <div className="analysis-actions">
               {canStartAnalysis(session.user.role) ? (
-                <button
-                  className="table-action"
-                  onClick={() => void handleStartAnalysis(video, index)}
-                  disabled={!hasMedia || isLoading || job?.status === 'processing'}
-                  title={hasMedia ? 'Bắt đầu phân tích AI' : 'Chưa có file media'}
-                  type="button"
-                >
-                  {isLoading ? <RefreshCw className="spin" size={16} /> : <Cpu size={16} />}
-                  Chạy
-                </button>
+                <>
+                  <button
+                    className="table-action"
+                    onClick={() => void handleStartAnalysis(video, index)}
+                    disabled={!hasMedia || isLoading || isProcessing}
+                    title={hasMedia ? 'Bắt đầu phân tích AI' : 'Chưa có file media'}
+                    type="button"
+                  >
+                    {isLoading ? <RefreshCw className="spin" size={16} /> : <Cpu size={16} />}
+                    Chạy
+                  </button>
+                  <button
+                    className="table-action muted-action"
+                    onClick={() => void handleRerunAnalysis(video, index)}
+                    disabled={!hasMedia || isLoading || isProcessing}
+                    title={hasMedia ? 'Chạy lại với cấu hình model hiện tại' : 'Chưa có file media'}
+                    type="button"
+                  >
+                    <Cpu size={16} />
+                    Rerun
+                  </button>
+                  <button
+                    className="table-action muted-action"
+                    onClick={() => void handleRetryAnalysis(video, index)}
+                    disabled={!hasMedia || isLoading || !canRetry}
+                    title={hasMedia ? 'Retry với cấu hình lần chạy gần nhất' : 'Chưa có file media'}
+                    type="button"
+                  >
+                    <RefreshCw size={16} />
+                    Retry
+                  </button>
+                  <button
+                    className="table-action danger-action"
+                    onClick={() => void handleCancelAnalysis(video, index)}
+                    disabled={!hasMedia || isLoading || !isProcessing}
+                    title={hasMedia ? 'Hủy job đang chạy' : 'Chưa có file media'}
+                    type="button"
+                  >
+                    <X size={16} />
+                    Hủy
+                  </button>
+                </>
               ) : null}
               <button
                 className="table-action muted-action"
@@ -1311,7 +1897,30 @@ export function App() {
                 <RefreshCw className={isLoading ? 'spin' : ''} size={16} />
                 Cập nhật
               </button>
+              <button
+                className="table-action muted-action"
+                onClick={() => void handleLoadAnalysisHistory(video, index)}
+                disabled={!hasMedia || isLoading}
+                title={hasMedia ? 'Xem lịch sử job' : 'Chưa có file media'}
+                type="button"
+              >
+                <ClipboardList size={16} />
+                History
+              </button>
             </div>
+            {history.length ? (
+              <div className="analysis-history">
+                {history.slice(-3).map((item) => (
+                  <div key={item.run_id || `${item.job_id}-${item.start_time}`}>
+                    <span className={`pill ${statusClass(item.status)}`}>{analysisStatusLabel(item.status)}</span>
+                    <strong>{analysisActionLabel(item.job_meta?.action)}</strong>
+                    <small>
+                      {textValue(item.job_meta?.options?.model_type)} · {jobTimeLabel(item)}
+                    </small>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
         );
       },
@@ -1610,6 +2219,84 @@ export function App() {
                 ) : null}
               </div>
             </form>
+          ) : null}
+
+          {activeView === 'videos' && canStartAnalysis(session.user.role) ? (
+            <section className="analysis-config-panel" aria-label="Cấu hình phân tích AI">
+              <div className="analysis-config-title">
+                <Cpu size={18} />
+                <div>
+                  <h3>Cấu hình job AI</h3>
+                  <span>Áp dụng cho nút Chạy/Rerun trong bảng video</span>
+                </div>
+              </div>
+              <div className="analysis-config-grid">
+                <label>
+                  Model
+                  <select
+                    value={analysisOptions.model_type}
+                    onChange={(event) =>
+                      setAnalysisOptions((current) => ({
+                        ...current,
+                        model_type: event.target.value as AnalysisJobOptions['model_type'],
+                      }))
+                    }
+                  >
+                    <option value="MediaPipe Heavy">MediaPipe Heavy</option>
+                    <option value="MediaPipe Full">MediaPipe Full</option>
+                    <option value="MediaPipe Lite">MediaPipe Lite</option>
+                  </select>
+                </label>
+                <label>
+                  Skip step
+                  <input
+                    type="number"
+                    min="0"
+                    max="30"
+                    value={analysisOptions.skip_step}
+                    onChange={(event) =>
+                      setAnalysisOptions((current) => ({
+                        ...current,
+                        skip_step: Number(event.target.value),
+                      }))
+                    }
+                  />
+                </label>
+                <label>
+                  Resize width
+                  <input
+                    type="number"
+                    min="240"
+                    max="2160"
+                    step="80"
+                    value={analysisOptions.resize_width}
+                    onChange={(event) =>
+                      setAnalysisOptions((current) => ({
+                        ...current,
+                        resize_width: Number(event.target.value),
+                      }))
+                    }
+                  />
+                </label>
+                <label>
+                  Confidence
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="0.95"
+                    step="0.05"
+                    value={analysisOptions.min_confidence}
+                    onChange={(event) =>
+                      setAnalysisOptions((current) => ({
+                        ...current,
+                        min_confidence: Number(event.target.value),
+                      }))
+                    }
+                  />
+                  <strong>{Math.round(analysisOptions.min_confidence * 100)}%</strong>
+                </label>
+              </div>
+            </section>
           ) : null}
 
           {activeView === 'symptoms' && session.user.role === PATIENT_ROLE ? (
@@ -1931,36 +2618,345 @@ export function App() {
             </div>
           ) : null}
 
-          {activeView === 'videos' && analysisArtifacts ? (
-            <div className="artifact-panel">
+          {activeView === 'videos' && selectedResult ? (
+            <div className="result-panel">
               <div className="subpanel-header">
                 <div>
-                  <h3>Kết quả phân tích</h3>
+                  <h3>Kết quả chi tiết</h3>
                   <span>
-                    {analysisArtifacts.video.video_name} - {textValue(analysisArtifacts.video.exercise)}
+                    {selectedResult.video.video_name} - {textValue(selectedResult.video.exercise)}
                   </span>
                 </div>
-                <button className="table-action muted-action" onClick={() => setAnalysisArtifacts(null)} type="button">
+                <button className="table-action muted-action" onClick={clearSelectedResult} type="button">
                   <EyeOff size={16} />
                   Ẩn
                 </button>
               </div>
-              <div className="artifact-metrics">
-                {Object.entries(analysisArtifacts.metrics).slice(0, 8).map(([key, value]) => (
-                  <div className="artifact-metric" key={key}>
-                    <span>{metricLabel(key)}</span>
-                    <strong>{textValue(value)}</strong>
+
+              <div className="result-summary-grid">
+                <div className="result-summary primary">
+                  <span>{session.user.role === PATIENT_ROLE ? 'Dành cho bệnh nhân' : 'Tóm tắt'}</span>
+                  <strong>{patientResultMessage(selectedResult)}</strong>
+                  {selectedResult.summary.doctor_comment ? <p>{selectedResult.summary.doctor_comment}</p> : null}
+                </div>
+                <div className="result-summary">
+                  <span>AI</span>
+                  <strong>{selectedResult.ai_detail_allowed ? accuracyLabel(selectedResult.summary.accuracy) : 'Đang chờ'}</strong>
+                  <p>{reportStatusLabel(selectedResult)}</p>
+                </div>
+                <div className="result-summary">
+                  <span>Bác sĩ</span>
+                  <strong>{textValue(selectedResult.summary.doctor_result, selectedResult.evaluation?.doctor_result)}</strong>
+                  <p>{textValue(selectedResult.summary.doctor_plan, selectedResult.evaluation?.plan)}</p>
+                </div>
+              </div>
+
+              <div className="result-sections">
+                <section className="result-section">
+                  <div className="section-title">
+                    <ClipboardList size={16} />
+                    <h4>Nhận xét lâm sàng</h4>
                   </div>
-                ))}
-                {!Object.keys(analysisArtifacts.metrics).length ? (
-                  <div className="artifact-metric">
-                    <span>Accuracy</span>
-                    <strong>{textValue(analysisArtifacts.video.accuracy)}</strong>
+                  {selectedResult.evaluation ? (
+                    <div className="clinical-notes">
+                      <div>
+                        <span>Kết quả</span>
+                        <strong>{textValue(selectedResult.evaluation.doctor_result)}</strong>
+                      </div>
+                      <div>
+                        <span>Kế hoạch</span>
+                        <strong>{textValue(selectedResult.evaluation.plan)}</strong>
+                      </div>
+                      <div>
+                        <span>Lỗi cần chú ý</span>
+                        <strong>{selectedResult.evaluation.errors?.length ? selectedResult.evaluation.errors.join(', ') : 'Chưa ghi nhận'}</strong>
+                      </div>
+                      <p>{textValue(selectedResult.evaluation.comments)}</p>
+                      {canViewClinicalResult(session.user.role) && selectedResult.evaluation.comments_ncv ? (
+                        <p className="clinical-private">{selectedResult.evaluation.comments_ncv}</p>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <p className="muted">Chưa có nhận xét bác sĩ cho video này.</p>
+                  )}
+                </section>
+
+                <section className="result-section">
+                  <div className="section-title">
+                    <Cpu size={16} />
+                    <h4>Chỉ số AI</h4>
+                  </div>
+                  {!selectedResult.ai_detail_allowed ? (
+                    <div className="empty-gallery">{selectedResult.report_status.message || 'NCV chưa gửi báo cáo AI chính thức.'}</div>
+                  ) : (
+                    <>
+                      <div className="artifact-metrics">
+                        {Object.entries(selectedResult.metrics).slice(0, 8).map(([key, value]) => (
+                          <div className="artifact-metric" key={key}>
+                            <span>{metricLabel(key)}</span>
+                            <strong>{metricValueLabel(value)}</strong>
+                          </div>
+                        ))}
+                        {!Object.keys(selectedResult.metrics).length ? (
+                          <div className="artifact-metric">
+                            <span>Accuracy</span>
+                            <strong>{accuracyLabel(selectedResult.video.accuracy)}</strong>
+                          </div>
+                        ) : null}
+                      </div>
+                      <div className="phase-metric-grid">
+                        {(['G1', 'G2', 'G3'] as const).map((phase) => (
+                          <div className="phase-metric-card" key={phase}>
+                            <span>{phase} ±{selectedResult.phase_metrics?.[phase]?.threshold ?? defaultPhaseThreshold(phase)}°</span>
+                            <strong>{metricPercentLabel(phaseMetricValue(selectedResult.phase_metrics, phase, 'accuracy'))}</strong>
+                            <small>
+                              MAE {chartNumberLabel(phaseMetricValue(selectedResult.phase_metrics, phase, 'mae'), '°')} · F1{' '}
+                              {chartNumberLabel(phaseMetricValue(selectedResult.phase_metrics, phase, 'f1'))} · ICC{' '}
+                              {chartNumberLabel(phaseMetricValue(selectedResult.phase_metrics, phase, 'icc'))}
+                            </small>
+                          </div>
+                        ))}
+                      </div>
+                      {selectedResult.latest_job?.status_msg || selectedResult.latest_job?.error_msg ? (
+                        <p className={selectedResult.latest_job.status === 'error' ? 'danger-text' : 'muted'}>
+                          {textValue(selectedResult.latest_job.status_msg, selectedResult.latest_job.error_msg)}
+                        </p>
+                      ) : null}
+                    </>
+                  )}
+                </section>
+              </div>
+
+              {selectedResult.ai_detail_allowed ? (
+              <section className="chart-panel">
+                <div className="subpanel-header">
+                  <div>
+                    <h3>Biểu đồ góc khớp</h3>
+                    <span>
+                      {analysisChart
+                        ? `${analysisChart.source_label} · ${analysisChart.sampled_rows}/${analysisChart.filtered_rows} điểm (${phaseLabel(analysisChart.filter)})`
+                        : 'Preview từ CSV hoặc JSON frame'}
+                    </span>
+                  </div>
+                  <LineChart size={18} />
+                </div>
+                {chartState === 'loading' ? (
+                  <div className="status-line">
+                    <RefreshCw className="spin" size={16} />
+                    Đang tải dữ liệu biểu đồ...
                   </div>
                 ) : null}
+                {chartState === 'error' ? <div className="alert inline">{chartMessage}</div> : null}
+                {analysisChart ? (
+                  <>
+                    <div className="chart-summary">
+                      <div>
+                        <span>Góc vai TB</span>
+                        <strong>{chartNumberLabel(analysisChart.summary.series.goc_vai?.avg, '°')}</strong>
+                      </div>
+                      <div>
+                        <span>Góc khuỷu TB</span>
+                        <strong>{chartNumberLabel(analysisChart.summary.series.goc_khuyu?.avg, '°')}</strong>
+                      </div>
+                      <div>
+                        <span>PASS</span>
+                        <strong>{analysisChart.summary.labels.PASS}</strong>
+                      </div>
+                      <div>
+                        <span>NEAR/FAIL</span>
+                        <strong>
+                          {analysisChart.summary.labels.NEAR}/{analysisChart.summary.labels.FAIL}
+                        </strong>
+                      </div>
+                    </div>
+                    {analysisChart.phase_summary?.phases ? (
+                      <div className="phase-summary-grid">
+                        {(['G1', 'G2', 'G3'] as const).map((phase) => {
+                          const phaseSummary = analysisChart.phase_summary?.phases[phase];
+                          return (
+                            <div key={phase}>
+                              <span>{phase} ±{phaseSummary?.threshold ?? 'N/A'}°</span>
+                              <strong>
+                                {phaseSummary?.PASS ?? 0}/{phaseSummary?.total ?? 0} PASS
+                              </strong>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                    <AngleChart chart={analysisChart} />
+                  </>
+                ) : chartState !== 'loading' && chartState !== 'error' ? (
+                  <div className="empty-gallery">Chưa có CSV/JSON đủ dữ liệu để preview biểu đồ.</div>
+                ) : null}
+              </section>
+              ) : null}
+
+              <div className="timeline-list">
+                {selectedResult.timeline.map((item, index) => (
+                  <div className="timeline-item" key={`${item.kind}-${index}`}>
+                    <span className={`pill ${statusClass(item.status)}`}>{textValue(item.status, item.label)}</span>
+                    <div>
+                      <strong>{item.label}</strong>
+                      <p>{textValue(item.detail)}</p>
+                    </div>
+                    <time>{textValue(item.time)}</time>
+                  </div>
+                ))}
               </div>
+
+              {selectedResult.ai_detail_allowed ? (
+              <section className="frame-gallery">
+                <div className="subpanel-header">
+                  <div>
+                    <h3>Frame PASS / NEAR / FAIL</h3>
+                    <span>
+                      {analysisFrames
+                        ? `${analysisFrames.pagination.total} frame trong bộ lọc`
+                        : 'Dữ liệu frame tải theo trang'}
+                    </span>
+                  </div>
+                  <div className="segmented-control frame-filter" aria-label="Lọc frame">
+                    {(['ALL', 'G1', 'G2', 'G3', 'PASS', 'NEAR', 'FAIL'] as FrameLabel[]).map((label) => (
+                      <button
+                        className={framesLabel === label ? 'active' : ''}
+                        key={label}
+                        onClick={() => handleFrameLabelChange(label)}
+                        type="button"
+                      >
+                        {phaseLabel(label)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {analysisFrames ? (
+                  <div className="frame-summary">
+                    <div>
+                      <span>Tổng</span>
+                      <strong>{analysisFrames.summary.total}</strong>
+                    </div>
+                    <div>
+                      <span>PASS</span>
+                      <strong>{analysisFrames.summary.PASS}</strong>
+                    </div>
+                    <div>
+                      <span>NEAR</span>
+                      <strong>{analysisFrames.summary.NEAR}</strong>
+                    </div>
+                    <div>
+                      <span>FAIL</span>
+                      <strong>{analysisFrames.summary.FAIL}</strong>
+                    </div>
+                  </div>
+                ) : null}
+                {analysisFrames?.summary.phases ? (
+                  <div className="phase-summary-grid">
+                    {(['G1', 'G2', 'G3'] as const).map((phase) => {
+                      const phaseSummary = analysisFrames.summary.phases?.[phase];
+                      return (
+                        <div key={phase}>
+                          <span>{phase} ±{phaseSummary?.threshold ?? 'N/A'}°</span>
+                          <strong>
+                            {phaseSummary?.PASS ?? 0}/{phaseSummary?.total ?? 0} PASS
+                          </strong>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
+
+                {framesState === 'loading' ? (
+                  <div className="status-line">
+                    <RefreshCw className="spin" size={16} />
+                    Đang tải frame...
+                  </div>
+                ) : null}
+                {framesState === 'error' ? <div className="alert inline">{framesMessage}</div> : null}
+
+                {analysisFrames && !analysisFrames.items.length && framesState !== 'loading' ? (
+                  <div className="empty-gallery">Chưa có frame phù hợp hoặc artifact frame chưa sẵn sàng.</div>
+                ) : null}
+
+                {analysisFrames?.items.length ? (
+                  <>
+                    <div className="frame-grid">
+                      {analysisFrames.items.map((frame) => (
+                        <article className="frame-card" key={`${frame.image_id || 'frame'}-${frame.index}`}>
+                          <div className="frame-card-top">
+                            <span>#{frame.index}</span>
+                            <span className="frame-card-badges">
+                              <span className={`pill ${statusClass(frame.label)}`}>{frame.phase ? `${frame.phase} · ${frame.label}` : frame.label}</span>
+                              {frame.ml ? (
+                                <span className={`pill ${mlBadgeClass(frame.ml.label_text || frame.ml.label)}`}>
+                                  ML · {textValue(frame.ml.label_text, frame.ml.label)}
+                                  {frame.ml.confidence !== undefined && frame.ml.confidence !== null ? ` ${mlConfidenceLabel(frame.ml.confidence)}` : ''}
+                                </span>
+                              ) : null}
+                            </span>
+                          </div>
+                          <div className="frame-image-wrap">
+                            {frame.image_id && frameImageUrls[frame.image_id] ? (
+                              <button
+                                aria-label={`Xem lớn frame ${frame.index}`}
+                                className="frame-image-button"
+                                onClick={() => openFocusedFrame(frame)}
+                                title="Xem frame lớn"
+                                type="button"
+                              >
+                                <img alt={`Frame ${frame.index} ${frame.label}`} src={frameImageUrls[frame.image_id]} />
+                                <span>
+                                  <Maximize2 size={16} />
+                                </span>
+                              </button>
+                            ) : (
+                              <span>Không có ảnh</span>
+                            )}
+                          </div>
+                          <div className="frame-meta">
+                            <span>
+                              {textValue(frame.timestamp)} · REF ±{textValue(frame.phase_threshold)}°
+                            </span>
+                            <strong>
+                              Vai {textValue(frame.goc_vai, frame.goc_vai_trai, frame.goc_vai_phai)} / Khuỷu{' '}
+                              {textValue(frame.goc_khuyu, frame.goc_khuyu_trai, frame.goc_khuyu_phai)}
+                            </strong>
+                            <span>
+                              Δ vai {textValue(frame.shoulder_delta)}° / Δ khuỷu {textValue(frame.elbow_delta)}°
+                            </span>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                    <div className="pager">
+                      <button
+                        className="table-action muted-action"
+                        disabled={framesState === 'loading' || analysisFrames.pagination.page <= 1}
+                        onClick={() => handleFramePageChange(framesPage - 1)}
+                        type="button"
+                      >
+                        Trước
+                      </button>
+                      <span>
+                        Trang {analysisFrames.pagination.page}/{analysisFrames.pagination.total_pages}
+                      </span>
+                      <button
+                        className="table-action muted-action"
+                        disabled={framesState === 'loading' || analysisFrames.pagination.page >= analysisFrames.pagination.total_pages}
+                        onClick={() => handleFramePageChange(framesPage + 1)}
+                        type="button"
+                      >
+                        Sau
+                      </button>
+                    </div>
+                  </>
+                ) : null}
+              </section>
+              ) : null}
+
+              {selectedResult.ai_detail_allowed ? (
               <div className="artifact-grid">
-                {analysisArtifacts.items.map((item) => (
+                {selectedResult.artifacts.map((item) => (
                   <div className={`artifact-item ${item.available ? '' : 'disabled'}`} key={item.kind}>
                     <div>
                       <strong>{item.label}</strong>
@@ -1972,12 +2968,38 @@ export function App() {
                       onClick={() => void handleDownloadArtifact(item.kind, item.filename)}
                       type="button"
                     >
-                      {artifactState === 'loading' ? <RefreshCw className="spin" size={16} /> : <FileVideo size={16} />}
+                      {artifactState === 'loading' ? <RefreshCw className="spin" size={16} /> : <Download size={16} />}
                       Tải
                     </button>
                   </div>
                 ))}
               </div>
+              ) : null}
+
+              {focusedFrame ? (
+                <div className="modal-backdrop" role="presentation" onClick={() => setFocusedFrame(null)}>
+                  <div className="frame-modal" role="dialog" aria-modal="true" aria-label={`Frame ${focusedFrame.frame.index}`} onClick={(event) => event.stopPropagation()}>
+                    <div className="preview-header">
+                      <span className="video-name">
+                        <FileVideo size={16} />
+                        Frame #{focusedFrame.frame.index} · {focusedFrame.frame.label}
+                      </span>
+                      <button className="table-action muted-action" onClick={() => setFocusedFrame(null)} type="button" title="Đóng">
+                        <X size={16} />
+                        Đóng
+                      </button>
+                    </div>
+                    <img alt={`Frame ${focusedFrame.frame.index} ${focusedFrame.frame.label}`} src={focusedFrame.url} />
+                    <div className="frame-modal-meta">
+                      <span>{textValue(focusedFrame.frame.timestamp)}</span>
+                      <strong>
+                        Vai {textValue(focusedFrame.frame.goc_vai, focusedFrame.frame.goc_vai_trai, focusedFrame.frame.goc_vai_phai)} / Khuỷu{' '}
+                        {textValue(focusedFrame.frame.goc_khuyu, focusedFrame.frame.goc_khuyu_trai, focusedFrame.frame.goc_khuyu_phai)}
+                      </strong>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </div>
           ) : null}
 

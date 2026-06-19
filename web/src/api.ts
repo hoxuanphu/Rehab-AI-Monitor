@@ -79,6 +79,7 @@ export type UploadVideoPayload = {
 
 export type AnalysisJob = {
   job_id: string;
+  run_id?: string;
   video_path?: string;
   username?: string;
   video_name?: string;
@@ -88,16 +89,47 @@ export type AnalysisJob = {
   elapsed?: number;
   start_time?: number;
   heartbeat?: number;
+  updated_at?: string;
   status_msg?: string;
   error_msg?: string;
   result?: Record<string, unknown> | null;
-  job_meta?: Record<string, unknown>;
+  job_meta?: {
+    requested_by?: string;
+    action?: string;
+    options?: AnalysisJobOptions;
+    canceled_by?: string;
+    canceled_at?: string;
+    [key: string]: unknown;
+  };
+  steps?: Array<{
+    key: string;
+    label: string;
+    status: 'done' | 'active' | 'pending' | 'error' | 'canceled' | string;
+  }>;
 };
 
 export type AnalysisJobStartResult = {
   started: boolean;
   reason: string;
   job: AnalysisJob;
+};
+
+export type AnalysisJobActionResult = {
+  ok?: boolean;
+  reason?: string;
+  job: AnalysisJob | null;
+};
+
+export type AnalysisJobHistoryResult = {
+  items: AnalysisJob[];
+  count: number;
+};
+
+export type AnalysisJobOptions = {
+  model_type: 'MediaPipe Heavy' | 'MediaPipe Full' | 'MediaPipe Lite';
+  skip_step: number;
+  resize_width: number;
+  min_confidence: number;
 };
 
 export type AnalysisArtifactItem = {
@@ -120,6 +152,174 @@ export type AnalysisArtifactsResult = {
   metrics: Record<string, unknown>;
   items: AnalysisArtifactItem[];
   count: number;
+};
+
+export type ResultTimelineItem = {
+  kind: string;
+  label: string;
+  time?: string;
+  detail?: string;
+  status?: string;
+};
+
+export type VideoResultDetail = {
+  video: VideoRecord & {
+    stored_filename: string;
+    video_name: string;
+  };
+  evaluation: EvaluationRecord | null;
+  latest_job: AnalysisJob | null;
+  metrics: Record<string, unknown>;
+  artifacts: AnalysisArtifactItem[];
+  artifact_count: number;
+  report_sent: boolean;
+  ai_detail_allowed: boolean;
+  report_status: {
+    report_sent: boolean;
+    report_status: string;
+    ai_detail_allowed: boolean;
+    sent_at?: string;
+    sent_by?: string;
+    message?: string;
+  };
+  phase_metrics: Record<string, PhaseMetricSummary>;
+  summary: {
+    patient?: string;
+    video_name?: string;
+    exercise?: string;
+    status?: string;
+    accuracy?: number;
+    doctor_result?: string;
+    doctor_plan?: string;
+    doctor_comment?: string;
+    analysis_status?: string;
+    analysis_message?: string;
+  };
+  timeline: ResultTimelineItem[];
+};
+
+export type FrameLabel = 'ALL' | 'G1' | 'G2' | 'G3' | 'PASS' | 'NEAR' | 'FAIL';
+export type RefLabel = 'PASS' | 'NEAR' | 'FAIL';
+
+export type PhaseCountSummary = {
+  total: number;
+  PASS: number;
+  NEAR: number;
+  FAIL: number;
+  threshold?: number;
+};
+
+export type PhaseMetricSummary = {
+  threshold?: number;
+  accuracy?: number | null;
+  mae?: number | null;
+  f1?: number | null;
+  icc?: number | null;
+};
+
+export type MlFrameBadge = {
+  label?: string;
+  label_text?: string;
+  confidence?: number | null;
+  probabilities?: Record<string, number>;
+};
+
+export type AnalysisFrameItem = {
+  index: number;
+  timestamp?: string;
+  label: RefLabel;
+  phase?: 'G1' | 'G2' | 'G3';
+  phase_label?: string;
+  phase_threshold?: number;
+  image_id: string;
+  has_image: boolean;
+  goc_vai?: number | null;
+  goc_khuyu?: number | null;
+  goc_vai_trai?: number | null;
+  goc_vai_phai?: number | null;
+  goc_khuyu_trai?: number | null;
+  goc_khuyu_phai?: number | null;
+  shoulder_ref?: number | null;
+  elbow_ref?: number | null;
+  shoulder_delta?: number | null;
+  elbow_delta?: number | null;
+  ml?: MlFrameBadge;
+  detected?: boolean;
+  filtered_stranger?: boolean;
+};
+
+export type AnalysisFramesResult = {
+  items: AnalysisFrameItem[];
+  summary: {
+    total: number;
+    PASS: number;
+    NEAR: number;
+    FAIL: number;
+    phases?: Record<'G1' | 'G2' | 'G3', PhaseCountSummary>;
+  };
+  pagination: {
+    page: number;
+    page_size: number;
+    total: number;
+    total_pages: number;
+  };
+  filter: FrameLabel;
+  segment_bounds?: number[];
+  phase_ranges?: Record<'G1' | 'G2' | 'G3', { start: number; end: number; threshold: number }>;
+  sources: {
+    frames_json: boolean;
+    frames_zip: boolean;
+  };
+};
+
+export type ChartSeriesPoint = {
+  index: number;
+  frame?: number | string;
+  timestamp?: string;
+  label?: '' | 'PASS' | 'NEAR' | 'FAIL';
+  phase?: 'G1' | 'G2' | 'G3';
+  phase_threshold?: number;
+  goc_vai?: number | null;
+  goc_khuyu?: number | null;
+  vai_chuan?: number | null;
+  khuyu_chuan?: number | null;
+};
+
+export type ChartSeriesSummary = {
+  count: number;
+  min: number | null;
+  max: number | null;
+  avg: number | null;
+};
+
+export type AnalysisChartPreview = {
+  source: 'csv' | 'frames-json' | 'none';
+  source_label: string;
+  filter: FrameLabel;
+  total_rows: number;
+  filtered_rows: number;
+  sampled_rows: number;
+  segment_bounds?: number[];
+  columns: Array<'goc_vai' | 'goc_khuyu' | 'vai_chuan' | 'khuyu_chuan'>;
+  summary: {
+    series: Record<string, ChartSeriesSummary>;
+    labels: {
+      total: number;
+      PASS: number;
+      NEAR: number;
+      FAIL: number;
+    };
+  };
+  phase_summary?: {
+    total: number;
+    PASS: number;
+    NEAR: number;
+    FAIL: number;
+    phases: Record<'G1' | 'G2' | 'G3', PhaseCountSummary>;
+  };
+  phase_metrics: Record<string, PhaseMetricSummary>;
+  metrics: Record<string, unknown>;
+  series: ChartSeriesPoint[];
 };
 
 export type CreateEvaluationPayload = {
@@ -354,17 +554,60 @@ export const api = {
   videos: (token: string) => request<ListResult<VideoRecord>>('/videos', {}, token),
   videoBlob: (token: string, storedFilename: string) =>
     blobRequest(`/videos/media/${encodeURIComponent(storedFilename)}`, token),
-  startAnalysisJob: (token: string, storedFilename: string) =>
+  startAnalysisJob: (token: string, storedFilename: string, options?: Partial<AnalysisJobOptions>) =>
     request<AnalysisJobStartResult>(
       `/videos/${encodeURIComponent(storedFilename)}/analysis-jobs`,
+      {
+        method: 'POST',
+        body: JSON.stringify(options || {}),
+      },
+      token,
+    ),
+  latestAnalysisJob: (token: string, storedFilename: string) =>
+    request<{ job: AnalysisJob | null }>(`/videos/${encodeURIComponent(storedFilename)}/analysis-jobs/latest`, {}, token),
+  analysisJobHistory: (token: string, storedFilename: string) =>
+    request<AnalysisJobHistoryResult>(`/videos/${encodeURIComponent(storedFilename)}/analysis-jobs/history`, {}, token),
+  cancelAnalysisJob: (token: string, storedFilename: string) =>
+    request<AnalysisJobActionResult>(
+      `/videos/${encodeURIComponent(storedFilename)}/analysis-jobs/cancel`,
       {
         method: 'POST',
         body: JSON.stringify({}),
       },
       token,
     ),
-  latestAnalysisJob: (token: string, storedFilename: string) =>
-    request<{ job: AnalysisJob | null }>(`/videos/${encodeURIComponent(storedFilename)}/analysis-jobs/latest`, {}, token),
+  retryAnalysisJob: (token: string, storedFilename: string) =>
+    request<AnalysisJobStartResult>(
+      `/videos/${encodeURIComponent(storedFilename)}/analysis-jobs/retry`,
+      {
+        method: 'POST',
+        body: JSON.stringify({}),
+      },
+      token,
+    ),
+  rerunAnalysisJob: (token: string, storedFilename: string, options: Partial<AnalysisJobOptions>) =>
+    request<AnalysisJobStartResult>(
+      `/videos/${encodeURIComponent(storedFilename)}/analysis-jobs/rerun`,
+      {
+        method: 'POST',
+        body: JSON.stringify(options),
+      },
+      token,
+    ),
+  videoResult: (token: string, storedFilename: string) =>
+    request<VideoResultDetail>(`/videos/${encodeURIComponent(storedFilename)}/results`, {}, token),
+  analysisFrames: (token: string, storedFilename: string, params: { page: number; pageSize: number; label: FrameLabel }) =>
+    request<AnalysisFramesResult>(
+      `/videos/${encodeURIComponent(storedFilename)}/analysis-frames?page=${encodeURIComponent(params.page)}&page_size=${encodeURIComponent(
+        params.pageSize,
+      )}&label=${encodeURIComponent(params.label)}`,
+      {},
+      token,
+    ),
+  analysisFrameBlob: (token: string, storedFilename: string, imageId: string) =>
+    blobRequest(`/videos/${encodeURIComponent(storedFilename)}/analysis-frames/${encodeURIComponent(imageId)}`, token),
+  analysisChart: (token: string, storedFilename: string, label: FrameLabel = 'ALL') =>
+    request<AnalysisChartPreview>(`/videos/${encodeURIComponent(storedFilename)}/analysis-chart?label=${encodeURIComponent(label)}`, {}, token),
   analysisArtifacts: (token: string, storedFilename: string) =>
     request<AnalysisArtifactsResult>(`/videos/${encodeURIComponent(storedFilename)}/analysis-artifacts`, {}, token),
   artifactBlob: (token: string, storedFilename: string, kind: string) =>
