@@ -173,6 +173,7 @@ Giai doan hien tai:
 - Backend co contract job progress cho phan tich video; React co the start/poll/cancel/retry/rerun job, backend da validate/transcode H.264 va co MediaPipe runner opt-in (`REHAB_BACKEND_ENABLE_AI_RUNNER=1`) de persist metrics/processed_path vao `video_list.json` khi thanh cong.
 - Backend co endpoint ket qua chi tiet `/videos/{stored_filename}/results` de React gom evaluation/latest job/metrics/artifact/timeline theo video, kem gate report cho bac si truoc khi NCV gui bao cao.
 - Backend co endpoint gallery frame `/videos/{stored_filename}/analysis-frames` voi pagination, filter G1/G2/G3/PASS/NEAR/FAIL, ML badge va image endpoint rieng.
+- Admin API co `/admin/audit-log`, lock/unlock user, reset password bat doi mat khau, revoke session theo user/toan bo; user ops co audit log va backup `users.json` truoc thao tac ghi/xoa.
 - Scope theo role/patient dung `auth.permissions`.
 - `backend.access` gom response shaping va pseudonymize cho NCV.
 - Frontend co `frontend.api_client` va opt-in qua `REHAB_FRONTEND_USE_BACKEND=1`.

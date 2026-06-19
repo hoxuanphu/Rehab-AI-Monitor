@@ -62,6 +62,7 @@ Giao dien dung token tu `DESIGN.md`:
   - Khai bao trieu chung.
   - Lich nhac cho admin/bac si/benh nhan.
   - Du lieu nghien cuu cho admin/nghien cuu vien.
+- Tab `Nguoi dung` cho admin tao/xoa tai khoan, khoa/mo khoa, reset password bat buoc doi mat khau, thu hoi phien theo user/toan bo va xem audit log gan nhat.
 - Sidebar tab va metric cards cap nhat tu backend API.
 - Dang ky self-service chi tao role `Benh nhan`; cac role nhay cam do admin cap.
 - Backend job da validate/transcode H.264 va co hook AI runner de cap nhat `video_list.json`; runner phan tich AI/MediaPipe that chua migrate khoi Streamlit mac dinh.

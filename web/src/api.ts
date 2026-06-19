@@ -7,6 +7,17 @@ export type User = {
   must_change_password?: boolean;
 };
 
+export type AuditLogRecord = {
+  id?: string;
+  timestamp?: string;
+  actor?: string;
+  actor_role?: string;
+  action?: string;
+  target?: string;
+  result?: string;
+  metadata?: Record<string, unknown>;
+};
+
 export type VideoRecord = {
   username?: string;
   patient_username?: string;
@@ -426,6 +437,24 @@ export type CreateUserPayload = {
   assigned_patient_usernames?: string[];
 };
 
+export type ResetUserPasswordPayload = {
+  password: string;
+  confirm_password: string;
+};
+
+export type UserAdminActionResult = {
+  item: PatientRecord;
+  revoked_sessions?: number;
+};
+
+export type RevokeSessionsResult = {
+  ok: boolean;
+  scope: 'user' | 'all';
+  username?: string;
+  revoked_sessions: number;
+  global_session_version?: number;
+};
+
 export type ListResult<T> = {
   items: T[];
   count: number;
@@ -534,12 +563,50 @@ export const api = {
     ),
   logout: (token: string) => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }, token),
   adminUsers: (token: string) => request<ListResult<PatientRecord>>('/admin/users', {}, token),
+  adminAuditLog: (token: string, limit = 100) =>
+    request<ListResult<AuditLogRecord>>(`/admin/audit-log?limit=${encodeURIComponent(String(limit))}`, {}, token),
   createUser: (token: string, payload: CreateUserPayload) =>
     request<{ item: PatientRecord }>(
       '/admin/users',
       {
         method: 'POST',
         body: JSON.stringify(payload),
+      },
+      token,
+    ),
+  setUserActive: (token: string, username: string, active: boolean) =>
+    request<UserAdminActionResult>(
+      `/admin/users/${encodeURIComponent(username)}/active`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ active }),
+      },
+      token,
+    ),
+  resetUserPassword: (token: string, username: string, payload: ResetUserPasswordPayload) =>
+    request<UserAdminActionResult>(
+      `/admin/users/${encodeURIComponent(username)}/reset-password`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      token,
+    ),
+  revokeUserSessions: (token: string, username: string, reason = 'admin') =>
+    request<RevokeSessionsResult>(
+      `/admin/users/${encodeURIComponent(username)}/sessions/revoke`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      },
+      token,
+    ),
+  revokeAllSessions: (token: string, reason: string, confirm: string) =>
+    request<RevokeSessionsResult>(
+      '/admin/sessions/revoke',
+      {
+        method: 'POST',
+        body: JSON.stringify({ reason, confirm }),
       },
       token,
     ),

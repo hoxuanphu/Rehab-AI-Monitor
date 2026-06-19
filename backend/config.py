@@ -103,3 +103,11 @@ class BackendConfig:
     @property
     def research_file(self) -> Path:
         return self.database_dir / "research_data.json"
+
+    @property
+    def audit_log_file(self) -> Path:
+        return self.database_dir / "audit_log.json"
+
+    @property
+    def session_state_file(self) -> Path:
+        return self.database_dir / "session_state.json"

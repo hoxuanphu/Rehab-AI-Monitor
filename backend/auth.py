@@ -57,6 +57,30 @@ class TokenStore:
             return False
         return self._tokens.pop(token, None) is not None
 
+    def revoke_actor(self, username: str) -> int:
+        target = normalize_auth_text(username).casefold()
+        if not target:
+            return 0
+        revoked = [
+            token
+            for token, actor in self._tokens.items()
+            if normalize_auth_text(actor.get("username")).casefold() == target
+        ]
+        for token in revoked:
+            self._tokens.pop(token, None)
+        return len(revoked)
+
+    def revoke_all(self) -> int:
+        count = len(self._tokens)
+        self._tokens.clear()
+        return count
+
+    def replace(self, token: str | None, actor: dict[str, Any]) -> bool:
+        if not token or token not in self._tokens:
+            return False
+        self._tokens[token] = dict(actor)
+        return True
+
 
 def authenticate_user(
     repo: JsonRepository,

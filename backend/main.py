@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import hashlib
 import json
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,7 @@ from auth.permissions import (
     researcher_view_records_for_actor,
     scope_records_for_actor,
 )
+from auth.sessions import bump_global_session_version
 from models.schemas import ADMIN_ROLE, DOCTOR_ROLE, PATIENT_ROLE, RESEARCHER_ROLE, AI_RESEARCHER
 from storage.app_json import update_app_json
 from video.validation import (
@@ -139,8 +141,7 @@ async def change_password(request: Request) -> JSONResponse:
         return json_error("password change failed", 500)
 
     token = bearer_token_from_header(request.headers.get("authorization"))
-    if token and token in tokens._tokens:
-        tokens._tokens[token] = dict(updated_user)
+    tokens.replace(token, updated_user)
     return JSONResponse({"user": updated_user})
 
 
@@ -268,6 +269,18 @@ def _bounded_float(value: Any, *, default: float, minimum: float, maximum: float
     return max(minimum, min(maximum, number))
 
 
+def _payload_bool(value: Any, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "on", "active", "unlock"}:
+            return True
+        if lowered in {"0", "false", "no", "off", "inactive", "lock"}:
+            return False
+    return default
+
+
 def _now_compact() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -304,6 +317,81 @@ def _public_user_management_record(username: str, record: dict[str, Any]) -> dic
         "created_at": _clean_text(record.get("created_at")),
         "updated_at": _clean_text(record.get("updated_at")),
     }
+
+
+def _safe_audit_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(metadata, dict):
+        return {}
+    blocked = {"password", "new_password", "old_password", "confirm_password", "access_token", "token"}
+    safe: dict[str, Any] = {}
+    for key, value in metadata.items():
+        key_text = _clean_text(key)
+        if not key_text or key_text.lower() in blocked:
+            continue
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            safe[key_text] = value
+        elif isinstance(value, list):
+            safe[key_text] = [str(item) for item in value[:20]]
+        elif isinstance(value, dict):
+            safe[key_text] = {str(inner_key): str(inner_value) for inner_key, inner_value in list(value.items())[:20]}
+        else:
+            safe[key_text] = str(value)
+    return safe
+
+
+def _audit_entry(
+    actor: dict[str, Any] | None,
+    *,
+    action: str,
+    target: str,
+    result: str,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    actor = actor or {}
+    return {
+        "id": _new_record_id("audit"),
+        "timestamp": _now_iso(),
+        "actor": _clean_text(actor.get("username")) or "anonymous",
+        "actor_role": _clean_text(actor.get("role")) or "anonymous",
+        "action": _clean_text(action),
+        "target": _clean_text(target),
+        "result": _clean_text(result),
+        "metadata": _safe_audit_metadata(metadata),
+    }
+
+
+def _append_audit(
+    actor: dict[str, Any] | None,
+    *,
+    action: str,
+    target: str,
+    result: str,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    entry = _audit_entry(actor, action=action, target=target, result=result, metadata=metadata)
+
+    def _append(current: Any) -> list[dict[str, Any]]:
+        records = [record for record in (current if isinstance(current, list) else []) if isinstance(record, dict)]
+        return records + [entry]
+
+    update_app_json(repo.config.audit_log_file, _append, default=[])
+    return entry
+
+
+def _backup_runtime_file(path: Path, *, action: str, target: str) -> str:
+    if not path.exists():
+        return ""
+    backup_dir = repo.config.repo_root / "backups" / "admin_ops"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    safe_action = sanitize_filename(action, fallback="admin")
+    safe_target = sanitize_filename(target or "global", fallback="target")
+    backup_name = f"{_now_compact()}_{safe_action}_{safe_target}_{path.name}"
+    backup_path = backup_dir / backup_name
+    shutil.copy2(path, backup_path)
+    try:
+        return str(backup_path.relative_to(repo.config.repo_root))
+    except ValueError:
+        return str(backup_path)
 
 
 def _safe_media_filename(value: Any) -> str | None:
@@ -1372,6 +1460,21 @@ async def list_admin_users(request: Request) -> JSONResponse:
     return json_items(items)
 
 
+async def list_admin_audit_log(request: Request) -> JSONResponse:
+    actor = current_actor(request)
+    auth_error = auth_error_if_missing(actor)
+    if auth_error:
+        return auth_error
+    try:
+        require_actor_role(actor, [ADMIN_ROLE])
+    except PermissionError as exc:
+        return json_error(str(exc), 403)
+    limit = _bounded_int(request.query_params.get("limit"), default=100, minimum=1, maximum=500)
+    items = repo.audit_log()[-limit:]
+    items.reverse()
+    return json_items(items)
+
+
 async def create_admin_user(request: Request) -> JSONResponse:
     actor = current_actor(request)
     auth_error = auth_error_if_missing(actor)
@@ -1434,6 +1537,13 @@ async def create_admin_user(request: Request) -> JSONResponse:
         return json_error(str(exc), exc.status_code)
     if not created:
         return json_error("user creation failed", 500)
+    _append_audit(
+        actor,
+        action="admin_create_user",
+        target=created.get("username", ""),
+        result="success",
+        metadata={"role": created.get("role"), "email": created.get("email")},
+    )
     return JSONResponse({"item": created}, status_code=201)
 
 
@@ -1454,6 +1564,7 @@ async def delete_admin_user(request: Request) -> JSONResponse:
         return json_error("this account cannot be deleted from the API", 400)
 
     deleted: str | None = None
+    backup_path = _backup_runtime_file(repo.config.users_file, action="admin_delete_user", target=target_username)
 
     def _delete(current: Any) -> dict[str, Any]:
         nonlocal deleted
@@ -1470,7 +1581,179 @@ async def delete_admin_user(request: Request) -> JSONResponse:
         update_app_json(repo.config.users_file, _delete, default={})
     except RegistrationError as exc:
         return json_error(str(exc), exc.status_code)
+    revoked = tokens.revoke_actor(deleted or target_username)
+    _append_audit(
+        actor,
+        action="admin_delete_user",
+        target=deleted or target_username,
+        result="success",
+        metadata={"revoked_sessions": revoked, "backup_path": backup_path},
+    )
     return JSONResponse({"ok": True, "username": deleted})
+
+
+async def set_admin_user_active(request: Request) -> JSONResponse:
+    actor = current_actor(request)
+    auth_error = auth_error_if_missing(actor)
+    if auth_error:
+        return auth_error
+    try:
+        require_actor_role(actor, [ADMIN_ROLE])
+    except PermissionError as exc:
+        return json_error(str(exc), 403)
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    target_username = normalize_auth_text(request.path_params.get("username"))
+    if not target_username:
+        return json_error("username is required", 400)
+    if target_username.casefold() == "admin" or target_username.casefold() == _clean_text(actor.get("username")).casefold():
+        return json_error("the current account cannot be locked from the API", 400)
+    active = _payload_bool(payload.get("active"), default=True)
+    updated_user: dict[str, Any] | None = None
+    backup_path = _backup_runtime_file(repo.config.users_file, action="admin_set_user_active", target=target_username)
+
+    def _update(current: Any) -> dict[str, Any]:
+        nonlocal updated_user
+        users = current if isinstance(current, dict) else {}
+        user_key = find_user_key(users, target_username)
+        if not user_key:
+            raise RegistrationError("user not found", 404)
+        record = dict(users.get(user_key) or {})
+        record["active"] = active
+        record["updated_at"] = _now_iso()
+        updated = dict(users)
+        updated[user_key] = record
+        updated_user = _public_user_management_record(user_key, record)
+        return updated
+
+    try:
+        update_app_json(repo.config.users_file, _update, default={})
+    except RegistrationError as exc:
+        return json_error(str(exc), exc.status_code)
+    if not updated_user:
+        return json_error("user update failed", 500)
+    revoked = tokens.revoke_actor(updated_user["username"]) if not active else 0
+    _append_audit(
+        actor,
+        action="admin_set_user_active",
+        target=updated_user["username"],
+        result="success",
+        metadata={"active": active, "revoked_sessions": revoked, "backup_path": backup_path},
+    )
+    return JSONResponse({"item": updated_user, "revoked_sessions": revoked})
+
+
+async def reset_admin_user_password(request: Request) -> JSONResponse:
+    actor = current_actor(request)
+    auth_error = auth_error_if_missing(actor)
+    if auth_error:
+        return auth_error
+    try:
+        require_actor_role(actor, [ADMIN_ROLE])
+    except PermissionError as exc:
+        return json_error(str(exc), 403)
+    try:
+        payload = await request.json()
+    except Exception:
+        return json_error("invalid JSON body", 400)
+
+    target_username = normalize_auth_text(request.path_params.get("username"))
+    password = str(payload.get("password") or "")
+    confirm_password = str(payload.get("confirm_password") or password)
+    if not target_username:
+        return json_error("username is required", 400)
+    if len(password) < 6:
+        return json_error("password must be at least 6 characters", 400)
+    if password != confirm_password:
+        return json_error("password confirmation does not match", 400)
+
+    updated_user: dict[str, Any] | None = None
+    backup_path = _backup_runtime_file(repo.config.users_file, action="admin_reset_password", target=target_username)
+
+    def _update(current: Any) -> dict[str, Any]:
+        nonlocal updated_user
+        users = current if isinstance(current, dict) else {}
+        user_key = find_user_key(users, target_username)
+        if not user_key:
+            raise RegistrationError("user not found", 404)
+        now = _now_iso()
+        record = {
+            **dict(users.get(user_key) or {}),
+            **password_record_update(password, updated_at=now, must_change_password=True),
+            "updated_at": now,
+        }
+        updated = dict(users)
+        updated[user_key] = record
+        updated_user = _public_user_management_record(user_key, record)
+        return updated
+
+    try:
+        update_app_json(repo.config.users_file, _update, default={})
+    except RegistrationError as exc:
+        return json_error(str(exc), exc.status_code)
+    if not updated_user:
+        return json_error("password reset failed", 500)
+    revoked = tokens.revoke_actor(updated_user["username"])
+    _append_audit(
+        actor,
+        action="admin_reset_password",
+        target=updated_user["username"],
+        result="success",
+        metadata={"must_change_password": True, "revoked_sessions": revoked, "backup_path": backup_path},
+    )
+    return JSONResponse({"item": updated_user, "revoked_sessions": revoked})
+
+
+async def revoke_admin_sessions(request: Request) -> JSONResponse:
+    actor = current_actor(request)
+    auth_error = auth_error_if_missing(actor)
+    if auth_error:
+        return auth_error
+    try:
+        require_actor_role(actor, [ADMIN_ROLE])
+    except PermissionError as exc:
+        return json_error(str(exc), 403)
+    payload = await _json_payload_or_empty(request)
+    reason = _clean_text(payload.get("reason")) or "admin"
+    target_username = normalize_auth_text(request.path_params.get("username"))
+    if target_username:
+        revoked = tokens.revoke_actor(target_username)
+        _append_audit(
+            actor,
+            action="admin_revoke_user_sessions",
+            target=target_username,
+            result="success",
+            metadata={"revoked_sessions": revoked, "reason": reason},
+        )
+        return JSONResponse({"ok": True, "scope": "user", "username": target_username, "revoked_sessions": revoked})
+
+    confirm = _clean_text(payload.get("confirm"))
+    if confirm != "REVOKE ALL SESSIONS":
+        return json_error("confirm must be REVOKE ALL SESSIONS", 400)
+    revoked = tokens.revoke_all()
+    version = bump_global_session_version(
+        str(repo.config.session_state_file),
+        actor=_clean_text(actor.get("username")) or "admin",
+        reason=reason,
+    )
+    _append_audit(
+        actor,
+        action="admin_revoke_all_sessions",
+        target="global",
+        result="success",
+        metadata={"revoked_sessions": revoked, "global_session_version": version, "reason": reason},
+    )
+    return JSONResponse(
+        {
+            "ok": True,
+            "scope": "all",
+            "revoked_sessions": revoked,
+            "global_session_version": version,
+        }
+    )
 
 
 async def list_symptoms(request: Request) -> JSONResponse:
@@ -1874,7 +2157,12 @@ routes = [
     Route("/auth/logout", logout, methods=["POST"]),
     Route("/admin/users", list_admin_users, methods=["GET"]),
     Route("/admin/users", create_admin_user, methods=["POST"]),
+    Route("/admin/users/{username}/active", set_admin_user_active, methods=["POST"]),
+    Route("/admin/users/{username}/reset-password", reset_admin_user_password, methods=["POST"]),
+    Route("/admin/users/{username}/sessions/revoke", revoke_admin_sessions, methods=["POST"]),
     Route("/admin/users/{username}", delete_admin_user, methods=["DELETE"]),
+    Route("/admin/sessions/revoke", revoke_admin_sessions, methods=["POST"]),
+    Route("/admin/audit-log", list_admin_audit_log, methods=["GET"]),
     Route("/patients", list_patients, methods=["GET"]),
     Route("/videos", list_videos, methods=["GET"]),
     Route("/videos/media/{stored_filename}", video_media, methods=["GET"]),

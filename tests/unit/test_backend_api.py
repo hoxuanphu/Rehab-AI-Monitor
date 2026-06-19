@@ -1469,6 +1469,81 @@ def test_backend_admin_can_manage_users_and_change_password(tmp_path, monkeypatc
     assert deleted.status_code == 200
 
 
+def test_backend_admin_user_ops_write_audit_and_revoke_sessions(tmp_path, monkeypatch):
+    _configure_tmp_backend(tmp_path, monkeypatch)
+    client = TestClient(app)
+    admin_login = client.post("/auth/login", json={"username": "admin", "password": "secret"})
+    admin_headers = {"Authorization": f"Bearer {admin_login.json()['access_token']}"}
+    patient_login = client.post("/auth/login", json={"username": "patient01", "password": "patientpass"})
+    patient_token = patient_login.json()["access_token"]
+    patient_headers = {"Authorization": f"Bearer {patient_token}"}
+
+    reset = client.post(
+        "/admin/users/patient01/reset-password",
+        headers=admin_headers,
+        json={"password": "resetpass", "confirm_password": "resetpass"},
+    )
+    assert reset.status_code == 200
+    assert reset.json()["item"]["must_change_password"] is True
+    assert reset.json()["revoked_sessions"] == 1
+    assert client.get("/auth/me", headers=patient_headers).status_code == 401
+
+    locked_login = client.post("/auth/login", json={"username": "patient01", "password": "resetpass"})
+    assert locked_login.status_code == 200
+    lock = client.post("/admin/users/patient01/active", headers=admin_headers, json={"active": False})
+    assert lock.status_code == 200
+    assert lock.json()["item"]["active"] is False
+    assert lock.json()["revoked_sessions"] == 1
+    assert client.post("/auth/login", json={"username": "patient01", "password": "resetpass"}).status_code == 401
+    assert client.post("/admin/users/admin/active", headers=admin_headers, json={"active": False}).status_code == 400
+
+    unlock = client.post("/admin/users/patient01/active", headers=admin_headers, json={"active": True})
+    assert unlock.status_code == 200
+    assert unlock.json()["item"]["active"] is True
+
+    another_admin_login = client.post("/auth/login", json={"username": "admin", "password": "secret"})
+    another_admin_headers = {"Authorization": f"Bearer {another_admin_login.json()['access_token']}"}
+    revoked = client.post(
+        "/admin/sessions/revoke",
+        headers=admin_headers,
+        json={"confirm": "REVOKE ALL SESSIONS", "reason": "test"},
+    )
+    assert revoked.status_code == 200
+    assert revoked.json()["scope"] == "all"
+    assert revoked.json()["revoked_sessions"] >= 2
+    assert client.get("/auth/me", headers=another_admin_headers).status_code == 401
+
+    relogin = client.post("/auth/login", json={"username": "admin", "password": "secret"})
+    audit_headers = {"Authorization": f"Bearer {relogin.json()['access_token']}"}
+    audit = client.get("/admin/audit-log", headers=audit_headers)
+    assert audit.status_code == 200
+    actions = [item["action"] for item in audit.json()["items"]]
+    assert "admin_reset_password" in actions
+    assert "admin_set_user_active" in actions
+    assert "admin_revoke_all_sessions" in actions
+    assert (tmp_path / "backups" / "admin_ops").exists()
+
+
+def test_backend_admin_ops_are_admin_only(tmp_path, monkeypatch):
+    _configure_tmp_backend(tmp_path, monkeypatch)
+    client = TestClient(app)
+    doctor_login = client.post("/auth/login", json={"username": "doctor", "password": "doctorpass"})
+    headers = {"Authorization": f"Bearer {doctor_login.json()['access_token']}"}
+
+    assert client.get("/admin/audit-log", headers=headers).status_code == 403
+    assert client.post("/admin/users/patient01/active", headers=headers, json={"active": False}).status_code == 403
+    assert client.post(
+        "/admin/users/patient01/reset-password",
+        headers=headers,
+        json={"password": "resetpass", "confirm_password": "resetpass"},
+    ).status_code == 403
+    assert client.post(
+        "/admin/sessions/revoke",
+        headers=headers,
+        json={"confirm": "REVOKE ALL SESSIONS"},
+    ).status_code == 403
+
+
 def test_backend_researcher_gets_pseudonymized_records(tmp_path, monkeypatch):
     _configure_tmp_backend(tmp_path, monkeypatch)
     client = TestClient(app)

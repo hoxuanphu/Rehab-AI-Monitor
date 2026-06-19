@@ -319,27 +319,31 @@ Tieu chi xong:
 
 ## Phase F - Admin van hanh
 
+Trang thai: Da trien khai slice audit/session/user ops dau tien ngay 2026-06-19.
+
 Muc tieu: React thay the cac tac vu quan tri quan trong cua Streamlit.
 
 Viec can lam:
 
-- Audit log API/UI.
-- Revoke all sessions API/UI.
-- Lock/unlock user.
-- Reset password voi `must_change_password`.
+- [x] Audit log API/UI.
+- [x] Revoke all sessions API/UI.
+- [x] Lock/unlock user.
+- [x] Reset password voi `must_change_password`.
 - Cleanup/reset tung nhom du lieu:
   - evaluations;
   - symptoms;
   - schedules;
   - videos/temp files;
   - processed artifacts.
-- Backup truoc destructive action.
+- [x] Backup truoc destructive action user ops.
+- [ ] Backup truoc cleanup/reset tung nhom du lieu.
 
 Tieu chi xong:
 
-- Tat ca destructive action can confirm text.
-- Co audit log gom actor, action, target, timestamp.
-- Co test permission admin-only.
+- [x] Revoke all sessions va delete user can confirm text.
+- [ ] Cleanup/reset destructive action can confirm text.
+- [x] Co audit log gom actor, action, target, timestamp.
+- [x] Co test permission admin-only cho audit/revoke/lock/reset.
 
 ## Phase G - Static/info pages
 

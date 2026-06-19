@@ -11,13 +11,17 @@ import {
   EyeOff,
   FileVideo,
   FlaskConical,
+  History,
   KeyRound,
   LineChart,
+  Lock,
   LogOut,
   Maximize2,
   RefreshCw,
   Shield,
   Trash2,
+  Unlock,
+  UserX,
   X,
   UserPlus,
   UserRound,
@@ -28,6 +32,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   api,
+  AuditLogRecord,
   ApiError,
   CreateEvaluationPayload,
   CreateResearchPayload,
@@ -238,6 +243,39 @@ function statusClass(value: unknown) {
     return 'warning';
   }
   return 'neutral';
+}
+
+function auditActionLabel(action: unknown) {
+  const labels: Record<string, string> = {
+    admin_create_user: 'Tạo tài khoản',
+    admin_delete_user: 'Xóa tài khoản',
+    admin_set_user_active: 'Khóa/mở khóa',
+    admin_reset_password: 'Reset mật khẩu',
+    admin_revoke_user_sessions: 'Thu hồi phiên user',
+    admin_revoke_all_sessions: 'Thu hồi toàn bộ phiên',
+  };
+  const key = String(action || '');
+  return labels[key] || textValue(action);
+}
+
+function auditMetadataLabel(metadata: unknown) {
+  if (!metadata || typeof metadata !== 'object') {
+    return 'N/A';
+  }
+  const entries = Object.entries(metadata as Record<string, unknown>)
+    .filter(([, value]) => value !== '' && value !== undefined && value !== null)
+    .slice(0, 4);
+  if (!entries.length) {
+    return 'N/A';
+  }
+  return entries
+    .map(([key, value]) => {
+      if (Array.isArray(value)) {
+        return `${key}: ${value.join(', ')}`;
+      }
+      return `${key}: ${String(value)}`;
+    })
+    .join(' · ');
 }
 
 function countLabel(count: number) {
@@ -592,6 +630,7 @@ export function App() {
   const [evaluations, setEvaluations] = useState<EvaluationRecord[]>([]);
   const [patients, setPatients] = useState<PatientRecord[]>([]);
   const [users, setUsers] = useState<PatientRecord[]>([]);
+  const [auditLog, setAuditLog] = useState<AuditLogRecord[]>([]);
   const [symptoms, setSymptoms] = useState<SymptomRecord[]>([]);
   const [schedules, setSchedules] = useState<ScheduleRecord[]>([]);
   const [researchRecords, setResearchRecords] = useState<ResearchRecord[]>([]);
@@ -629,6 +668,7 @@ export function App() {
   const [formMessage, setFormMessage] = useState('');
   const [previewMessage, setPreviewMessage] = useState('');
   const [analysisMessage, setAnalysisMessage] = useState('');
+  const [adminActionKey, setAdminActionKey] = useState('');
   const previewUrlRef = useRef<string | null>(null);
   const frameUrlMapRef = useRef<Record<string, string>>({});
   const completedAnalysisRefreshRef = useRef<Set<string>>(new Set());
@@ -654,6 +694,7 @@ export function App() {
     setEvaluations([]);
     setPatients([]);
     setUsers([]);
+    setAuditLog([]);
     setSymptoms([]);
     setSchedules([]);
     setResearchRecords([]);
@@ -662,6 +703,7 @@ export function App() {
     setAnalysisState('idle');
     setAnalysisTargetKey('');
     setAnalysisMessage('');
+    setAdminActionKey('');
     setArtifactState('idle');
     setArtifactTargetKey('');
     setArtifactMessage('');
@@ -707,7 +749,7 @@ export function App() {
     setMessage('');
     const role = nextSession.user.role;
     try {
-      const [videoResult, evaluationResult, patientResult, symptomResult, scheduleResult, researchResult, userResult] = await Promise.all([
+      const [videoResult, evaluationResult, patientResult, symptomResult, scheduleResult, researchResult, userResult, auditResult] = await Promise.all([
         api.videos(nextSession.token),
         api.evaluations(nextSession.token),
         api.patients(nextSession.token),
@@ -715,6 +757,7 @@ export function App() {
         canViewSchedules(role) ? api.schedules(nextSession.token) : Promise.resolve({ items: [], count: 0 }),
         canViewResearch(role) ? api.researchRecords(nextSession.token) : Promise.resolve({ items: [], count: 0 }),
         canManageUsers(role) ? api.adminUsers(nextSession.token) : Promise.resolve({ items: [], count: 0 }),
+        canManageUsers(role) ? api.adminAuditLog(nextSession.token, 100) : Promise.resolve({ items: [], count: 0 }),
       ]);
       setVideos(videoResult.items);
       setEvaluations(evaluationResult.items);
@@ -723,6 +766,7 @@ export function App() {
       setSymptoms(symptomResult.items);
       setSchedules(scheduleResult.items);
       setResearchRecords(researchResult.items);
+      setAuditLog(auditResult.items);
       setPreviewMessage('');
       setAnalysisMessage('');
       setLoadState('ready');
@@ -1000,6 +1044,12 @@ export function App() {
     if (!session || !record.username) {
       return;
     }
+    const confirm = window.prompt(`Nhập ${record.username} để xóa tài khoản`);
+    if (confirm !== record.username) {
+      setFormState('error');
+      setFormMessage('Chưa xác nhận đúng tên tài khoản cần xóa.');
+      return;
+    }
     setFormState('loading');
     setFormMessage('');
     try {
@@ -1010,6 +1060,110 @@ export function App() {
     } catch (error) {
       setFormState('error');
       setFormMessage(error instanceof Error ? error.message : 'Không xóa được tài khoản.');
+    }
+  }
+
+  async function handleSetUserActive(record: PatientRecord, active: boolean) {
+    if (!session || !record.username) {
+      return;
+    }
+    const key = `active:${record.username}`;
+    setAdminActionKey(key);
+    setFormState('loading');
+    setFormMessage('');
+    try {
+      const result = await api.setUserActive(session.token, record.username, active);
+      setFormState('ready');
+      setFormMessage(
+        active
+          ? `Đã mở khóa ${result.item.username}.`
+          : `Đã khóa ${result.item.username} và thu hồi ${result.revoked_sessions || 0} phiên.`,
+      );
+      await loadDashboard(session);
+    } catch (error) {
+      setFormState('error');
+      setFormMessage(error instanceof Error ? error.message : 'Không cập nhật được trạng thái tài khoản.');
+    } finally {
+      setAdminActionKey('');
+    }
+  }
+
+  async function handleResetUserPassword(record: PatientRecord) {
+    if (!session || !record.username) {
+      return;
+    }
+    const password = window.prompt(`Mật khẩu tạm mới cho ${record.username}`);
+    if (!password) {
+      return;
+    }
+    const confirmPassword = window.prompt('Nhập lại mật khẩu tạm');
+    if (password !== confirmPassword) {
+      setFormState('error');
+      setFormMessage('Mật khẩu nhập lại không khớp.');
+      return;
+    }
+    const key = `reset:${record.username}`;
+    setAdminActionKey(key);
+    setFormState('loading');
+    setFormMessage('');
+    try {
+      const result = await api.resetUserPassword(session.token, record.username, {
+        password,
+        confirm_password: confirmPassword,
+      });
+      setFormState('ready');
+      setFormMessage(`Đã reset mật khẩu ${result.item.username}; người dùng sẽ phải đổi mật khẩu khi đăng nhập.`);
+      await loadDashboard(session);
+    } catch (error) {
+      setFormState('error');
+      setFormMessage(error instanceof Error ? error.message : 'Không reset được mật khẩu.');
+    } finally {
+      setAdminActionKey('');
+    }
+  }
+
+  async function handleRevokeUserSessions(record: PatientRecord) {
+    if (!session || !record.username) {
+      return;
+    }
+    const key = `revoke:${record.username}`;
+    setAdminActionKey(key);
+    setFormState('loading');
+    setFormMessage('');
+    try {
+      const result = await api.revokeUserSessions(session.token, record.username, 'admin user action');
+      setFormState('ready');
+      setFormMessage(`Đã thu hồi ${result.revoked_sessions} phiên của ${record.username}.`);
+      await loadDashboard(session);
+    } catch (error) {
+      setFormState('error');
+      setFormMessage(error instanceof Error ? error.message : 'Không thu hồi được phiên.');
+    } finally {
+      setAdminActionKey('');
+    }
+  }
+
+  async function handleRevokeAllSessions() {
+    if (!session) {
+      return;
+    }
+    const confirm = window.prompt('Nhập REVOKE ALL SESSIONS để thu hồi toàn bộ phiên');
+    if (confirm !== 'REVOKE ALL SESSIONS') {
+      setFormState('error');
+      setFormMessage('Chưa xác nhận thu hồi toàn bộ phiên.');
+      return;
+    }
+    setAdminActionKey('revoke:all');
+    setFormState('loading');
+    setFormMessage('');
+    try {
+      const result = await api.revokeAllSessions(session.token, 'admin global action', confirm);
+      clearLocalSession(`Đã thu hồi ${result.revoked_sessions} phiên. Vui lòng đăng nhập lại.`);
+    } catch (error) {
+      setFormState('error');
+      setFormMessage(error instanceof Error ? error.message : 'Không thu hồi được toàn bộ phiên.');
+    } finally {
+      setAdminActionKey('');
     }
   }
 
@@ -2055,21 +2209,84 @@ export function App() {
     {
       key: 'status',
       label: 'Trạng thái',
-      render: (user) => <span className={`pill ${user.active === false ? 'danger' : 'success'}`}>{user.active === false ? 'Tạm khóa' : 'Hoạt động'}</span>,
+      render: (user) => (
+        <div className="status-stack">
+          <span className={`pill ${user.active === false ? 'danger' : 'success'}`}>{user.active === false ? 'Tạm khóa' : 'Hoạt động'}</span>
+          {user.must_change_password ? <span className="pill warning">Cần đổi mật khẩu</span> : null}
+        </div>
+      ),
     },
     {
       key: 'actions',
       label: 'Thao tác',
-      render: (user) =>
-        user.username === session.user.username || user.username === 'admin' ? (
-          'N/A'
-        ) : (
-          <button className="table-action danger-action" onClick={() => void handleDeleteUser(user)} disabled={!user.username || formState === 'loading'} type="button">
-            <Trash2 size={16} />
-            Xóa
-          </button>
-        ),
+      render: (user) => {
+        const protectedUser = user.username === session.user.username || user.username === 'admin';
+        const username = user.username || '';
+        const busy = formState === 'loading';
+        if (!username) {
+          return 'N/A';
+        }
+        return (
+          <div className="row-actions">
+            <button
+              className={user.active === false ? 'table-action' : 'table-action danger-action'}
+              onClick={() => void handleSetUserActive(user, user.active === false)}
+              disabled={protectedUser || busy}
+              title={protectedUser ? 'Không thao tác trên tài khoản hệ thống/đang dùng' : user.active === false ? 'Mở khóa tài khoản' : 'Khóa tài khoản'}
+              type="button"
+            >
+              {adminActionKey === `active:${username}` ? (
+                <RefreshCw className="spin" size={16} />
+              ) : user.active === false ? (
+                <Unlock size={16} />
+              ) : (
+                <Lock size={16} />
+              )}
+              {user.active === false ? 'Mở' : 'Khóa'}
+            </button>
+            <button
+              className="table-action muted-action"
+              onClick={() => void handleResetUserPassword(user)}
+              disabled={busy}
+              title="Reset mật khẩu tạm và bắt đổi mật khẩu"
+              type="button"
+            >
+              {adminActionKey === `reset:${username}` ? <RefreshCw className="spin" size={16} /> : <KeyRound size={16} />}
+              Reset
+            </button>
+            <button
+              className="table-action muted-action"
+              onClick={() => void handleRevokeUserSessions(user)}
+              disabled={busy}
+              title="Thu hồi phiên đăng nhập của tài khoản"
+              type="button"
+            >
+              {adminActionKey === `revoke:${username}` ? <RefreshCw className="spin" size={16} /> : <UserX size={16} />}
+              Phiên
+            </button>
+            {protectedUser ? null : (
+              <button className="table-action danger-action" onClick={() => void handleDeleteUser(user)} disabled={busy} type="button">
+                <Trash2 size={16} />
+                Xóa
+              </button>
+            )}
+          </div>
+        );
+      },
     },
+  ];
+
+  const auditColumns: TableColumn<AuditLogRecord>[] = [
+    { key: 'timestamp', label: 'Thời gian', render: (item) => textValue(item.timestamp) },
+    { key: 'actor', label: 'Actor', render: (item) => <span className="mono">{textValue(item.actor)}</span> },
+    { key: 'action', label: 'Hành động', render: (item) => auditActionLabel(item.action) },
+    { key: 'target', label: 'Target', render: (item) => <span className="mono">{textValue(item.target)}</span> },
+    {
+      key: 'result',
+      label: 'Kết quả',
+      render: (item) => <span className={`pill ${statusClass(item.result)}`}>{textValue(item.result)}</span>,
+    },
+    { key: 'metadata', label: 'Metadata', render: (item) => auditMetadataLabel(item.metadata) },
   ];
 
   return (
@@ -2602,6 +2819,37 @@ export function App() {
             </form>
           ) : null}
 
+          {activeView === 'users' && canManageUsers(session.user.role) ? (
+            <div className="admin-ops">
+              <div>
+                <strong>Vận hành tài khoản</strong>
+                <span>{auditLog.length} sự kiện audit gần nhất</span>
+              </div>
+              <div className="row-actions">
+                <button
+                  className="table-action muted-action"
+                  onClick={() => void loadDashboard(session)}
+                  disabled={loadState === 'loading' || formState === 'loading'}
+                  type="button"
+                  title="Tải lại người dùng và audit log"
+                >
+                  <RefreshCw className={loadState === 'loading' ? 'spin' : ''} size={16} />
+                  Làm mới
+                </button>
+                <button
+                  className="table-action danger-action"
+                  onClick={() => void handleRevokeAllSessions()}
+                  disabled={formState === 'loading'}
+                  type="button"
+                  title="Thu hồi toàn bộ phiên đăng nhập"
+                >
+                  {adminActionKey === 'revoke:all' ? <RefreshCw className="spin" size={16} /> : <Shield size={16} />}
+                  Revoke all
+                </button>
+              </div>
+            </div>
+          ) : null}
+
           {activeView === 'videos' && videoPreview ? (
             <div className="video-preview">
               <div className="preview-header">
@@ -3063,12 +3311,31 @@ export function App() {
             />
           ) : null}
           {activeView === 'users' ? (
-            <DataTable
-              columns={userColumns}
-              items={filteredUsers}
-              emptyText="Chưa có tài khoản phù hợp."
-              rowKey={(user, index) => recordKey('user', user as RecordLike, index)}
-            />
+            <>
+              <DataTable
+                columns={userColumns}
+                items={filteredUsers}
+                emptyText="Chưa có tài khoản phù hợp."
+                rowKey={(user, index) => recordKey('user', user as RecordLike, index)}
+              />
+              {canManageUsers(session.user.role) ? (
+                <div className="subpanel">
+                  <div className="subpanel-header">
+                    <div>
+                      <h3>Audit log</h3>
+                      <span>{auditLog.length} sự kiện gần nhất</span>
+                    </div>
+                    <History size={18} />
+                  </div>
+                  <DataTable
+                    columns={auditColumns}
+                    items={auditLog.filter((item) => matchesQuery(item as RecordLike, query))}
+                    emptyText="Chưa có audit log phù hợp."
+                    rowKey={(item, index) => recordKey('audit', item as RecordLike, index)}
+                  />
+                </div>
+              ) : null}
+            </>
           ) : null}
         </section>
       </section>
