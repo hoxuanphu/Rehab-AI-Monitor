@@ -41,3 +41,4 @@ tmp_hf_pkg/
 .streamlit/secrets.toml
 .venv310/
 Rehab-AI-Monitor-UI-new/
+node_modules/
