@@ -168,6 +168,8 @@ def test_build_upload_h264_command_toggles_audio():
 
     assert "-c:a" in with_audio
     assert "-an" in no_audio
+    assert with_audio[with_audio.index("-movflags") + 1] == "+faststart"
+    assert with_audio[-3:] == ["-f", "mp4", "out.mp4"]
     assert with_audio[-1] == "out.mp4"
 
 

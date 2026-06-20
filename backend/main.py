@@ -14,6 +14,7 @@ import os
 import hashlib
 import json
 import shutil
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -40,7 +41,9 @@ from video.validation import (
     MAX_UPLOAD_SIZE_BYTES,
     sanitize_filename,
     upload_video_magic_matches,
+    validate_video_file_for_processing,
 )
+from video.io import build_upload_h264_command, ffprobe_video_codecs
 from video.serving import allowed_media_file_path, video_media_allowed_roots
 
 from backend.access import patient_records_for_actor, scoped_records_for_response
@@ -1319,6 +1322,64 @@ async def _save_upload_file(upload: Any, target_path: Path) -> tuple[int, bytes]
     return size, prefix
 
 
+def _decode_process_stderr(value: Any) -> str:
+    if isinstance(value, bytes):
+        text = value.decode("utf-8", errors="replace")
+    else:
+        text = str(value or "")
+    return " ".join(text.strip().split())[-500:]
+
+
+def _browser_playable_upload_path(target_path: Path) -> tuple[Path, str]:
+    ok, message = validate_video_file_for_processing(target_path)
+    if not ok:
+        raise ValueError(message or "uploaded video is not readable")
+
+    video_codec, audio_codec = ffprobe_video_codecs(target_path)
+    if target_path.suffix.lower() == ".mp4" and str(video_codec or "").lower() == "h264":
+        return target_path, target_path.name
+
+    final_path = target_path.with_suffix(".mp4")
+    temp_path = final_path.with_name(f"{final_path.stem}.h264_tmp.mp4")
+    temp_path.unlink(missing_ok=True)
+
+    cmd = build_upload_h264_command(
+        target_path,
+        temp_path,
+        has_audio=bool(audio_codec),
+        ffmpeg_threads=2,
+    )
+    try:
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=300)
+    except FileNotFoundError as exc:
+        raise ValueError("ffmpeg is required to normalize uploaded video") from exc
+    except subprocess.TimeoutExpired as exc:
+        temp_path.unlink(missing_ok=True)
+        raise ValueError("video normalization timed out") from exc
+    except OSError as exc:
+        temp_path.unlink(missing_ok=True)
+        raise ValueError(f"could not normalize uploaded video: {exc}") from exc
+
+    if result.returncode != 0:
+        temp_path.unlink(missing_ok=True)
+        detail = _decode_process_stderr(getattr(result, "stderr", ""))
+        suffix = f": {detail}" if detail else ""
+        raise ValueError(f"could not convert uploaded video to MP4 H.264{suffix}")
+    if not temp_path.exists() or temp_path.stat().st_size <= 0:
+        temp_path.unlink(missing_ok=True)
+        raise ValueError("video normalization did not produce a readable file")
+
+    ok, message = validate_video_file_for_processing(temp_path)
+    if not ok:
+        temp_path.unlink(missing_ok=True)
+        raise ValueError(message or "normalized video is not readable")
+
+    temp_path.replace(final_path)
+    if target_path != final_path:
+        target_path.unlink(missing_ok=True)
+    return final_path, final_path.name
+
+
 async def list_videos(request: Request) -> JSONResponse:
     actor = current_actor(request)
     auth_error = auth_error_if_missing(actor)
@@ -1980,6 +2041,12 @@ async def upload_video(request: Request) -> JSONResponse:
     if not exercise:
         target_path.unlink(missing_ok=True)
         return json_error("exercise is required", 400)
+
+    try:
+        playable_path, stored_filename = _browser_playable_upload_path(target_path)
+    except ValueError as exc:
+        target_path.unlink(missing_ok=True)
+        return json_error(str(exc), 400)
 
     rel_path = Path("patient_uploads") / stored_filename
     item = {

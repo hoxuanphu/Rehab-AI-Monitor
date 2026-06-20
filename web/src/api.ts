@@ -367,6 +367,10 @@ export type AnalysisFrameItem = {
   has_image: boolean;
   goc_vai?: number | null;
   goc_khuyu?: number | null;
+  vai_chuan?: number | null;
+  khuyu_chuan?: number | null;
+  delta_vai?: number | null;
+  delta_khuyu?: number | null;
   goc_vai_trai?: number | null;
   goc_vai_phai?: number | null;
   goc_khuyu_trai?: number | null;

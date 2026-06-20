@@ -279,6 +279,7 @@ def frame_summary(records: list[dict[str, Any]], bounds: list[int], exercise: An
 
 def frame_public_payload(record: dict[str, Any], raw_index: int, public_index: int, image_id: str, bounds: list[int], exercise: Any = "") -> dict[str, Any]:
     phase, label, threshold = phase_label_for_record(record, raw_index, bounds, exercise)
+    delta = frame_delta_payload(record)
     payload = {
         "index": record.get("index") if record.get("index") not in (None, "") else public_index + 1,
         "timestamp": record.get("timestamp") or record.get("time") or "",
@@ -288,15 +289,19 @@ def frame_public_payload(record: dict[str, Any], raw_index: int, public_index: i
         "phase_threshold": threshold,
         "image_id": image_id,
         "has_image": bool(image_id),
-        "goc_vai": record.get("goc_vai"),
-        "goc_khuyu": record.get("goc_khuyu"),
+        "goc_vai": shoulder_angle(record),
+        "goc_khuyu": elbow_angle(record),
+        "vai_chuan": delta["shoulder_ref"],
+        "khuyu_chuan": delta["elbow_ref"],
+        "delta_vai": delta["shoulder_delta"],
+        "delta_khuyu": delta["elbow_delta"],
         "goc_vai_trai": record.get("goc_vai_trai"),
         "goc_vai_phai": record.get("goc_vai_phai"),
         "goc_khuyu_trai": record.get("goc_khuyu_trai"),
         "goc_khuyu_phai": record.get("goc_khuyu_phai"),
         "detected": record.get("detected"),
         "filtered_stranger": record.get("filtered_stranger"),
-        **frame_delta_payload(record),
+        **delta,
     }
     ml = ml_payload(record)
     if ml:

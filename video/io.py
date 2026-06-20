@@ -165,6 +165,8 @@ def build_upload_h264_command(
         bufsize,
         "-vf",
         scale_filter,
+        "-movflags",
+        "+faststart",
         "-threads",
         str(ffmpeg_threads),
     ]
@@ -172,7 +174,7 @@ def build_upload_h264_command(
         cmd.extend(["-c:a", "aac"])
     else:
         cmd.extend(["-an"])
-    cmd.append(str(dst_path))
+    cmd.extend(["-f", "mp4", str(dst_path)])
     return cmd
 
 

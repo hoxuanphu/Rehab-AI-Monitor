@@ -27,7 +27,7 @@ from scripts.sync_data_and_report import generate_report
 from storage.json_store import read_json, update_json, write_json
 
 
-HF_TERMINAL_STATUSES = frozenset({"success", "error"})
+HF_TERMINAL_STATUSES = frozenset({"success", "error", "canceled"})
 HF_SAFE_SYNC_FILES = tuple(sorted(HF_JSON_DOWNLOAD_FILES - {"users.json"}))
 
 
@@ -137,6 +137,13 @@ class HfWorkflowJobs:
     def start(self, request: HfWorkflowRequest) -> dict[str, Any]:
         with self._lock:
             current = self.read_latest()
+            if (
+                self._running_job_id
+                and isinstance(current, dict)
+                and current.get("job_id") == self._running_job_id
+                and current.get("status") in HF_TERMINAL_STATUSES
+            ):
+                self._running_job_id = ""
             if self._running_job_id or self._queued_job_ids:
                 return {"started": False, "reason": "already_running", "job": current}
             job_id = self._new_job_id(request.action)

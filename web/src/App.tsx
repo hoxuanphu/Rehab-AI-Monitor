@@ -4335,8 +4335,9 @@ export function App() {
                               {textValue(frame.timestamp)} · REF ±{textValue(frame.phase_threshold)}°
                             </span>
                             <strong>
-                              Vai {textValue(frame.goc_vai, frame.goc_vai_trai, frame.goc_vai_phai)} / Khuỷu{' '}
-                              {textValue(frame.goc_khuyu, frame.goc_khuyu_trai, frame.goc_khuyu_phai)}
+                              Vai {textValue(frame.goc_vai, frame.goc_vai_trai, frame.goc_vai_phai)} / REF{' '}
+                              {textValue(frame.shoulder_ref)} · Khuỷu {textValue(frame.goc_khuyu, frame.goc_khuyu_trai, frame.goc_khuyu_phai)} /
+                              REF {textValue(frame.elbow_ref)}
                             </strong>
                             <span>
                               Δ vai {textValue(frame.shoulder_delta)}° / Δ khuỷu {textValue(frame.elbow_delta)}°
@@ -4410,8 +4411,10 @@ export function App() {
                     <div className="frame-modal-meta">
                       <span>{textValue(focusedFrame.frame.timestamp)}</span>
                       <strong>
-                        Vai {textValue(focusedFrame.frame.goc_vai, focusedFrame.frame.goc_vai_trai, focusedFrame.frame.goc_vai_phai)} / Khuỷu{' '}
-                        {textValue(focusedFrame.frame.goc_khuyu, focusedFrame.frame.goc_khuyu_trai, focusedFrame.frame.goc_khuyu_phai)}
+                        Vai {textValue(focusedFrame.frame.goc_vai, focusedFrame.frame.goc_vai_trai, focusedFrame.frame.goc_vai_phai)} / REF{' '}
+                        {textValue(focusedFrame.frame.shoulder_ref)} · Khuỷu{' '}
+                        {textValue(focusedFrame.frame.goc_khuyu, focusedFrame.frame.goc_khuyu_trai, focusedFrame.frame.goc_khuyu_phai)} / REF{' '}
+                        {textValue(focusedFrame.frame.elbow_ref)}
                       </strong>
                     </div>
                   </div>

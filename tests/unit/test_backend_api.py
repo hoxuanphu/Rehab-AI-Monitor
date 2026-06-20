@@ -3,6 +3,7 @@ import subprocess
 import sys
 import time
 import zipfile
+from pathlib import Path
 
 import pytest
 from starlette.testclient import TestClient
@@ -374,6 +375,8 @@ def test_backend_scopes_video_and_evaluation_lists_for_doctor(tmp_path, monkeypa
 
 def test_backend_patient_can_upload_video_and_append_metadata(tmp_path, monkeypatch):
     _configure_tmp_backend(tmp_path, monkeypatch)
+    monkeypatch.setattr("backend.main.validate_video_file_for_processing", lambda path: (True, ""))
+    monkeypatch.setattr("backend.main.ffprobe_video_codecs", lambda path: ("h264", "aac"))
     client = TestClient(app)
     login = client.post("/auth/login", json={"username": "patient01", "password": "patientpass"})
     token = login.json()["access_token"]
@@ -404,6 +407,38 @@ def test_backend_patient_can_upload_video_and_append_metadata(tmp_path, monkeypa
 
     videos = JsonRepository(BackendConfig(repo_root=tmp_path, database_dir=tmp_path / "database")).videos()
     assert videos[-1]["stored_filename"] == item["stored_filename"]
+
+
+def test_backend_upload_video_transcodes_non_h264_to_playable_mp4(tmp_path, monkeypatch):
+    _configure_tmp_backend(tmp_path, monkeypatch)
+    monkeypatch.setattr("backend.main.validate_video_file_for_processing", lambda path: (True, ""))
+    monkeypatch.setattr("backend.main.ffprobe_video_codecs", lambda path: ("hevc", "aac"))
+
+    def fake_run(cmd, **kwargs):
+        Path(cmd[-1]).write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"h264" * 512)
+        return type("Result", (), {"returncode": 0, "stderr": b""})()
+
+    monkeypatch.setattr("backend.main.subprocess.run", fake_run)
+    client = TestClient(app)
+    login = client.post("/auth/login", json={"username": "patient01", "password": "patientpass"})
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    mov_bytes = b"\x00\x00\x00\x18ftypqt  " + b"\x00" * 128
+
+    response = client.post(
+        "/videos/upload",
+        headers=headers,
+        data={"full_name": "Patient One", "exercise": "Codman"},
+        files={"file": ("clip.mov", mov_bytes, "video/quicktime")},
+    )
+
+    assert response.status_code == 201
+    item = response.json()["item"]
+    assert item["video_name"] == "clip.mov"
+    assert item["original_filename"] == "clip.mov"
+    assert item["stored_filename"].endswith("_clip.mp4")
+    assert item["video_path"].replace("\\", "/").endswith("_clip.mp4")
+    assert (tmp_path / item["video_path"]).exists()
+    assert not list((tmp_path / "patient_uploads").glob("*_clip.mov"))
 
 
 def test_backend_upload_video_rejects_non_patient_and_bad_payload(tmp_path, monkeypatch):
@@ -967,6 +1002,35 @@ def test_backend_hf_sync_status_and_metadata_dry_run_are_guarded(tmp_path, monke
     assert videos[0]["video_name"] == "a.mp4"
 
 
+def test_backend_hf_sync_clears_stale_terminal_running_flag(tmp_path, monkeypatch):
+    _configure_tmp_backend(tmp_path, monkeypatch)
+    enabled_config = BackendConfig(
+        repo_root=tmp_path,
+        database_dir=tmp_path / "database",
+        hf_token="hf_secret_token",
+        hf_dataset_id="owner/dataset",
+    )
+    monkeypatch.setattr("backend.main.repo", JsonRepository(enabled_config))
+    stale_job = {
+        "job_id": "stale-job",
+        "action": "sync",
+        "status": "success",
+        "progress": 1.0,
+    }
+    _write(tmp_path / "processed_results" / "hf_sync_job_latest.json", stale_job)
+    hf_workflow_jobs._running_job_id = "stale-job"
+    client = TestClient(app)
+    researcher_login = client.post("/auth/login", json={"username": "researcher", "password": "researchpass"})
+    headers = {"Authorization": f"Bearer {researcher_login.json()['access_token']}"}
+
+    response = client.post("/hf-sync/report", headers=headers, json={"dry_run": True})
+
+    assert response.status_code == 202
+    assert response.json()["started"] is True
+    assert response.json()["reason"] == ""
+    assert _wait_for_hf_job(client, headers)["status"] == "success"
+
+
 def test_backend_hf_upload_artifact_and_report_dry_run(tmp_path, monkeypatch):
     _configure_tmp_backend(tmp_path, monkeypatch)
     enabled_config = BackendConfig(
@@ -1468,8 +1532,11 @@ def test_backend_lists_paginated_analysis_frames_and_serves_zip_image(tmp_path, 
                 "index": 3,
                 "timestamp": "00:03",
                 "path": "processed_results/f_000003.jpg",
-                "goc_vai": 140,
-                "goc_khuyu": 120,
+                "goc_vai_trai": 138,
+                "goc_vai_phai": 142,
+                "goc_khuyu_trai": 118,
+                "goc_khuyu_phai": 122,
+                "eval_info": {"shoulder_ref": 100, "elbow_ref": 160},
                 "dung": False,
                 "gan_dung": False,
             },
@@ -1520,6 +1587,9 @@ def test_backend_lists_paginated_analysis_frames_and_serves_zip_image(tmp_path, 
     assert body["items"][1]["phase_threshold"] == 30.0
     assert body["items"][1]["ml"]["label_text"] == "Gần đúng"
     assert body["items"][1]["ml"]["confidence"] == 0.42
+    assert body["items"][1]["goc_vai"] == 125.0
+    assert body["items"][1]["vai_chuan"] == 90.0
+    assert body["items"][1]["delta_vai"] == 35.0
 
     image = client.get(
         f"/videos/patient01_clip.mp4/analysis-frames/{body['items'][0]['image_id']}",
@@ -1540,6 +1610,19 @@ def test_backend_lists_paginated_analysis_frames_and_serves_zip_image(tmp_path, 
     assert g2.status_code == 200
     assert g2.json()["pagination"]["total"] == 1
     assert g2.json()["items"][0]["label"] == "NEAR"
+
+    fail_page = client.get(
+        "/videos/patient01_clip.mp4/analysis-frames?label=FAIL&page_size=12",
+        headers=headers,
+    )
+    assert fail_page.status_code == 200
+    fail_item = fail_page.json()["items"][0]
+    assert fail_item["goc_vai"] == 140.0
+    assert fail_item["goc_khuyu"] == 120.0
+    assert fail_item["shoulder_ref"] == 100.0
+    assert fail_item["elbow_ref"] == 160.0
+    assert fail_item["shoulder_delta"] == 40.0
+    assert fail_item["elbow_delta"] == 40.0
 
 
 def test_backend_analysis_frames_reject_out_of_scope_and_unsafe_zip(tmp_path, monkeypatch):
