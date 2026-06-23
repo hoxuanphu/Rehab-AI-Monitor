@@ -386,6 +386,7 @@ def _render_patient_video_upload(st, deps, upload_state: dict) -> None:
     if file_upload is not None and not st.session_state.processing:
         if st.session_state.get("uploaded_file_name") != file_upload.name:
             _reset_large_video_session_state(st)
+            st.session_state.uploaded_file_name = file_upload.name
         upload_ok, upload_msg = deps.validate_uploaded_video_file(file_upload)
         if upload_ok:
             st.success(f"✅ Đã chọn file: {file_upload.name} ({file_upload.size / (1024 * 1024):.2f} MB)")

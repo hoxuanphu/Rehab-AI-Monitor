@@ -7046,7 +7046,35 @@ def _hien_thi_gan_lai_video_ui(v, video_path, key_suffix):
                             except Exception:
                                 pass
                             raise ValueError(_probe_msg)
-                        os.replace(_tmp_save_path, _save_path)
+                        
+                        _v_codec, _a_codec = None, None
+                        try:
+                            _v_codec, _a_codec = get_video_codec(_tmp_save_path)
+                        except Exception:
+                            pass
+
+                        _orig_ext = os.path.splitext(_safe_new_name)[1].lower() or ".mp4"
+                        if _v_codec == "h264" and _orig_ext == ".mp4":
+                            os.replace(_tmp_save_path, _save_path)
+                        else:
+                            _file_path_mp4 = _save_path.rsplit(".", 1)[0] + ".mp4"
+                            try:
+                                _cmd = build_upload_h264_command(_tmp_save_path, _file_path_mp4, has_audio=bool(_a_codec), ffmpeg_threads=MAX_FFMPEG_THREADS)
+                                _res = subprocess.run(_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=180)
+                                if _res.returncode == 0 and os.path.exists(_file_path_mp4) and os.path.getsize(_file_path_mp4) > 1024:
+                                    try: os.remove(_tmp_save_path)
+                                    except Exception: pass
+                                    _save_path = _file_path_mp4
+                                    if _save_path != get_local_frame_path(video_path):
+                                        raise ValueError("Path changed due to extension, need DB update")
+                                else:
+                                    if os.path.exists(_file_path_mp4):
+                                        try: os.remove(_file_path_mp4)
+                                        except Exception: pass
+                                    os.replace(_tmp_save_path, _save_path)
+                            except Exception:
+                                os.replace(_tmp_save_path, _save_path)
+                        
                         push_file_to_hf_async(_save_path, priority=1)
                         _saved = True
                     except Exception:

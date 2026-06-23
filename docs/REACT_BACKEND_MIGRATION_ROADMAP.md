@@ -411,3 +411,9 @@ Tieu chi xong:
 ## Ghi chu ve khoang trong backend da cap nhat
 
 Danh sach cu co cac muc nhu "chua co upload API", "chua co media API", "chua co analysis job API", "chua co CRUD symptoms/schedules/evaluations/research". Cac muc nay hien da duoc lấp o muc co ban. Viec con lai khong phai la tao API tu dau, ma la lam day du workflow, UX, export, job lifecycle, media gallery, admin operations va production gates.
+
+## Roadmap parity 100%
+
+Muc tieu dua React/backend va Streamlit tuong duong 100% duoc tach thanh file rieng: `docs/REACT_STREAMLIT_PARITY_100_ROADMAP.md`.
+
+Dung file do de theo doi cac viec con lai truoc khi cutover React/backend thanh luong production chinh va dong bang Streamlit legacy.
